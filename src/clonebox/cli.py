@@ -634,6 +634,95 @@ def cmd_status(args):
     except Exception as e:
         console.print(f"[red]❌ Error: {e}[/]")
         return
+
+    def _qga_ping() -> bool:
+        try:
+            result = subprocess.run(
+                [
+                    "virsh",
+                    "--connect",
+                    conn_uri,
+                    "qemu-agent-command",
+                    name,
+                    json.dumps({"execute": "guest-ping"}),
+                ],
+                capture_output=True,
+                text=True,
+                timeout=5,
+            )
+            return result.returncode == 0
+        except Exception:
+            return False
+
+    def _qga_exec(command: str, timeout: int = 10) -> Optional[str]:
+        try:
+            payload = {
+                "execute": "guest-exec",
+                "arguments": {
+                    "path": "/bin/sh",
+                    "arg": ["-c", command],
+                    "capture-output": True,
+                },
+            }
+            exec_result = subprocess.run(
+                [
+                    "virsh",
+                    "--connect",
+                    conn_uri,
+                    "qemu-agent-command",
+                    name,
+                    json.dumps(payload),
+                ],
+                capture_output=True,
+                text=True,
+                timeout=timeout,
+            )
+            if exec_result.returncode != 0:
+                return None
+
+            resp = json.loads(exec_result.stdout)
+            pid = resp.get("return", {}).get("pid")
+            if not pid:
+                return None
+
+            import base64
+            import time
+
+            deadline = time.time() + timeout
+            while time.time() < deadline:
+                status_payload = {"execute": "guest-exec-status", "arguments": {"pid": pid}}
+                status_result = subprocess.run(
+                    [
+                        "virsh",
+                        "--connect",
+                        conn_uri,
+                        "qemu-agent-command",
+                        name,
+                        json.dumps(status_payload),
+                    ],
+                    capture_output=True,
+                    text=True,
+                    timeout=5,
+                )
+                if status_result.returncode != 0:
+                    return None
+
+                status_resp = json.loads(status_result.stdout)
+                ret = status_resp.get("return", {})
+                if not ret.get("exited", False):
+                    time.sleep(0.3)
+                    continue
+
+                out_data = ret.get("out-data")
+                if out_data:
+                    return base64.b64decode(out_data).decode().strip()
+                return ""
+
+            return None
+        except Exception:
+            return None
+
+    guest_agent_ready = _qga_ping()
     
     # Get VM IP address
     console.print("\n[bold]🔍 Checking VM network...[/]")
@@ -661,19 +750,15 @@ def cmd_status(args):
     # Check cloud-init status via console
     console.print("\n[bold]☁️  Checking cloud-init status...[/]")
     try:
-        # Use virsh console to check - this is tricky, so we check for the ready file
-        result = subprocess.run(
-            ["virsh", "--connect", conn_uri, "qemu-agent-command", name, 
-             '{"execute":"guest-exec","arguments":{"path":"/bin/cat","arg":["/var/log/clonebox-ready"],"capture-output":true}}'],
-            capture_output=True, text=True, timeout=10
-        )
-        if result.returncode != 0:
-            console.print("[yellow]⏳ Cloud-init status: Unknown (QEMU agent may not be ready)[/]")
-        elif "CloneBox VM ready" in result.stdout:
-            cloud_init_complete = True
-            console.print("[green]✅ Cloud-init: Complete[/]")
+        if not guest_agent_ready:
+            console.print("[yellow]⏳ Cloud-init status: Unknown (QEMU guest agent not connected yet)[/]")
         else:
-            console.print("[yellow]⏳ Cloud-init: Still running (packages installing)[/]")
+            ready_msg = _qga_exec("cat /var/log/clonebox-ready 2>/dev/null || true", timeout=10)
+            if ready_msg and "CloneBox VM ready" in ready_msg:
+                cloud_init_complete = True
+                console.print("[green]✅ Cloud-init: Complete[/]")
+            else:
+                console.print("[yellow]⏳ Cloud-init: Still running (packages installing)[/]")
     except Exception:
         console.print("[yellow]⏳ Cloud-init status: Unknown (QEMU agent may not be ready)[/]")
     
@@ -683,108 +768,69 @@ def cmd_status(args):
         if not cloud_init_complete:
             console.print("[dim]Mounts may not be ready until cloud-init completes.[/]")
 
-        # Load config to get expected mounts
-        if not config_file:
-            config_file = Path.cwd() / ".clonebox.yaml"
-
-        if config_file.exists():
-            config = load_clonebox_config(config_file)
-            all_paths = config.get("paths", {}).copy()
-            all_paths.update(config.get("app_data_paths", {}))
-            
-            if all_paths:
-                # Check which mounts are active
-                result = subprocess.run(
-                    ["virsh", "--connect", conn_uri, "qemu-agent-command", name,
-                     '{"execute":"guest-exec","arguments":{"path":"/bin/sh","arg":["-c","mount | grep 9p"],"capture-output":true}}'],
-                    capture_output=True, text=True, timeout=10
-                )
-
-                if result.returncode != 0:
-                    console.print("[dim]QEMU guest agent is not ready yet - cannot inspect mounts from host.[/]")
-                    result = None
-                
-                mount_table = Table(title="Mount Points", border_style="cyan", show_header=True)
-                mount_table.add_column("Guest Path", style="bold")
-                mount_table.add_column("Status", justify="center")
-                mount_table.add_column("Files", justify="right")
-                
-                mounted_paths = []
-                if result and result.returncode == 0 and "return" in result.stdout:
-                    # Parse guest-exec response for mount output
-                    import json
-                    try:
-                        resp = json.loads(result.stdout)
-                        if "return" in resp and "pid" in resp["return"]:
-                            # Get the output from guest-exec-status
-                            pid = resp["return"]["pid"]
-                            status_result = subprocess.run(
-                                ["virsh", "--connect", conn_uri, "qemu-agent-command", name,
-                                 f'{{"execute":"guest-exec-status","arguments":{{"pid":{pid}}}}}'],
-                                capture_output=True, text=True, timeout=5
-                            )
-                            if status_result.returncode == 0:
-                                status_resp = json.loads(status_result.stdout)
-                                if "return" in status_resp and "out-data" in status_resp["return"]:
-                                    import base64
-                                    mount_output = base64.b64decode(status_resp["return"]["out-data"]).decode()
-                                    mounted_paths = [line.split()[2] for line in mount_output.split('\n') if line.strip()]
-                    except:
-                        pass
-                
-                # Check each expected mount
-                working_mounts = 0
-                total_mounts = 0
-                for host_path, guest_path in all_paths.items():
-                    total_mounts += 1
-                    is_mounted = any(guest_path in mp for mp in mounted_paths)
-                    
-                    # Try to get file count
-                    file_count = "?"
-                    if is_mounted:
-                        try:
-                            count_result = subprocess.run(
-                                ["virsh", "--connect", conn_uri, "qemu-agent-command", name,
-                                 f'{{"execute":"guest-exec","arguments":{{"path":"/bin/sh","arg":["-c","ls -A {guest_path} 2>/dev/null | wc -l"],"capture-output":true}}}}'],
-                                capture_output=True, text=True, timeout=5
-                            )
-                            if count_result.returncode == 0:
-                                resp = json.loads(count_result.stdout)
-                                if "return" in resp and "pid" in resp["return"]:
-                                    pid = resp["return"]["pid"]
-                                    import time
-                                    time.sleep(0.5)
-                                    status_result = subprocess.run(
-                                        ["virsh", "--connect", conn_uri, "qemu-agent-command", name,
-                                         f'{{"execute":"guest-exec-status","arguments":{{"pid":{pid}}}}}'],
-                                        capture_output=True, text=True, timeout=5
-                                    )
-                                    if status_result.returncode == 0:
-                                        status_resp = json.loads(status_result.stdout)
-                                        if "return" in status_resp and "out-data" in status_resp["return"]:
-                                            file_count = base64.b64decode(status_resp["return"]["out-data"]).decode().strip()
-                        except:
-                            pass
-                    
-                    if is_mounted:
-                        status = "[green]✅ Mounted[/]"
-                        working_mounts += 1
-                    else:
-                        status = "[red]❌ Not mounted[/]"
-                    
-                    mount_table.add_row(guest_path, status, str(file_count))
-                
-                console.print(mount_table)
-                console.print(f"[dim]{working_mounts}/{total_mounts} mounts active[/]")
-                
-                if working_mounts < total_mounts:
-                    console.print("[yellow]⚠️  Some mounts are missing. Try remounting in VM:[/]")
-                    console.print("[dim]  sudo mount -a[/]")
-                    console.print("[dim]Or rebuild VM with: clonebox clone . --user --run --replace[/]")
-            else:
-                console.print("[dim]No mount points configured[/]")
+        if not guest_agent_ready:
+            console.print("[yellow]⏳ QEMU guest agent not connected yet - cannot verify mounts.[/]")
+            console.print("[dim]Wait a few minutes, then re-run: clonebox status . --user[/]")
         else:
-            console.print("[dim]No .clonebox.yaml found - cannot check mounts[/]")
+            # Load config to get expected mounts
+            if not config_file:
+                config_file = Path.cwd() / ".clonebox.yaml"
+
+            if config_file.exists():
+                config = load_clonebox_config(config_file)
+                all_paths = config.get("paths", {}).copy()
+                all_paths.update(config.get("app_data_paths", {}))
+                
+                if all_paths:
+                    mount_output = _qga_exec("mount | grep 9p || true", timeout=10) or ""
+                    
+                    mount_table = Table(title="Mount Points", border_style="cyan", show_header=True)
+                    mount_table.add_column("Guest Path", style="bold")
+                    mount_table.add_column("Status", justify="center")
+                    mount_table.add_column("Files", justify="right")
+                    
+                    mounted_paths = [
+                        line.split()[2] for line in mount_output.split("\n") if line.strip()
+                    ]
+                    
+                    # Check each expected mount
+                    working_mounts = 0
+                    total_mounts = 0
+                    for host_path, guest_path in all_paths.items():
+                        total_mounts += 1
+                        is_mounted = any(guest_path in mp for mp in mounted_paths)
+                        
+                        # Try to get file count
+                        file_count = "?"
+                        if is_mounted:
+                            try:
+                                count_str = _qga_exec(
+                                    f"ls -A {guest_path} 2>/dev/null | wc -l", timeout=5
+                                )
+                                if count_str and count_str.strip().isdigit():
+                                    file_count = count_str.strip()
+                            except:
+                                pass
+                        
+                        if is_mounted:
+                            status = "[green]✅ Mounted[/]"
+                            working_mounts += 1
+                        else:
+                            status = "[red]❌ Not mounted[/]"
+                        
+                        mount_table.add_row(guest_path, status, str(file_count))
+                    
+                    console.print(mount_table)
+                    console.print(f"[dim]{working_mounts}/{total_mounts} mounts active[/]")
+                    
+                    if working_mounts < total_mounts:
+                        console.print("[yellow]⚠️  Some mounts are missing. Try remounting in VM:[/]")
+                        console.print("[dim]  sudo mount -a[/]")
+                        console.print("[dim]Or rebuild VM with: clonebox clone . --user --run --replace[/]")
+                else:
+                    console.print("[dim]No mount points configured[/]")
+            else:
+                console.print("[dim]No .clonebox.yaml found - cannot check mounts[/]")
     except Exception as e:
         console.print(f"[yellow]⚠️  Cannot check mounts: {e}[/]")
         console.print("[dim]QEMU guest agent may not be ready yet[/]")
@@ -792,23 +838,16 @@ def cmd_status(args):
     # Check health status if available
     console.print("\n[bold]🏥 Health Check Status...[/]")
     try:
-        if not cloud_init_complete:
-            console.print("[dim]Health check is generated and run at the end of cloud-init.[/]")
-
-        result = subprocess.run(
-            ["virsh", "--connect", conn_uri, "qemu-agent-command", name,
-             '{"execute":"guest-exec","arguments":{"path":"/bin/cat","arg":["/var/log/clonebox-health-status"],"capture-output":true}}'],
-            capture_output=True, text=True, timeout=10
-        )
-        if result.returncode != 0:
-            console.print("[dim]Health status: Not available yet (QEMU agent may not be ready)[/]")
-            result = None
-        if result and "HEALTH_STATUS=OK" in result.stdout:
-            console.print("[green]✅ Health: All checks passed[/]")
-        elif result and "HEALTH_STATUS=FAILED" in result.stdout:
-            console.print("[red]❌ Health: Some checks failed[/]")
+        if not guest_agent_ready:
+            console.print("[dim]Health status: Not available yet (QEMU guest agent not connected)[/]")
         else:
-            console.print("[yellow]⏳ Health check not yet run[/]")
+            health_status = _qga_exec("cat /var/log/clonebox-health-status 2>/dev/null || true")
+            if health_status and "HEALTH_STATUS=OK" in health_status:
+                console.print("[green]✅ Health: All checks passed[/]")
+            elif health_status and "HEALTH_STATUS=FAILED" in health_status:
+                console.print("[red]❌ Health: Some checks failed[/]")
+            else:
+                console.print("[yellow]⏳ Health check not yet run[/]")
     except Exception:
         console.print("[dim]Health status: Not available yet[/]")
     
