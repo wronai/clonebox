@@ -196,6 +196,9 @@ clonebox open . --user
 
 # 6. Stop VM when done
 clonebox stop . --user
+
+# 7. Delete VM if needed
+clonebox delete . --user --yes
 ```
 
 ### Development Environment with Browser Profiles
@@ -539,9 +542,10 @@ clonebox clone . --network auto
 | `clonebox start .` | Start VM from `.clonebox.yaml` in current dir |
 | `clonebox start . --viewer` | Start VM and open GUI window |
 | `clonebox start <name>` | Start existing VM by name |
-| `clonebox stop <name>` | Stop a VM (graceful shutdown) |
-| `clonebox stop -f <name>` | Force stop a VM |
-| `clonebox delete <name>` | Delete VM and storage |
+| `clonebox stop .` | Stop VM from `.clonebox.yaml` in current dir |
+| `clonebox stop . -f` | Force stop VM |
+| `clonebox delete .` | Delete VM from `.clonebox.yaml` in current dir |
+| `clonebox delete . --yes` | Delete VM without confirmation |
 | `clonebox list` | List all VMs |
 | `clonebox detect` | Show detected services/apps/paths |
 | `clonebox detect --yaml` | Output as YAML config |
@@ -721,6 +725,160 @@ clonebox list
 virsh --connect qemu:///session console clone-clonebox
 # Press Ctrl + ] to exit console
 ```
+
+## Exporting to Proxmox
+
+To use CloneBox VMs in Proxmox, you need to convert the qcow2 disk image to Proxmox format.
+
+### Step 1: Locate VM Disk Image
+
+```bash
+# Find VM disk location
+clonebox list
+
+# Check VM details for disk path
+virsh --connect qemu:///session dominfo clone-clonebox
+
+# Typical locations:
+# User session: ~/.local/share/libvirt/images/<vm-name>/<vm-name>.qcow2
+# System session: /var/lib/libvirt/images/<vm-name>/<vm-name>.qcow2
+```
+
+### Step 2: Export VM with CloneBox
+
+```bash
+# Export VM with all data (from current directory with .clonebox.yaml)
+clonebox export . --user --include-data -o clonebox-vm.tar.gz
+
+# Or export specific VM by name
+clonebox export safetytwin-vm --include-data -o safetytwin.tar.gz
+
+# Extract to get the disk image
+tar -xzf clonebox-vm.tar.gz
+cd clonebox-clonebox
+ls -la  # Should show disk.qcow2, vm.xml, etc.
+```
+
+### Step 3: Convert to Proxmox Format
+
+```bash
+# Install qemu-utils if not installed
+sudo apt install qemu-utils
+
+# Convert qcow2 to raw format (Proxmox preferred)
+qemu-img convert -f qcow2 -O raw disk.qcow2 vm-disk.raw
+
+# Or convert to qcow2 with compression for smaller size
+qemu-img convert -f qcow2 -O qcow2 -c disk.qcow2 vm-disk-compressed.qcow2
+```
+
+### Step 4: Transfer to Proxmox Host
+
+```bash
+# Using scp (replace with your Proxmox host IP)
+scp vm-disk.raw root@proxmox:/var/lib/vz/template/iso/
+
+# Or using rsync for large files
+rsync -avh --progress vm-disk.raw root@proxmox:/var/lib/vz/template/iso/
+```
+
+### Step 5: Create VM in Proxmox
+
+1. **Log into Proxmox Web UI**
+
+2. **Create new VM:**
+   - Click "Create VM"
+   - Enter VM ID and Name
+   - Set OS: "Do not use any media"
+
+3. **Configure Hardware:**
+   - **Hard Disk:** 
+     - Delete default disk
+     - Click "Add" → "Hard Disk"
+     - Select your uploaded image file
+     - Set Disk size (can be larger than image)
+     - Set Bus: "VirtIO SCSI"
+     - Set Cache: "Write back" for better performance
+
+4. **CPU & Memory:**
+   - Set CPU cores (match original VM config)
+   - Set Memory (match original VM config)
+
+5. **Network:**
+   - Set Model: "VirtIO (paravirtualized)"
+
+6. **Confirm:** Click "Finish" to create VM
+
+### Step 6: Post-Import Configuration
+
+1. **Start the VM in Proxmox**
+
+2. **Update network configuration:**
+   ```bash
+   # In VM console, update network interfaces
+   sudo nano /etc/netplan/01-netcfg.yaml
+   
+   # Example for Proxmox bridge:
+   network:
+     version: 2
+     renderer: networkd
+     ethernets:
+       ens18:  # Proxmox typically uses ens18
+         dhcp4: true
+   ```
+
+3. **Apply network changes:**
+   ```bash
+   sudo netplan apply
+   ```
+
+4. **Update mount points (if needed):**
+   ```bash
+   # Mount points will fail in Proxmox, remove them
+   sudo nano /etc/fstab
+   # Comment out or remove 9p mount entries
+   
+   # Reboot to apply changes
+   sudo reboot
+   ```
+
+### Alternative: Direct Import to Proxmox Storage
+
+If you have Proxmox with shared storage:
+
+```bash
+# On Proxmox host
+# Create a temporary directory
+mkdir /tmp/import
+
+# Copy disk directly to Proxmox storage (example for local-lvm)
+scp vm-disk.raw root@proxmox:/tmp/import/
+
+# On Proxmox host, create VM using CLI
+qm create 9000 --name clonebox-vm --memory 4096 --cores 4 --net0 virtio,bridge=vmbr0
+
+# Import disk to VM
+qm importdisk 9000 /tmp/import/vm-disk.raw local-lvm
+
+# Attach disk to VM
+qm set 9000 --scsihw virtio-scsi-pci --scsi0 local-lvm:vm-9000-disk-0
+
+# Set boot disk
+qm set 9000 --boot c --bootdisk scsi0
+```
+
+### Troubleshooting
+
+- **VM won't boot:** Check if disk format is compatible (raw is safest)
+- **Network not working:** Update network configuration for Proxmox's NIC naming
+- **Performance issues:** Use VirtIO drivers and set cache to "Write back"
+- **Mount errors:** Remove 9p mount entries from /etc/fstab as they won't work in Proxmox
+
+### Notes
+
+- CloneBox's bind mounts (9p filesystem) are specific to libvirt/QEMU and won't work in Proxmox
+- Browser profiles and app data exported with `--include-data` will be available in the VM disk
+- For shared folders in Proxmox, use Proxmox's shared folders or network shares instead
 
 ## License
 

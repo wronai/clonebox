@@ -515,21 +515,47 @@ def cmd_open(args):
 
 def cmd_stop(args):
     """Stop a VM."""
+    name = args.name
+    
+    # If name is a path, load config
+    if name and (name.startswith(".") or name.startswith("/") or name.startswith("~")):
+        target_path = Path(name).expanduser().resolve()
+        config_file = target_path / ".clonebox.yaml" if target_path.is_dir() else target_path
+        if config_file.exists():
+            config = load_clonebox_config(config_file)
+            name = config["vm"]["name"]
+        else:
+            console.print(f"[red]❌ Config not found: {config_file}[/]")
+            return
+    
     cloner = SelectiveVMCloner(user_session=getattr(args, "user", False))
-    cloner.stop_vm(args.name, force=args.force, console=console)
+    cloner.stop_vm(name, force=args.force, console=console)
 
 
 def cmd_delete(args):
     """Delete a VM."""
+    name = args.name
+    
+    # If name is a path, load config
+    if name and (name.startswith(".") or name.startswith("/") or name.startswith("~")):
+        target_path = Path(name).expanduser().resolve()
+        config_file = target_path / ".clonebox.yaml" if target_path.is_dir() else target_path
+        if config_file.exists():
+            config = load_clonebox_config(config_file)
+            name = config["vm"]["name"]
+        else:
+            console.print(f"[red]❌ Config not found: {config_file}[/]")
+            return
+    
     if not args.yes:
         if not questionary.confirm(
-            f"Delete VM '{args.name}' and its storage?", default=False, style=custom_style
+            f"Delete VM '{name}' and its storage?", default=False, style=custom_style
         ).ask():
             console.print("[yellow]Cancelled.[/]")
             return
 
     cloner = SelectiveVMCloner(user_session=getattr(args, "user", False))
-    cloner.delete_vm(args.name, delete_storage=not args.keep_storage, console=console)
+    cloner.delete_vm(name, delete_storage=not args.keep_storage, console=console)
 
 
 def cmd_list(args):
@@ -710,28 +736,49 @@ def cmd_export(args):
         else:
             console.print(f"[red]❌ Config not found: {config_file}[/]")
             return
-    
-    if not name:
+    elif not name or name == ".":
         config_file = Path.cwd() / ".clonebox.yaml"
         if config_file.exists():
             config = load_clonebox_config(config_file)
             name = config["vm"]["name"]
         else:
-            console.print("[red]❌ No VM name specified[/]")
+            console.print("[red]❌ No .clonebox.yaml found in current directory[/]")
+            console.print("[dim]Usage: clonebox export . or clonebox export <vm-name>[/]")
             return
     
     console.print(f"[bold cyan]📦 Exporting VM: {name}[/]\n")
     
-    # Determine storage path
-    if user_session:
-        storage_base = Path.home() / ".local/share/libvirt/images"
-    else:
-        storage_base = Path("/var/lib/libvirt/images")
-    
-    vm_dir = storage_base / name
-    
-    if not vm_dir.exists():
-        console.print(f"[red]❌ VM storage not found: {vm_dir}[/]")
+    # Get actual disk location from virsh
+    try:
+        result = subprocess.run(
+            ["virsh", "--connect", conn_uri, "domblklist", name, "--details"],
+            capture_output=True, text=True, timeout=10
+        )
+        if result.returncode != 0:
+            console.print(f"[red]❌ VM '{name}' not found[/]")
+            return
+        
+        # Parse disk paths from output
+        disk_path = None
+        cloudinit_path = None
+        for line in result.stdout.split('\n'):
+            if 'disk' in line and '.qcow2' in line:
+                parts = line.split()
+                if len(parts) >= 4:
+                    disk_path = Path(parts[3])
+            elif 'cdrom' in line or '.iso' in line:
+                parts = line.split()
+                if len(parts) >= 4:
+                    cloudinit_path = Path(parts[3])
+        
+        if not disk_path or not disk_path.exists():
+            console.print(f"[red]❌ VM disk not found[/]")
+            return
+            
+        console.print(f"[dim]Disk location: {disk_path}[/]")
+        
+    except Exception as e:
+        console.print(f"[red]❌ Error getting VM disk: {e}[/]")
         return
     
     # Create export directory
@@ -771,14 +818,16 @@ def cmd_export(args):
         
         # Copy disk image
         console.print("[cyan]Copying disk image (this may take a while)...[/]")
-        disk_image = vm_dir / f"{name}.qcow2"
-        if disk_image.exists():
-            shutil.copy2(disk_image, temp_dir / "disk.qcow2")
+        if disk_path and disk_path.exists():
+            shutil.copy2(disk_path, temp_dir / "disk.qcow2")
+            console.print(f"[green]✅ Disk copied: {disk_path.stat().st_size / (1024**3):.2f} GB[/]")
+        else:
+            console.print("[yellow]⚠️  Disk image not found[/]")
         
         # Copy cloud-init ISO
-        cloudinit_iso = vm_dir / "cloud-init.iso"
-        if cloudinit_iso.exists():
-            shutil.copy2(cloudinit_iso, temp_dir / "cloud-init.iso")
+        if cloudinit_path and cloudinit_path.exists():
+            shutil.copy2(cloudinit_path, temp_dir / "cloud-init.iso")
+            console.print("[green]✅ Cloud-init ISO copied[/]")
         
         # Copy config file
         config_file = Path.cwd() / ".clonebox.yaml"
@@ -1827,7 +1876,7 @@ def main():
 
     # Stop command
     stop_parser = subparsers.add_parser("stop", help="Stop a VM")
-    stop_parser.add_argument("name", help="VM name")
+    stop_parser.add_argument("name", nargs="?", default=None, help="VM name or '.' to use .clonebox.yaml")
     stop_parser.add_argument("--force", "-f", action="store_true", help="Force stop")
     stop_parser.add_argument(
         "-u",
@@ -1839,7 +1888,7 @@ def main():
 
     # Delete command
     delete_parser = subparsers.add_parser("delete", help="Delete a VM")
-    delete_parser.add_argument("name", help="VM name")
+    delete_parser.add_argument("name", nargs="?", default=None, help="VM name or '.' to use .clonebox.yaml")
     delete_parser.add_argument("--yes", "-y", action="store_true", help="Skip confirmation")
     delete_parser.add_argument("--keep-storage", action="store_true", help="Keep disk images")
     delete_parser.add_argument(
