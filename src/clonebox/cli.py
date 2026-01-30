@@ -682,6 +682,7 @@ def monitor_cloud_init_status(vm_name: str, user_session: bool = False, timeout:
     
     conn_uri = "qemu:///session" if user_session else "qemu:///system"
     start_time = time.time()
+    shutdown_count = 0  # Count consecutive shutdown detections
     restart_detected = False
     
     with Progress(
@@ -708,16 +709,24 @@ def monitor_cloud_init_status(vm_name: str, user_session: bool = False, timeout:
                 vm_state = result.stdout.strip().lower()
                 
                 if "shut off" in vm_state or "shutting down" in vm_state:
-                    # VM is restarting
-                    if not restart_detected:
+                    # VM is shutting down - count consecutive detections
+                    shutdown_count += 1
+                    if shutdown_count >= 3 and not restart_detected:
+                        # Confirmed shutdown after 3 consecutive checks
                         restart_detected = True
                         progress.update(task, description="[yellow]⟳ VM restarting after package installation...")
                     time.sleep(3)
                     continue
+                else:
+                    # VM is running - reset shutdown counter
+                    if shutdown_count > 0 and shutdown_count < 3:
+                        # Was a brief glitch, not a real shutdown
+                        shutdown_count = 0
                 
-                if restart_detected and "running" in vm_state:
+                if restart_detected and "running" in vm_state and shutdown_count >= 3:
                     # VM restarted successfully - GUI should be ready
                     progress.update(task, description=f"[green]✓ GUI ready! Total time: {minutes}m {seconds}s")
+                    time.sleep(2)
                     break
                 
                 # Estimate remaining time
