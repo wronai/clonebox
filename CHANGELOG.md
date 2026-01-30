@@ -1,3 +1,26 @@
+## [0.1.8] - 2026-01-30
+
+### Summary
+
+fix(goal): CLI interface improvements
+
+### Core
+
+- update src/clonebox/cli.py
+- update src/clonebox/cloner.py
+- update src/clonebox/detector.py
+
+### Test
+
+- update tests/test_network.py
+
+### Other
+
+- update src/clonebox/__pycache__/cli.cpython-313.pyc
+- update src/clonebox/__pycache__/cloner.cpython-313.pyc
+- update src/clonebox/__pycache__/detector.cpython-313.pyc
+
+
 ## [0.1.7] - 2026-01-30
 
 ### Summary

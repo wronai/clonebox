@@ -476,6 +476,179 @@ class SelectiveVMCloner:
 
         return ET.tostring(root, encoding="unicode")
 
+    def _generate_health_check_script(self, config: VMConfig) -> str:
+        """Generate a health check script that validates all installed components."""
+        import base64
+        
+        # Build package check commands
+        apt_checks = []
+        for pkg in config.packages:
+            apt_checks.append(f'check_apt_package "{pkg}"')
+        
+        snap_checks = []
+        for pkg in config.snap_packages:
+            snap_checks.append(f'check_snap_package "{pkg}"')
+        
+        service_checks = []
+        for svc in config.services:
+            service_checks.append(f'check_service "{svc}"')
+        
+        mount_checks = []
+        for idx, (host_path, guest_path) in enumerate(config.paths.items()):
+            mount_checks.append(f'check_mount "{guest_path}" "mount{idx}"')
+        
+        apt_checks_str = "\n".join(apt_checks) if apt_checks else "echo 'No apt packages to check'"
+        snap_checks_str = "\n".join(snap_checks) if snap_checks else "echo 'No snap packages to check'"
+        service_checks_str = "\n".join(service_checks) if service_checks else "echo 'No services to check'"
+        mount_checks_str = "\n".join(mount_checks) if mount_checks else "echo 'No mounts to check'"
+        
+        script = f'''#!/bin/bash
+# CloneBox Health Check Script
+# Generated automatically - validates all installed components
+
+REPORT_FILE="/var/log/clonebox-health.log"
+PASSED=0
+FAILED=0
+WARNINGS=0
+
+# Colors for output
+RED='\\033[0;31m'
+GREEN='\\033[0;32m'
+YELLOW='\\033[1;33m'
+NC='\\033[0m'
+
+log() {{
+    echo "[$(date '+%Y-%m-%d %H:%M:%S')] $1" | tee -a "$REPORT_FILE"
+}}
+
+check_apt_package() {{
+    local pkg="$1"
+    if dpkg -l "$pkg" 2>/dev/null | grep -q "^ii"; then
+        log "[PASS] APT package '$pkg' is installed"
+        ((PASSED++))
+        return 0
+    else
+        log "[FAIL] APT package '$pkg' is NOT installed"
+        ((FAILED++))
+        return 1
+    fi
+}}
+
+check_snap_package() {{
+    local pkg="$1"
+    if snap list "$pkg" &>/dev/null; then
+        log "[PASS] Snap package '$pkg' is installed"
+        ((PASSED++))
+        return 0
+    else
+        log "[FAIL] Snap package '$pkg' is NOT installed"
+        ((FAILED++))
+        return 1
+    fi
+}}
+
+check_service() {{
+    local svc="$1"
+    if systemctl is-enabled "$svc" &>/dev/null; then
+        if systemctl is-active "$svc" &>/dev/null; then
+            log "[PASS] Service '$svc' is enabled and running"
+            ((PASSED++))
+            return 0
+        else
+            log "[WARN] Service '$svc' is enabled but not running"
+            ((WARNINGS++))
+            return 1
+        fi
+    else
+        log "[INFO] Service '$svc' is not enabled (may be optional)"
+        return 0
+    fi
+}}
+
+check_mount() {{
+    local path="$1"
+    local tag="$2"
+    if mountpoint -q "$path" 2>/dev/null; then
+        log "[PASS] Mount '$path' ($tag) is active"
+        ((PASSED++))
+        return 0
+    elif [ -d "$path" ]; then
+        log "[WARN] Directory '$path' exists but not mounted"
+        ((WARNINGS++))
+        return 1
+    else
+        log "[INFO] Mount point '$path' does not exist yet"
+        return 0
+    fi
+}}
+
+check_gui() {{
+    if systemctl get-default | grep -q graphical; then
+        log "[PASS] System configured for graphical target"
+        ((PASSED++))
+        if systemctl is-active gdm3 &>/dev/null || systemctl is-active gdm &>/dev/null; then
+            log "[PASS] Display manager (GDM) is running"
+            ((PASSED++))
+        else
+            log "[WARN] Display manager not yet running (may start after reboot)"
+            ((WARNINGS++))
+        fi
+    else
+        log "[INFO] System not configured for GUI"
+    fi
+}}
+
+# Start health check
+log "=========================================="
+log "CloneBox Health Check Report"
+log "VM Name: {config.name}"
+log "Date: $(date)"
+log "=========================================="
+
+log ""
+log "--- APT Packages ---"
+{apt_checks_str}
+
+log ""
+log "--- Snap Packages ---"
+{snap_checks_str}
+
+log ""
+log "--- Services ---"
+{service_checks_str}
+
+log ""
+log "--- Mounts ---"
+{mount_checks_str}
+
+log ""
+log "--- GUI Status ---"
+check_gui
+
+log ""
+log "=========================================="
+log "Health Check Summary"
+log "=========================================="
+log "Passed:   $PASSED"
+log "Failed:   $FAILED"
+log "Warnings: $WARNINGS"
+
+if [ $FAILED -eq 0 ]; then
+    log ""
+    log "[SUCCESS] All critical checks passed!"
+    echo "HEALTH_STATUS=OK" > /var/log/clonebox-health-status
+    exit 0
+else
+    log ""
+    log "[ERROR] Some checks failed. Review log for details."
+    echo "HEALTH_STATUS=FAILED" > /var/log/clonebox-health-status
+    exit 1
+fi
+'''
+        # Encode script to base64 for safe embedding in cloud-init
+        encoded = base64.b64encode(script.encode()).decode()
+        return encoded
+
     def _create_cloudinit_iso(self, vm_dir: Path, config: VMConfig) -> Path:
         """Create cloud-init ISO with user-data and meta-data."""
 
@@ -540,12 +713,12 @@ class SelectiveVMCloner:
             for cmd in config.post_commands:
                 runcmd_lines.append(f"  - {cmd}")
         
-        # Validation - check installed packages and log results
-        runcmd_lines.append("  - echo '=== CloneBox Setup Validation ===' >> /var/log/clonebox-setup.log")
-        runcmd_lines.append("  - dpkg -l | grep -E 'ii' | wc -l >> /var/log/clonebox-setup.log")
-        runcmd_lines.append("  - snap list >> /var/log/clonebox-setup.log 2>/dev/null || true")
+        # Generate health check script
+        health_script = self._generate_health_check_script(config)
+        runcmd_lines.append(f"  - echo '{health_script}' | base64 -d > /usr/local/bin/clonebox-health")
+        runcmd_lines.append("  - chmod +x /usr/local/bin/clonebox-health")
+        runcmd_lines.append("  - /usr/local/bin/clonebox-health >> /var/log/clonebox-health.log 2>&1")
         runcmd_lines.append("  - echo 'CloneBox VM ready!' > /var/log/clonebox-ready")
-        runcmd_lines.append("  - echo 'Setup completed at:' $(date) >> /var/log/clonebox-setup.log")
         
         # Add reboot command at the end if GUI is enabled
         if config.gui:

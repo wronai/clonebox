@@ -238,9 +238,114 @@ class SystemDetector:
         "atom": ("atom", "snap"),
     }
 
+    # Map applications to their config/data directories for complete cloning
+    # These directories contain user settings, extensions, profiles, credentials
+    APP_DATA_DIRS = {
+        # Browsers - profiles, extensions, bookmarks, passwords
+        "chrome": [".config/google-chrome", ".config/chromium"],
+        "chromium": [".config/chromium"],
+        "firefox": [".mozilla/firefox", ".cache/mozilla/firefox"],
+        
+        # IDEs and editors - settings, extensions, projects history
+        "code": [".config/Code", ".vscode", ".vscode-server"],
+        "vscode": [".config/Code", ".vscode", ".vscode-server"],
+        "pycharm": [".config/JetBrains", ".local/share/JetBrains", ".cache/JetBrains"],
+        "idea": [".config/JetBrains", ".local/share/JetBrains"],
+        "webstorm": [".config/JetBrains", ".local/share/JetBrains"],
+        "goland": [".config/JetBrains", ".local/share/JetBrains"],
+        "sublime": [".config/sublime-text", ".config/sublime-text-3"],
+        "atom": [".atom"],
+        "vim": [".vim", ".vimrc", ".config/nvim"],
+        "nvim": [".config/nvim", ".local/share/nvim"],
+        "emacs": [".emacs.d", ".emacs"],
+        "cursor": [".config/Cursor", ".cursor"],
+        
+        # Development tools
+        "docker": [".docker"],
+        "git": [".gitconfig", ".git-credentials", ".config/git"],
+        "npm": [".npm", ".npmrc"],
+        "yarn": [".yarn", ".yarnrc"],
+        "pip": [".pip", ".config/pip"],
+        "cargo": [".cargo"],
+        "rustup": [".rustup"],
+        "go": [".go", "go"],
+        "gradle": [".gradle"],
+        "maven": [".m2"],
+        
+        # Python environments
+        "python": [".pyenv", ".virtualenvs", ".local/share/virtualenvs"],
+        "python3": [".pyenv", ".virtualenvs", ".local/share/virtualenvs"],
+        "conda": [".conda", "anaconda3", "miniconda3"],
+        
+        # Node.js
+        "node": [".nvm", ".node", ".npm"],
+        
+        # Databases
+        "postgres": [".pgpass", ".psqlrc", ".psql_history"],
+        "mysql": [".my.cnf", ".mysql_history"],
+        "mongodb": [".mongorc.js", ".dbshell"],
+        "redis": [".rediscli_history"],
+        
+        # Communication apps
+        "slack": [".config/Slack"],
+        "discord": [".config/discord"],
+        "telegram": [".local/share/TelegramDesktop"],
+        "teams": [".config/Microsoft/Microsoft Teams"],
+        
+        # Other tools
+        "postman": [".config/Postman"],
+        "insomnia": [".config/Insomnia"],
+        "dbeaver": [".local/share/DBeaverData"],
+        "ssh": [".ssh"],
+        "gpg": [".gnupg"],
+        "aws": [".aws"],
+        "gcloud": [".config/gcloud"],
+        "kubectl": [".kube"],
+        "terraform": [".terraform.d"],
+        "ansible": [".ansible"],
+        
+        # General app data
+        "spotify": [".config/spotify"],
+        "vlc": [".config/vlc"],
+        "gimp": [".config/GIMP", ".gimp-2.10"],
+        "obs": [".config/obs-studio"],
+    }
+
     def __init__(self):
         self.user = pwd.getpwuid(os.getuid()).pw_name
         self.home = Path.home()
+
+    def detect_app_data_dirs(self, applications: list) -> list:
+        """Detect config/data directories for running applications.
+        
+        Returns list of paths that contain user data needed by running apps.
+        """
+        app_data_paths = []
+        seen_paths = set()
+        
+        for app in applications:
+            app_name = app.name.lower()
+            
+            # Check each known app pattern
+            for pattern, dirs in self.APP_DATA_DIRS.items():
+                if pattern in app_name:
+                    for dir_name in dirs:
+                        full_path = self.home / dir_name
+                        if full_path.exists() and str(full_path) not in seen_paths:
+                            seen_paths.add(str(full_path))
+                            # Calculate size
+                            try:
+                                size = self._get_dir_size(full_path, max_depth=2)
+                            except:
+                                size = 0
+                            app_data_paths.append({
+                                "path": str(full_path),
+                                "app": app.name,
+                                "type": "app_data",
+                                "size_mb": round(size / 1024 / 1024, 1)
+                            })
+        
+        return app_data_paths
 
     def detect_all(self) -> SystemSnapshot:
         """Detect all services, applications and paths."""

@@ -602,6 +602,18 @@ def generate_clonebox_yaml(
         if host_folder.exists() and str(host_folder) not in paths_mapping:
             paths_mapping[str(host_folder)] = guest_folder
 
+    # Detect and add app-specific data directories for running applications
+    # This includes browser profiles, IDE settings, credentials, extensions, etc.
+    app_data_dirs = detector.detect_app_data_dirs(snapshot.applications)
+    app_data_mapping = {}
+    for app_data in app_data_dirs:
+        host_path = app_data["path"]
+        if host_path not in paths_mapping:
+            # Map to same relative path in VM user home
+            rel_path = host_path.replace(str(home_dir), "").lstrip("/")
+            guest_path = f"/home/ubuntu/{rel_path}"
+            app_data_mapping[host_path] = guest_path
+
     # Determine VM name
     if not vm_name:
         if target_path:
@@ -654,15 +666,20 @@ def generate_clonebox_yaml(
         "snap_packages": all_snap_packages,
         "post_commands": [],  # User can add custom commands to run after setup
         "paths": paths_mapping,
+        "app_data_paths": app_data_mapping,  # App-specific config/data directories
         "detected": {
             "running_apps": [
-                {"name": a.name, "cwd": a.working_dir, "memory_mb": round(a.memory_mb)}
+                {"name": a.name, "cwd": a.working_dir or "", "memory_mb": round(a.memory_mb)}
                 for a in snapshot.applications[:10]
             ],
+            "app_data_dirs": [
+                {"path": d["path"], "app": d["app"], "size_mb": d["size_mb"]}
+                for d in app_data_dirs[:15]
+            ],
             "all_paths": {
-                "projects": paths_by_type["project"],
-                "configs": paths_by_type["config"][:5],
-                "data": paths_by_type["data"][:5],
+                "projects": list(paths_by_type["project"]),
+                "configs": list(paths_by_type["config"][:5]),
+                "data": list(paths_by_type["data"][:5]),
             },
         },
     }
@@ -781,13 +798,17 @@ def create_vm_from_config(
     replace: bool = False,
 ) -> str:
     """Create VM from YAML config dict."""
+    # Merge paths and app_data_paths
+    all_paths = config.get("paths", {}).copy()
+    all_paths.update(config.get("app_data_paths", {}))
+    
     vm_config = VMConfig(
         name=config["vm"]["name"],
         ram_mb=config["vm"].get("ram_mb", 4096),
         vcpus=config["vm"].get("vcpus", 4),
         gui=config["vm"].get("gui", True),
         base_image=config["vm"].get("base_image"),
-        paths=config.get("paths", {}),
+        paths=all_paths,
         packages=config.get("packages", []),
         snap_packages=config.get("snap_packages", []),
         services=config.get("services", []),
@@ -915,16 +936,27 @@ def cmd_clone(args):
                 password = config['vm'].get('password', 'ubuntu')
                 console.print("\n[bold yellow]⏰ GUI Setup Process:[/]")
                 console.print("  [yellow]•[/] Installing desktop environment (~5-10 minutes)")
+                console.print("  [yellow]•[/] Running health checks on all components")
                 console.print("  [yellow]•[/] Automatic restart after installation")
                 console.print("  [yellow]•[/] GUI login screen will appear")
                 console.print(f"  [yellow]•[/] Login: [cyan]{username}[/] / [cyan]{'*' * len(password)}[/] (from .env)")
                 console.print("\n[dim]💡 Progress will be monitored automatically below[/]")
 
+            # Show health check info
+            console.print("\n[bold]📊 Health Check (inside VM):[/]")
+            console.print("  [cyan]cat /var/log/clonebox-health.log[/]  # View full report")
+            console.print("  [cyan]cat /var/log/clonebox-health-status[/]  # Quick status")
+            console.print("  [cyan]clonebox-health[/]  # Re-run health check")
+
             # Show mount instructions
-            if config.get("paths"):
-                console.print("\n[bold]Inside VM, mount paths with:[/]")
-                for idx, (host, guest) in enumerate(config["paths"].items()):
-                    console.print(f"  [cyan]sudo mount -t 9p -o trans=virtio mount{idx} {guest}[/]")
+            all_paths = config.get("paths", {}).copy()
+            all_paths.update(config.get("app_data_paths", {}))
+            if all_paths:
+                console.print("\n[bold]📁 Mounted paths (automatic):[/]")
+                for idx, (host, guest) in enumerate(list(all_paths.items())[:5]):
+                    console.print(f"  [dim]{host}[/] → [cyan]{guest}[/]")
+                if len(all_paths) > 5:
+                    console.print(f"  [dim]... and {len(all_paths) - 5} more paths[/]")
         except PermissionError as e:
             console.print(f"[red]❌ Permission Error:[/]\n{e}")
             console.print("\n[yellow]💡 Try running with --user flag:[/]")
