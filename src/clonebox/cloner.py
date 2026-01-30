@@ -663,8 +663,7 @@ fi
         # Generate mount commands and fstab entries for 9p filesystems
         mount_commands = []
         fstab_entries = []
-        all_paths = config.get("paths", {}).copy()
-        all_paths.update(config.get("app_data_paths", {}))
+        all_paths = dict(config.paths) if config.paths else {}
         for idx, (host_path, guest_path) in enumerate(all_paths.items()):
             if Path(host_path).exists():
                 tag = f"mount{idx}"
