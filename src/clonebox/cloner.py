@@ -97,7 +97,7 @@ class SelectiveVMCloner:
         try:
             net = self.conn.networkLookupByName("default")
             return net.isActive() == 1
-        except libvirt.libvirtError:
+        except Exception:
             return False
     
     def resolve_network_mode(self, config: VMConfig) -> str:
