@@ -817,8 +817,6 @@ final_message: "CloneBox VM is ready after $UPTIME seconds"
         try:
             vm = self.conn.lookupByName(vm_name)
         except libvirt.libvirtError:
-            if ignore_not_found:
-                return False
             log(f"[red]❌ VM '{vm_name}' not found[/]")
             return False
 

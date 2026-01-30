@@ -667,7 +667,9 @@ def cmd_status(args):
              '{"execute":"guest-exec","arguments":{"path":"/bin/cat","arg":["/var/log/clonebox-ready"],"capture-output":true}}'],
             capture_output=True, text=True, timeout=10
         )
-        if "CloneBox VM ready" in result.stdout:
+        if result.returncode != 0:
+            console.print("[yellow]⏳ Cloud-init status: Unknown (QEMU agent may not be ready)[/]")
+        elif "CloneBox VM ready" in result.stdout:
             cloud_init_complete = True
             console.print("[green]✅ Cloud-init: Complete[/]")
         else:
@@ -697,6 +699,10 @@ def cmd_status(args):
                      '{"execute":"guest-exec","arguments":{"path":"/bin/sh","arg":["-c","mount | grep 9p"],"capture-output":true}}'],
                     capture_output=True, text=True, timeout=10
                 )
+
+                if result.returncode != 0:
+                    console.print("[dim]QEMU guest agent is not ready yet - cannot inspect mounts from host.[/]")
+                    result = None
                 
                 mount_table = Table(title="Mount Points", border_style="cyan", show_header=True)
                 mount_table.add_column("Guest Path", style="bold")
@@ -704,7 +710,7 @@ def cmd_status(args):
                 mount_table.add_column("Files", justify="right")
                 
                 mounted_paths = []
-                if result.returncode == 0 and "return" in result.stdout:
+                if result and result.returncode == 0 and "return" in result.stdout:
                     # Parse guest-exec response for mount output
                     import json
                     try:
@@ -794,9 +800,12 @@ def cmd_status(args):
              '{"execute":"guest-exec","arguments":{"path":"/bin/cat","arg":["/var/log/clonebox-health-status"],"capture-output":true}}'],
             capture_output=True, text=True, timeout=10
         )
-        if "HEALTH_STATUS=OK" in result.stdout:
+        if result.returncode != 0:
+            console.print("[dim]Health status: Not available yet (QEMU agent may not be ready)[/]")
+            result = None
+        if result and "HEALTH_STATUS=OK" in result.stdout:
             console.print("[green]✅ Health: All checks passed[/]")
-        elif "HEALTH_STATUS=FAILED" in result.stdout:
+        elif result and "HEALTH_STATUS=FAILED" in result.stdout:
             console.print("[red]❌ Health: Some checks failed[/]")
         else:
             console.print("[yellow]⏳ Health check not yet run[/]")
