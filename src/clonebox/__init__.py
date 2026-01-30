@@ -5,7 +5,7 @@ Selectively clone applications, paths and services to a new virtual machine
 with bind mounts instead of full disk cloning.
 """
 
-__version__ = "0.1.0"
+__version__ = "0.1.10"
 __author__ = "CloneBox Team"
 
 from clonebox.cloner import SelectiveVMCloner
