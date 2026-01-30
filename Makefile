@@ -136,7 +136,7 @@ run:
 # Quick test commands
 test-clone:
 	@if [ -d ".venv" ]; then \
-		.venv/bin/python -m clonebox clone . --user; \
+		.venv/bin/python -m clonebox clone . --user --run --replace; \
 	else \
 		echo "No virtual environment found. Run 'make install-dev' first."; \
 		exit 1; \

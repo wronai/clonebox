@@ -175,7 +175,7 @@ class SelectiveVMCloner:
 
         return checks
 
-    def create_vm(self, config: VMConfig, console=None) -> str:
+    def create_vm(self, config: VMConfig, console=None, replace: bool = False) -> str:
         """
         Create a VM with only selected applications/paths.
 
@@ -192,6 +192,25 @@ class SelectiveVMCloner:
                 console.print(msg)
             else:
                 print(msg)
+
+        # If VM already exists, optionally replace it
+        try:
+            existing_vm = self.conn.lookupByName(config.name)
+        except Exception:
+            existing_vm = None
+
+        if existing_vm is not None:
+            if not replace:
+                raise RuntimeError(
+                    f"VM '{config.name}' already exists.\n\n"
+                    f"🔧 Solutions:\n"
+                    f"  1. Reuse existing VM: clonebox start {config.name}\n"
+                    f"  2. Replace it: clonebox clone . --name {config.name} --replace\n"
+                    f"  3. Delete it: clonebox delete {config.name}\n"
+                )
+
+            log(f"[yellow]⚠️  VM '{config.name}' already exists - replacing...[/]")
+            self.delete_vm(config.name, delete_storage=True, console=console, ignore_not_found=True)
 
         # Determine images directory
         images_dir = self.get_images_dir()
@@ -258,7 +277,14 @@ class SelectiveVMCloner:
 
         # Define and create VM
         log(f"[cyan]🔧 Defining VM '{config.name}'...[/]")
-        vm = self.conn.defineXML(vm_xml)
+        try:
+            vm = self.conn.defineXML(vm_xml)
+        except Exception as e:
+            raise RuntimeError(
+                f"Failed to define VM '{config.name}'.\n"
+                f"Error: {e}\n\n"
+                f"If the VM already exists, try: clonebox clone . --name {config.name} --replace\n"
+            ) from e
 
         log(f"[green]✅ VM '{config.name}' created successfully![/]")
         log(f"[dim]   UUID: {vm.UUIDString()}[/]")
@@ -451,6 +477,8 @@ final_message: "CloneBox VM is ready after $UPTIME seconds"
         try:
             vm = self.conn.lookupByName(vm_name)
         except libvirt.libvirtError:
+            if ignore_not_found:
+                return False
             log(f"[red]❌ VM '{vm_name}' not found[/]")
             return False
 
@@ -500,7 +528,13 @@ final_message: "CloneBox VM is ready after $UPTIME seconds"
         log("[green]✅ VM stopped![/]")
         return True
 
-    def delete_vm(self, vm_name: str, delete_storage: bool = True, console=None) -> bool:
+    def delete_vm(
+        self,
+        vm_name: str,
+        delete_storage: bool = True,
+        console=None,
+        ignore_not_found: bool = False,
+    ) -> bool:
         """Delete a VM and optionally its storage."""
 
         def log(msg):
@@ -525,7 +559,7 @@ final_message: "CloneBox VM is ready after $UPTIME seconds"
 
         # Delete storage
         if delete_storage:
-            vm_dir = Path(f"/var/lib/libvirt/images/{vm_name}")
+            vm_dir = self.get_images_dir() / vm_name
             if vm_dir.exists():
                 import shutil
 

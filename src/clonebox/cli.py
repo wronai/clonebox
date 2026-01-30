@@ -615,7 +615,12 @@ def load_clonebox_config(path: Path) -> dict:
         return yaml.safe_load(f)
 
 
-def create_vm_from_config(config: dict, start: bool = False, user_session: bool = False) -> str:
+def create_vm_from_config(
+    config: dict,
+    start: bool = False,
+    user_session: bool = False,
+    replace: bool = False,
+) -> str:
     """Create VM from YAML config dict."""
     vm_config = VMConfig(
         name=config["vm"]["name"],
@@ -643,7 +648,7 @@ def create_vm_from_config(config: dict, start: bool = False, user_session: bool 
 
     console.print(f"[dim]Session: {checks['session_type']}, Storage: {checks['images_dir']}[/]")
 
-    vm_uuid = cloner.create_vm(vm_config, console=console)
+    vm_uuid = cloner.create_vm(vm_config, console=console, replace=replace)
 
     if start:
         cloner.start_vm(vm_config.name, open_viewer=vm_config.gui, console=console)
@@ -720,7 +725,12 @@ def cmd_clone(args):
             console.print("[cyan]Using user session (qemu:///session) - no root required[/]")
 
         try:
-            vm_uuid = create_vm_from_config(config, start=True, user_session=user_session)
+            vm_uuid = create_vm_from_config(
+                config,
+                start=True,
+                user_session=user_session,
+                replace=getattr(args, "replace", False),
+            )
             console.print(f"\n[bold green]🎉 VM '{config['vm']['name']}' is running![/]")
             console.print(f"[dim]UUID: {vm_uuid}[/]")
 
@@ -938,6 +948,11 @@ def main():
         choices=["auto", "default", "user"],
         default="auto",
         help="Network mode: auto (default), default (libvirt network), user (slirp)",
+    )
+    clone_parser.add_argument(
+        "--replace",
+        action="store_true",
+        help="If VM already exists, stop+undefine it and recreate (also deletes its storage)",
     )
     clone_parser.set_defaults(func=cmd_clone)
 
