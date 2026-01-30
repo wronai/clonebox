@@ -1,6 +1,6 @@
 # CloneBox Makefile
 
-.PHONY: help install install-dev test test-verbose lint format clean build upload docs run
+.PHONY: help install install-dev test test-verbose lint format clean build upload publish docs run
 
 # Default target
 help:
@@ -16,6 +16,7 @@ help:
 	@echo "  clean        Clean build artifacts"
 	@echo "  build        Build package"
 	@echo "  upload       Upload to PyPI (requires twine)"
+	@echo "  publish      Build and upload to PyPI"
 	@echo "  docs         Generate documentation"
 	@echo "  run          Run clonebox (interactive mode)"
 
@@ -85,6 +86,31 @@ format:
 		exit 1; \
 	fi
 
+# Version bump
+bump-patch:
+	@if [ -d ".venv" ]; then \
+		.venv/bin/bump2version patch; \
+	else \
+		echo "No virtual environment found. Run 'make install-dev' first."; \
+		exit 1; \
+	fi
+
+bump-minor:
+	@if [ -d ".venv" ]; then \
+		.venv/bin/bump2version minor; \
+	else \
+		echo "No virtual environment found. Run 'make install-dev' first."; \
+		exit 1; \
+	fi
+
+bump-major:
+	@if [ -d ".venv" ]; then \
+		.venv/bin/bump2version major; \
+	else \
+		echo "No virtual environment found. Run 'make install-dev' first."; \
+		exit 1; \
+	fi
+
 # Build and distribution
 clean:
 	rm -rf build/
@@ -120,6 +146,18 @@ upload-test: build
 		exit 1; \
 	fi
 
+publish: bump-patch clean
+	@if [ -d ".venv" ]; then \
+		echo "Building package..."; \
+		.venv/bin/python -m build; \
+		echo "Uploading to PyPI..."; \
+		.venv/bin/python -m twine upload dist/*; \
+		echo "Published successfully!"; \
+	else \
+		echo "No virtual environment found. Run 'make install-dev' first."; \
+		exit 1; \
+	fi
+
 # Documentation
 docs:
 	@echo "Documentation is in README.md"
@@ -145,31 +183,6 @@ test-clone:
 test-detect:
 	@if [ -d ".venv" ]; then \
 		.venv/bin/python -m clonebox detect --yaml --dedupe; \
-	else \
-		echo "No virtual environment found. Run 'make install-dev' first."; \
-		exit 1; \
-	fi
-
-# Version bump
-bump-patch:
-	@if [ -d ".venv" ]; then \
-		.venv/bin/bump2version patch; \
-	else \
-		echo "No virtual environment found. Run 'make install-dev' first."; \
-		exit 1; \
-	fi
-
-bump-minor:
-	@if [ -d ".venv" ]; then \
-		.venv/bin/bump2version minor; \
-	else \
-		echo "No virtual environment found. Run 'make install-dev' first."; \
-		exit 1; \
-	fi
-
-bump-major:
-	@if [ -d ".venv" ]; then \
-		.venv/bin/bump2version major; \
 	else \
 		echo "No virtual environment found. Run 'make install-dev' first."; \
 		exit 1; \
