@@ -35,7 +35,7 @@ jobs:
 
       - name: Run unit tests
         run: |
-          pytest tests/ -v --ignore=tests/e2e/ --cov=clonebox --cov-report=xml --cov-report=term-missing
+          pytest tests/ -v --ignore=tests/e2e/ --cov=src/clonebox --cov-report=xml --cov-report=term-missing --cov-fail-under=70
 
       - name: Upload coverage to Codecov
         uses: codecov/codecov-action@v4

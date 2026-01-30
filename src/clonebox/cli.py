@@ -1734,12 +1734,16 @@ def create_vm_from_config(
 def cmd_clone(args):
     """Generate clone config from path and optionally create VM."""
     target_path = Path(args.path).resolve()
+    dry_run = getattr(args, "dry_run", False)
 
     if not target_path.exists():
         console.print(f"[red]❌ Path does not exist: {target_path}[/]")
         return
 
-    console.print(f"[bold cyan]📦 Generating clone config for: {target_path}[/]\n")
+    if dry_run:
+        console.print(f"[bold cyan]🔍 DRY RUN - Analyzing: {target_path}[/]\n")
+    else:
+        console.print(f"[bold cyan]📦 Generating clone config for: {target_path}[/]\n")
 
     # Detect system state
     with Progress(
@@ -1763,6 +1767,25 @@ def cmd_clone(args):
         network_mode=args.network,
         base_image=getattr(args, "base_image", None),
     )
+
+    # Dry run - show what would be created and exit
+    if dry_run:
+        config = yaml.safe_load(yaml_content)
+        console.print(Panel(
+            f"[bold]VM Name:[/] {config['vm']['name']}\n"
+            f"[bold]RAM:[/] {config['vm'].get('ram_mb', 4096)} MB\n"
+            f"[bold]vCPUs:[/] {config['vm'].get('vcpus', 4)}\n"
+            f"[bold]Network:[/] {config['vm'].get('network_mode', 'auto')}\n"
+            f"[bold]Paths:[/] {len(config.get('paths', {}))} mounts\n"
+            f"[bold]Packages:[/] {len(config.get('packages', []))} packages\n"
+            f"[bold]Services:[/] {len(config.get('services', []))} services",
+            title="[bold cyan]Would create VM[/]",
+            border_style="cyan",
+        ))
+        console.print("\n[dim]Config preview:[/]")
+        console.print(Panel(yaml_content, title="[bold].clonebox.yaml[/]", border_style="dim"))
+        console.print("\n[yellow]ℹ️  Dry run complete. No changes made.[/]")
+        return
 
     # Save config file
     config_file = (
@@ -2070,6 +2093,11 @@ def main():
         "--replace",
         action="store_true",
         help="If VM already exists, stop+undefine it and recreate (also deletes its storage)",
+    )
+    clone_parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Show what would be created without making any changes",
     )
     clone_parser.set_defaults(func=cmd_clone)
 

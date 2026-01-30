@@ -4,6 +4,8 @@
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 from clonebox.detector import (
     DetectedApplication,
     DetectedPath,
@@ -16,33 +18,48 @@ from clonebox.detector import (
 class TestDetectedDataclasses:
     """Test dataclasses for detected items."""
 
-    def test_detected_service(self):
+    @pytest.mark.parametrize("name,status,enabled", [
+        ("docker", "running", True),
+        ("nginx", "stopped", False),
+        ("postgresql", "running", True),
+    ])
+    def test_detected_service(self, name, status, enabled):
         svc = DetectedService(
-            name="docker", status="running", description="Docker daemon", enabled=True
+            name=name, status=status, description=f"{name} service", enabled=enabled
         )
-        assert svc.name == "docker"
-        assert svc.status == "running"
-        assert svc.enabled is True
+        assert svc.name == name
+        assert svc.status == status
+        assert svc.enabled is enabled
 
-    def test_detected_application(self):
+    @pytest.mark.parametrize("name,pid,memory_mb", [
+        ("python3", 1234, 100.5),
+        ("node", 5678, 200.0),
+        ("java", 9012, 1024.0),
+    ])
+    def test_detected_application(self, name, pid, memory_mb):
         app = DetectedApplication(
-            name="python3",
-            pid=1234,
-            cmdline="python3 app.py",
-            exe="/usr/bin/python3",
+            name=name,
+            pid=pid,
+            cmdline=f"{name} app",
+            exe=f"/usr/bin/{name}",
             working_dir="/home/user/project",
-            memory_mb=100.5,
+            memory_mb=memory_mb,
         )
-        assert app.name == "python3"
-        assert app.pid == 1234
-        assert app.memory_mb == 100.5
+        assert app.name == name
+        assert app.pid == pid
+        assert app.memory_mb == memory_mb
 
-    def test_detected_path(self):
-        path = DetectedPath(
-            path="/home/user/projects", type="project", size_mb=500.0, description="User projects"
+    @pytest.mark.parametrize("path,path_type,size_mb", [
+        ("/home/user/projects", "project", 500.0),
+        ("/home/user/.config", "config", 10.0),
+        ("/home/user/data", "data", 1000.0),
+    ])
+    def test_detected_path(self, path, path_type, size_mb):
+        detected = DetectedPath(
+            path=path, type=path_type, size_mb=size_mb, description="Test path"
         )
-        assert path.path == "/home/user/projects"
-        assert path.type == "project"
+        assert detected.path == path
+        assert detected.type == path_type
 
     def test_system_snapshot_running_services(self):
         services = [
@@ -155,18 +172,21 @@ class TestDetectorHelpers:
         assert size > 0
         assert size == len("Hello World!")
 
+    @pytest.mark.parametrize("docker_output,expected_count,expected_names", [
+        ("myapp\tmyimage:latest\tUp 2 hours\ndb\tpostgres:15\tUp 2 hours\n", 2, ["myapp", "db"]),
+        ("web\tnginx:latest\tUp 1 hour\n", 1, ["web"]),
+        ("", 0, []),
+    ])
     @patch("clonebox.detector.subprocess.run")
-    def test_detect_docker_containers(self, mock_run):
-        mock_run.return_value = MagicMock(
-            stdout="myapp\tmyimage:latest\tUp 2 hours\ndb\tpostgres:15\tUp 2 hours\n", returncode=0
-        )
+    def test_detect_docker_containers(self, mock_run, docker_output, expected_count, expected_names):
+        mock_run.return_value = MagicMock(stdout=docker_output, returncode=0)
 
         detector = SystemDetector()
         containers = detector.detect_docker_containers()
 
-        assert len(containers) == 2
-        assert containers[0]["name"] == "myapp"
-        assert containers[1]["name"] == "db"
+        assert len(containers) == expected_count
+        for i, name in enumerate(expected_names):
+            assert containers[i]["name"] == name
 
     @patch("clonebox.detector.subprocess.run")
     def test_detect_docker_containers_no_docker(self, mock_run):

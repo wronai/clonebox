@@ -60,27 +60,20 @@ class TestSelectiveVMClonerInit:
         expected = Path.home() / ".local/share/libvirt/images"
         assert SelectiveVMCloner.USER_IMAGES_DIR == expected
 
+    @pytest.mark.parametrize("user_session,expected_uri", [
+        (False, "qemu:///system"),
+        (True, "qemu:///session"),
+    ])
     @patch("clonebox.cloner.libvirt")
-    def test_init_system_session(self, mock_libvirt):
+    def test_init_session_type(self, mock_libvirt, user_session, expected_uri):
         mock_conn = MagicMock()
         mock_libvirt.open.return_value = mock_conn
 
-        cloner = SelectiveVMCloner(user_session=False)
+        cloner = SelectiveVMCloner(user_session=user_session)
 
-        assert cloner.conn_uri == "qemu:///system"
-        assert cloner.user_session is False
-        mock_libvirt.open.assert_called_with("qemu:///system")
-
-    @patch("clonebox.cloner.libvirt")
-    def test_init_user_session(self, mock_libvirt):
-        mock_conn = MagicMock()
-        mock_libvirt.open.return_value = mock_conn
-
-        cloner = SelectiveVMCloner(user_session=True)
-
-        assert cloner.conn_uri == "qemu:///session"
-        assert cloner.user_session is True
-        mock_libvirt.open.assert_called_with("qemu:///session")
+        assert cloner.conn_uri == expected_uri
+        assert cloner.user_session is user_session
+        mock_libvirt.open.assert_called_with(expected_uri)
 
     @patch("clonebox.cloner.libvirt")
     def test_init_custom_uri(self, mock_libvirt):
@@ -121,19 +114,16 @@ class TestSelectiveVMClonerInit:
 class TestSelectiveVMClonerMethods:
     """Test SelectiveVMCloner methods."""
 
+    @pytest.mark.parametrize("user_session,expected_path", [
+        (False, Path("/var/lib/libvirt/images")),
+        (True, Path.home() / ".local/share/libvirt/images"),
+    ])
     @patch("clonebox.cloner.libvirt")
-    def test_get_images_dir_system(self, mock_libvirt):
+    def test_get_images_dir(self, mock_libvirt, user_session, expected_path):
         mock_libvirt.open.return_value = MagicMock()
 
-        cloner = SelectiveVMCloner(user_session=False)
-        assert cloner.get_images_dir() == Path("/var/lib/libvirt/images")
-
-    @patch("clonebox.cloner.libvirt")
-    def test_get_images_dir_user(self, mock_libvirt):
-        mock_libvirt.open.return_value = MagicMock()
-
-        cloner = SelectiveVMCloner(user_session=True)
-        assert cloner.get_images_dir() == Path.home() / ".local/share/libvirt/images"
+        cloner = SelectiveVMCloner(user_session=user_session)
+        assert cloner.get_images_dir() == expected_path
 
     @patch("clonebox.cloner.libvirt")
     def test_check_prerequisites_returns_dict(self, mock_libvirt):
@@ -152,17 +142,18 @@ class TestSelectiveVMClonerMethods:
         assert "images_dir" in checks
         assert "session_type" in checks
 
+    @pytest.mark.parametrize("user_session,expected_type", [
+        (False, "system"),
+        (True, "user"),
+    ])
     @patch("clonebox.cloner.libvirt")
-    def test_check_prerequisites_session_type(self, mock_libvirt):
+    def test_check_prerequisites_session_type(self, mock_libvirt, user_session, expected_type):
         mock_conn = MagicMock()
         mock_conn.isAlive.return_value = True
         mock_libvirt.open.return_value = mock_conn
 
-        cloner_system = SelectiveVMCloner(user_session=False)
-        cloner_user = SelectiveVMCloner(user_session=True)
-
-        assert cloner_system.check_prerequisites()["session_type"] == "system"
-        assert cloner_user.check_prerequisites()["session_type"] == "user"
+        cloner = SelectiveVMCloner(user_session=user_session)
+        assert cloner.check_prerequisites()["session_type"] == expected_type
 
     @patch("clonebox.cloner.libvirt")
     def test_list_vms(self, mock_libvirt):

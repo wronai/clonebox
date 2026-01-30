@@ -1,7 +1,12 @@
 #!/usr/bin/env python3
 """Tests for the CLI module."""
 
-from unittest.mock import MagicMock
+import argparse
+import subprocess
+import sys
+from io import StringIO
+from pathlib import Path
+from unittest.mock import MagicMock, patch
 
 import pytest
 import yaml
@@ -11,6 +16,7 @@ from clonebox.cli import (
     deduplicate_list,
     generate_clonebox_yaml,
     load_clonebox_config,
+    main,
 )
 from clonebox.detector import (
     DetectedApplication,
@@ -205,3 +211,195 @@ class TestCLIConstants:
 
     def test_config_file_name(self):
         assert CLONEBOX_CONFIG_FILE == ".clonebox.yaml"
+
+
+class TestCLIIntegration:
+    """Integration tests for CLI commands."""
+
+    @pytest.mark.parametrize("command,expected_exit", [
+        (["--version"], 0),
+        (["--help"], 0),
+        (["detect", "--help"], 0),
+        (["clone", "--help"], 0),
+        (["list", "--help"], 0),
+    ])
+    def test_cli_help_commands(self, command, expected_exit):
+        """Test CLI help and version commands."""
+        result = subprocess.run(
+            [sys.executable, "-m", "clonebox"] + command,
+            capture_output=True,
+            text=True,
+        )
+        assert result.returncode == expected_exit
+
+    @patch("clonebox.cli.SystemDetector")
+    @patch("clonebox.cli.console")
+    def test_detect_json_output(self, mock_console, mock_detector_class, tmp_path):
+        """Test detect command with JSON output."""
+        from clonebox.cli import cmd_detect
+        
+        mock_detector = MagicMock()
+        mock_detector.detect_all.return_value = SystemSnapshot(
+            services=[DetectedService("docker", "running", enabled=True)],
+            applications=[],
+            paths=[]
+        )
+        mock_detector.get_system_info.return_value = {
+            "hostname": "test",
+            "user": "testuser",
+            "cpu_count": 4,
+            "memory_total_gb": 16.0,
+            "memory_available_gb": 8.0,
+            "disk_total_gb": 500.0,
+            "disk_free_gb": 200.0,
+        }
+        mock_detector.detect_docker_containers.return_value = []
+        mock_detector_class.return_value = mock_detector
+
+        args = argparse.Namespace(json=True, yaml=False, dedupe=False, output=None)
+        cmd_detect(args)
+
+        mock_console.print.assert_called()
+
+    @patch("clonebox.cli.SystemDetector")
+    @patch("clonebox.cli.console")
+    def test_detect_yaml_output(self, mock_console, mock_detector_class):
+        """Test detect command with YAML output."""
+        from clonebox.cli import cmd_detect
+        
+        mock_detector = MagicMock()
+        mock_detector.detect_all.return_value = SystemSnapshot(
+            services=[DetectedService("nginx", "running", enabled=True)],
+            applications=[],
+            paths=[DetectedPath("/home/user/project", "project", 100.0)]
+        )
+        mock_detector.get_system_info.return_value = {
+            "hostname": "test",
+            "user": "testuser",
+            "cpu_count": 4,
+            "memory_total_gb": 16.0,
+            "memory_available_gb": 8.0,
+            "disk_total_gb": 500.0,
+            "disk_free_gb": 200.0,
+        }
+        mock_detector.detect_docker_containers.return_value = []
+        mock_detector_class.return_value = mock_detector
+
+        args = argparse.Namespace(json=False, yaml=True, dedupe=True, output=None)
+        cmd_detect(args)
+
+        mock_console.print.assert_called()
+
+    @patch("clonebox.cli.SelectiveVMCloner")
+    @patch("clonebox.cli.questionary")
+    @patch("clonebox.cli.Progress")
+    @patch("clonebox.cli.console")
+    @patch("clonebox.cli.SystemDetector")
+    def test_clone_creates_config_file(
+        self, mock_detector_class, mock_console, mock_progress, mock_questionary, mock_cloner, tmp_path
+    ):
+        """Test clone command creates .clonebox.yaml config file."""
+        config_file = tmp_path / CLONEBOX_CONFIG_FILE
+        
+        mock_detector = MagicMock()
+        mock_detector.detect_all.return_value = SystemSnapshot(
+            services=[DetectedService("docker", "running", enabled=True)],
+            applications=[],
+            paths=[]
+        )
+        mock_detector.get_system_info.return_value = {
+            "hostname": "test",
+            "user": "testuser",
+            "cpu_count": 4,
+            "memory_total_gb": 16.0,
+            "memory_available_gb": 8.0,
+            "disk_total_gb": 500.0,
+            "disk_free_gb": 200.0,
+        }
+        mock_detector.detect_docker_containers.return_value = []
+        mock_detector_class.return_value = mock_detector
+        mock_questionary.confirm.return_value.ask.return_value = False
+
+        from clonebox.cli import cmd_clone
+        
+        args = argparse.Namespace(
+            path=str(tmp_path),
+            name=None,
+            run=False,
+            edit=False,
+            dedupe=True,
+            user=True,
+            network="auto",
+            base_image=None,
+            replace=False,
+        )
+        cmd_clone(args)
+
+        assert config_file.exists()
+        config = yaml.safe_load(config_file.read_text())
+        assert "vm" in config
+        assert "version" in config
+
+
+class TestCLIParametrized:
+    """Parametrized CLI tests."""
+
+    @pytest.mark.parametrize("vm_name,expected", [
+        ("my-vm", "my-vm"),
+        ("test-project", "test-project"),
+        ("clone-app", "clone-app"),
+    ])
+    def test_generate_yaml_custom_vm_names(self, vm_name, expected):
+        """Test YAML generation with various VM names."""
+        snapshot = SystemSnapshot(
+            services=[DetectedService("docker", "running", enabled=True)],
+            applications=[],
+            paths=[]
+        )
+        detector = MagicMock(spec=SystemDetector)
+        detector.get_system_info.return_value = {
+            "hostname": "test-host",
+            "user": "testuser",
+            "cpu_count": 8,
+            "memory_total_gb": 16.0,
+            "memory_available_gb": 8.0,
+            "disk_total_gb": 500.0,
+            "disk_free_gb": 200.0,
+        }
+
+        yaml_str = generate_clonebox_yaml(snapshot, detector, vm_name=vm_name)
+        config = yaml.safe_load(yaml_str)
+
+        assert config["vm"]["name"] == expected
+
+    @pytest.mark.parametrize("services,expected_count", [
+        (["docker"], 1),
+        (["docker", "nginx"], 2),
+        (["docker", "nginx", "postgresql"], 3),
+        ([], 0),
+    ])
+    def test_generate_yaml_services_count(self, services, expected_count):
+        """Test YAML generation with various service configurations."""
+        detected_services = [
+            DetectedService(name, "running", enabled=True) for name in services
+        ]
+        snapshot = SystemSnapshot(
+            services=detected_services,
+            applications=[],
+            paths=[]
+        )
+        detector = MagicMock(spec=SystemDetector)
+        detector.get_system_info.return_value = {
+            "hostname": "test-host",
+            "user": "testuser",
+            "cpu_count": 8,
+            "memory_total_gb": 16.0,
+            "memory_available_gb": 8.0,
+            "disk_total_gb": 500.0,
+            "disk_free_gb": 200.0,
+        }
+
+        yaml_str = generate_clonebox_yaml(snapshot, detector)
+        config = yaml.safe_load(yaml_str)
+
+        assert len(config["services"]) == expected_count

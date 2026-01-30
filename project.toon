@@ -1,13 +1,13 @@
-# clonebox | 15f 5809L | python:15
+# clonebox | 15f 6212L | python:15
 # Keys: M=modules, D=details, i=imports, c=classes, f=functions, m=methods
 M[15]:
-  tests/conftest.py,178
-  tests/test_cloner.py,189
+  tests/conftest.py,343
+  tests/test_cloner.py,186
   tests/__init__.py,0
   tests/test_validator.py,225
   tests/test_network.py,133
-  tests/test_detector.py,135
-  tests/test_cli.py,156
+  tests/test_detector.py,154
+  tests/test_cli.py,328
   tests/e2e/test_full_workflow.py,271
   tests/e2e/__init__.py,1
   src/clonebox/validator.py,287
@@ -19,21 +19,21 @@ M[15]:
 D:
   tests/conftest.py:
     i: os,tempfile,pytest,yaml,pathlib.Path,unittest.mock.{MagicMock,patch}
-    e: temp_dir,temp_config_dir,mock_subprocess,mock_virsh,mock_system_detector,sample_vm_config,pytest_configure,pytest_collection_modifyitems
-    temp_dir()->None
-    temp_config_dir(temp_dir)->None
+    e: temp_dir,session_temp_dir,module_vm_config,temp_config_dir,module_mock_subprocess,mock_subprocess,module_mock_virsh,mock_virsh
+    temp_dir(tmp_path)->None
+    session_temp_dir(tmp_path_factory)->None
+    module_vm_config(tmp_path_factory)->None
+    temp_config_dir(tmp_path)->None
+    module_mock_subprocess()->None
     mock_subprocess()->None
+    module_mock_virsh()->None
     mock_virsh()->None
-    mock_system_detector()->None
-    sample_vm_config()->None
-    pytest_configure(config)->None
-    pytest_collection_modifyitems(config;items)->None
   tests/test_cloner.py:
     i: pytest,clonebox.cloner.{SelectiveVMCloner,VMConfig},pathlib.Path,unittest.mock.{MagicMock,patch}
     e: TestVMConfig,TestSelectiveVMClonerInit,TestSelectiveVMClonerMethods,TestVMXMLGeneration,TestVMCreation
     TestVMConfig: test_default_values(0),test_custom_values(0),test_to_dict(0)  # Test VMConfig dataclass.
-    TestSelectiveVMClonerInit: test_system_images_dir(0),test_user_images_dir(0),test_init_system_session(1),test_init_user_session(1),test_init_custom_uri(1)  # Test SelectiveVMCloner initialization.
-    TestSelectiveVMClonerMethods: test_get_images_dir_system(1),test_get_images_dir_user(1),test_check_prerequisites_returns_dict(1),test_check_prerequisites_session_type(1),test_list_vms(1)  # Test SelectiveVMCloner methods.
+    TestSelectiveVMClonerInit: test_system_images_dir(0),test_user_images_dir(0),test_init_session_type(3),test_init_custom_uri(1),test_init_no_libvirt(0)  # Test SelectiveVMCloner initialization.
+    TestSelectiveVMClonerMethods: test_get_images_dir(3),test_check_prerequisites_returns_dict(1),test_check_prerequisites_session_type(3),test_list_vms(1),test_close(1)  # Test SelectiveVMCloner methods.
     TestVMXMLGeneration: test_generate_vm_xml_basic(1),test_generate_vm_xml_with_paths(1)  # Test VM XML generation.
     TestVMCreation: test_create_vm_permission_error(2)  # Test VM creation (with mocked libvirt).
   tests/test_validator.py:
@@ -47,18 +47,19 @@ D:
     e: TestNetworkMode
     TestNetworkMode: test_vm_config_network_mode_default(1),test_vm_config_network_mode_custom(1),test_resolve_network_mode_auto_system(1),test_resolve_network_mode_auto_user_with_default(1),test_resolve_network_mode_auto_user_no_default(1)  # Test network mode resolution and fall...
   tests/test_detector.py:
-    i: clonebox.detector.{DetectedApplication,DetectedPath,DetectedService,SystemDetector,SystemSnapshot},pathlib.Path,unittest.mock.{MagicMock,patch}
+    i: pytest,clonebox.detector.{DetectedApplication,DetectedPath,DetectedService,SystemDetector,SystemSnapshot},pathlib.Path,unittest.mock.{MagicMock,patch}
     e: TestDetectedDataclasses,TestSystemDetector,TestDetectorHelpers
-    TestDetectedDataclasses: test_detected_service(0),test_detected_application(0),test_detected_path(0),test_system_snapshot_running_services(0)  # Test dataclasses for detected items.
+    TestDetectedDataclasses: test_detected_service(3),test_detected_application(3),test_detected_path(3),test_system_snapshot_running_services(0)  # Test dataclasses for detected items.
     TestSystemDetector: test_init(0),test_detect_services_parses_output(1),test_detect_applications(1),test_detect_paths_finds_home_dirs(0),test_get_system_info(0)  # Test SystemDetector class.
-    TestDetectorHelpers: test_get_dir_size_nonexistent(0),test_get_dir_size_existing(1),test_detect_docker_containers(1),test_detect_docker_containers_no_docker(1)  # Test helper methods.
+    TestDetectorHelpers: test_get_dir_size_nonexistent(0),test_get_dir_size_existing(1),test_detect_docker_containers(4),test_detect_docker_containers_no_docker(1)  # Test helper methods.
   tests/test_cli.py:
-    i: pytest,yaml,clonebox.cli.{CLONEBOX_CONFIG_FILE,deduplicate_list,generate_clonebox_yaml,load_clonebox_config},clonebox.detector.{DetectedApplication,DetectedPath,DetectedService},unittest.mock.MagicMock
-    e: TestDeduplicateList,TestGenerateCloneboxYaml,TestLoadCloneboxConfig,TestCLIConstants
+    i: argparse,subprocess,sys,pytest,yaml,clonebox.cli.CLONEBOX_CONFIG_FILE,io.StringIO,pathlib.Path,unittest.mock.{MagicMock,patch}
+    e: TestDeduplicateList,TestGenerateCloneboxYaml,TestLoadCloneboxConfig,TestCLIConstants,TestCLIIntegration,TestCLIParametrized
     TestDeduplicateList: test_dedupe_simple_list(0),test_dedupe_strings(0),test_dedupe_preserves_order(0),test_dedupe_with_key(0),test_dedupe_empty_list(0)  # Test deduplicate_list helper function.
     TestGenerateCloneboxYaml: create_mock_snapshot(0),create_mock_detector(0),test_generate_yaml_basic(0),test_generate_yaml_vm_name_from_path(0),test_generate_yaml_custom_vm_name(0)  # Test YAML config generation.
     TestLoadCloneboxConfig: test_load_config_from_file(1),test_load_config_from_directory(1),test_load_config_not_found(1)  # Test loading .clonebox.yaml configs.
     TestCLIConstants: test_config_file_name(0)  # Test CLI constants.
+    TestCLIIntegration: test_cli_help_commands(2),test_detect_json_output(3),test_detect_yaml_output(2),test_clone_creates_config_file(1)  # Integration tests for CLI commands.
   tests/e2e/test_full_workflow.py:
     i: os,shutil,subprocess,tempfile,time,pytest,yaml,pathlib.Path
     e: TestFullWorkflow,TestVMLifecycle,TestConfigValidation,TestExportImport
