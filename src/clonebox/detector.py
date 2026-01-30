@@ -276,6 +276,8 @@ class SystemDetector:
     def _get_dir_size(self, path: Path, max_depth: int = 2) -> int:
         """Get approximate directory size in bytes."""
         total = 0
+        if not path.exists():
+            return 0
         try:
             for item in path.iterdir():
                 if item.is_file():
@@ -285,7 +287,7 @@ class SystemDetector:
                         pass
                 elif item.is_dir() and max_depth > 0 and not item.is_symlink():
                     total += self._get_dir_size(item, max_depth - 1)
-        except PermissionError:
+        except (PermissionError, FileNotFoundError, OSError):
             pass
         return total
     

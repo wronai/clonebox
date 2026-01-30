@@ -1,3 +1,32 @@
+## [0.1.2] - 2026-01-30
+
+### Summary
+
+feat(tests): CLI interface improvements
+
+### Core
+
+- update src/clonebox/detector.py
+
+### Docs
+
+- docs: update README
+
+### Test
+
+- update tests/__init__.py
+- update tests/test_cli.py
+- update tests/test_cloner.py
+- update tests/test_detector.py
+
+### Other
+
+- update src/clonebox/__pycache__/__init__.cpython-313.pyc
+- update src/clonebox/__pycache__/cli.cpython-313.pyc
+- update src/clonebox/__pycache__/cloner.cpython-313.pyc
+- update src/clonebox/__pycache__/detector.cpython-313.pyc
+
+
 ## [0.1.1] - 2026-01-30
 
 ### Summary
