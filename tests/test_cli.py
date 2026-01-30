@@ -222,6 +222,9 @@ class TestCLIIntegration:
         (["detect", "--help"], 0),
         (["clone", "--help"], 0),
         (["list", "--help"], 0),
+        (["container", "--help"], 0),
+        (["container", "ps", "--help"], 0),
+        (["container", "up", "--help"], 0),
     ])
     def test_cli_help_commands(self, command, expected_exit):
         """Test CLI help and version commands."""

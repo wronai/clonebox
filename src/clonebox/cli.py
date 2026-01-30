@@ -234,9 +234,22 @@ def run_vm_diagnostics(
         if domifaddr.stdout.strip():
             console.print(f"[dim]{domifaddr.stdout.strip()}[/]")
         else:
-            console.print("[yellow]⚠️  No interface address detected yet[/]")
+            console.print("[yellow]⚠️  No interface address detected via virsh domifaddr[/]")
             if verbose and domifaddr.stderr.strip():
                 console.print(f"[dim]{domifaddr.stderr.strip()}[/]")
+            # Fallback: try to get IP via QEMU Guest Agent (useful for slirp/user networking)
+            if guest_agent_ready:
+                try:
+                    ip_out = _qga_exec(vm_name, conn_uri, "ip -4 -o addr show scope global | awk '{print $4}'", timeout=5)
+                    if ip_out and ip_out.strip():
+                        console.print(f"[green]IP (via QGA): {ip_out.strip()}[/]")
+                        result["network"]["qga_ip"] = ip_out.strip()
+                    else:
+                        console.print("[dim]IP: not available via QGA[/]")
+                except Exception as e:
+                    console.print(f"[dim]IP: QGA query failed ({e})[/]")
+            else:
+                console.print("[dim]IP: QEMU Guest Agent not connected[/]")
     except Exception as e:
         result["network"] = {"error": str(e)}
         console.print(f"[yellow]⚠️  Cannot get IP: {e}[/]")
@@ -932,14 +945,6 @@ def cmd_list(args):
 
 def cmd_container_up(args):
     """Start a container sandbox."""
-    try:
-        from clonebox.container import ContainerCloner
-        from clonebox.models import ContainerConfig
-    except ModuleNotFoundError as e:
-        raise ModuleNotFoundError(
-            "Container features require extra dependencies (e.g. pydantic). Install them to use 'clonebox container'."
-        ) from e
-
     mounts = {}
     for m in getattr(args, "mount", []) or []:
         if ":" not in m:
@@ -967,13 +972,6 @@ def cmd_container_up(args):
 
 def cmd_container_ps(args):
     """List containers."""
-    try:
-        from clonebox.container import ContainerCloner
-    except ModuleNotFoundError as e:
-        raise ModuleNotFoundError(
-            "Container features require extra dependencies (e.g. pydantic). Install them to use 'clonebox container'."
-        ) from e
-
     cloner = ContainerCloner(engine=getattr(args, "engine", "auto"))
     items = cloner.ps(all=getattr(args, "all", False))
 
@@ -1004,39 +1002,18 @@ def cmd_container_ps(args):
 
 def cmd_container_stop(args):
     """Stop a container."""
-    try:
-        from clonebox.container import ContainerCloner
-    except ModuleNotFoundError as e:
-        raise ModuleNotFoundError(
-            "Container features require extra dependencies (e.g. pydantic). Install them to use 'clonebox container'."
-        ) from e
-
     cloner = ContainerCloner(engine=getattr(args, "engine", "auto"))
     cloner.stop(args.name)
 
 
 def cmd_container_rm(args):
     """Remove a container."""
-    try:
-        from clonebox.container import ContainerCloner
-    except ModuleNotFoundError as e:
-        raise ModuleNotFoundError(
-            "Container features require extra dependencies (e.g. pydantic). Install them to use 'clonebox container'."
-        ) from e
-
     cloner = ContainerCloner(engine=getattr(args, "engine", "auto"))
     cloner.rm(args.name, force=getattr(args, "force", False))
 
 
 def cmd_container_down(args):
     """Stop and remove a container."""
-    try:
-        from clonebox.container import ContainerCloner
-    except ModuleNotFoundError as e:
-        raise ModuleNotFoundError(
-            "Container features require extra dependencies (e.g. pydantic). Install them to use 'clonebox container'."
-        ) from e
-
     cloner = ContainerCloner(engine=getattr(args, "engine", "auto"))
     cloner.stop(args.name)
     cloner.rm(args.name, force=True)
@@ -1521,7 +1498,23 @@ def cmd_test(args):
                             if '192.168' in line or '10.0' in line:
                                 console.print(f"   IP: {line.split()[-1]}")
                 else:
-                    console.print("[yellow]⚠️  No IP address detected[/]")
+                    console.print("[yellow]⚠️  No IP address detected via virsh domifaddr[/]")
+                    # Fallback: try to get IP via QEMU Guest Agent (useful for slirp/user networking)
+                    try:
+                        from .cli import _qga_ping, _qga_exec
+                    except ImportError:
+                        from clonebox.cli import _qga_ping, _qga_exec
+                    if _qga_ping(vm_name, conn_uri):
+                        try:
+                            ip_out = _qga_exec(vm_name, conn_uri, "ip -4 -o addr show scope global | awk '{print $4}'", timeout=5)
+                            if ip_out and ip_out.strip():
+                                console.print(f"[green]✅ VM has network access (IP via QGA: {ip_out.strip()})[/]")
+                            else:
+                                console.print("[yellow]⚠️  IP not available via QGA[/]")
+                        except Exception as e:
+                            console.print(f"[yellow]⚠️  Could not get IP via QGA ({e})[/]")
+                    else:
+                        console.print("[dim]IP: QEMU Guest Agent not connected[/]")
             except:
                 console.print("[yellow]⚠️  Could not check network[/]")
         else:
@@ -1582,34 +1575,13 @@ def cmd_test(args):
         if all_paths:
             for idx, (host_path, guest_path) in enumerate(all_paths.items()):
                 try:
-                    result = subprocess.run(
-                        ["virsh", "--connect", conn_uri, "qemu-agent-command", vm_name,
-                         f'{{"execute":"guest-exec","arguments":{{"path":"test","arg":["-d","{guest_path}"],"capture-output":true}}}}'],
-                        capture_output=True, text=True, timeout=10
-                    )
-                    if result.returncode == 0:
-                        try:
-                            response = json.loads(result.stdout)
-                            if "return" in response:
-                                pid = response["return"]["pid"]
-                                result2 = subprocess.run(
-                                    ["virsh", "--connect", conn_uri, "qemu-agent-command", vm_name,
-                                     f'{{"execute":"guest-exec-status","arguments":{"pid":{pid}}}}'],
-                                    capture_output=True, text=True, timeout=10
-                                )
-                                if result2.returncode == 0:
-                                    resp2 = json.loads(result2.stdout)
-                                    if "return" in resp2 and resp2["return"]["exited"]:
-                                        exit_code = resp2["return"]["exitcode"]
-                                        if exit_code == 0:
-                                            console.print(f"[green]✅ {guest_path}[/]")
-                                        else:
-                                            console.print(f"[red]❌ {guest_path} (not accessible)[/]")
-                                        continue
-                        except:
-                            pass
-                    console.print(f"[yellow]⚠️  {guest_path} (unknown)[/]")
-                except:
+                    # Use the same QGA helper as diagnose/status
+                    is_accessible = _qga_exec(vm_name, conn_uri, f"test -d {guest_path} && echo yes || echo no", timeout=5)
+                    if is_accessible == "yes":
+                        console.print(f"[green]✅ {guest_path}[/]")
+                    else:
+                        console.print(f"[red]❌ {guest_path} (not accessible)[/]")
+                except Exception:
                     console.print(f"[yellow]⚠️  {guest_path} (could not check)[/]")
         else:
             console.print("[dim]No mount points configured[/]")
@@ -2347,6 +2319,7 @@ def main():
         default="auto",
         help="Container engine: auto (default), podman, docker",
     )
+    container_parser.set_defaults(func=lambda args, p=container_parser: p.print_help())
     container_sub = container_parser.add_subparsers(dest="container_command", help="Container commands")
 
     container_up = container_sub.add_parser("up", help="Start container")
@@ -2461,6 +2434,9 @@ def main():
     )
     status_parser.add_argument(
         "--health", "-H", action="store_true", help="Run full health check"
+    )
+    status_parser.add_argument(
+        "--verbose", "-v", action="store_true", help="Show detailed diagnostics (QGA, stderr, etc.)"
     )
     status_parser.set_defaults(func=cmd_status)
 

@@ -663,7 +663,9 @@ fi
         # Generate mount commands and fstab entries for 9p filesystems
         mount_commands = []
         fstab_entries = []
-        for idx, (host_path, guest_path) in enumerate(config.paths.items()):
+        all_paths = config.get("paths", {}).copy()
+        all_paths.update(config.get("app_data_paths", {}))
+        for idx, (host_path, guest_path) in enumerate(all_paths.items()):
             if Path(host_path).exists():
                 tag = f"mount{idx}"
                 # Use uid=1000,gid=1000 to give ubuntu user access to mounts

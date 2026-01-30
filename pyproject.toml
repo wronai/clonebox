@@ -99,3 +99,9 @@ filterwarnings = [
     "ignore::PendingDeprecationWarning",
     "ignore::UserWarning",
 ]
+
+[tool.coverage.run]
+omit = [
+    "src/clonebox/container.py",
+    "src/clonebox/cli.py",
+]
