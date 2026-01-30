@@ -7,6 +7,7 @@ import argparse
 import json
 import os
 import sys
+from typing import Optional
 from datetime import datetime
 from pathlib import Path
 
@@ -508,7 +509,7 @@ def generate_clonebox_yaml(
     target_path: str = None,
     vm_name: str = None,
     network_mode: str = "auto",
-    base_image: str | None = None,
+    base_image: Optional[str] = None,
 ) -> str:
     """Generate YAML config from system snapshot."""
     sys_info = detector.get_system_info()

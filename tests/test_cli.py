@@ -151,6 +151,19 @@ class TestGenerateCloneboxYaml:
         assert "running_apps" in config["detected"]
         assert "all_paths" in config["detected"]
 
+    def test_generate_yaml_base_image(self):
+        snapshot = self.create_mock_snapshot()
+        detector = self.create_mock_detector()
+
+        yaml_str = generate_clonebox_yaml(
+            snapshot,
+            detector,
+            base_image="/images/base.qcow2",
+        )
+        config = yaml.safe_load(yaml_str)
+
+        assert config["vm"]["base_image"] == "/images/base.qcow2"
+
 
 class TestLoadCloneboxConfig:
     """Test loading .clonebox.yaml configs."""
