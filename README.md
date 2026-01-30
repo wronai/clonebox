@@ -630,22 +630,37 @@ sudo apt install virt-viewer
 virt-viewer --connect qemu:///session <vm-name>
 ```
 
-### Browser Profiles Not Syncing
+### Browser Profiles and PyCharm Not Working
 
-If browser profiles or app data aren't available:
+If browser profiles or PyCharm configs aren't available, or you get permission errors:
 
-1. **Regenerate config with app data:**
-   ```bash
-   rm .clonebox.yaml
-   clonebox clone . --user --run --replace
-   ```
+**Root cause:** VM was created with old version without proper mount permissions.
 
-2. **Check mount permissions in VM:**
-   ```bash
-   # Verify mounts are accessible
-   ls -la ~/.config/google-chrome
-   ls -la ~/.mozilla/firefox
-   ```
+**Solution - Rebuild VM with latest fixes:**
+
+```bash
+# Stop and delete old VM
+clonebox stop . --user
+clonebox delete . --user --yes
+
+# Recreate VM with fixed permissions and app data mounts
+clonebox clone . --user --run --replace
+```
+
+**After rebuild, verify mounts in VM:**
+```bash
+# Check all mounts are accessible
+ls ~/.config/google-chrome      # Chrome profile
+ls ~/.mozilla/firefox           # Firefox profile  
+ls ~/.config/JetBrains         # PyCharm settings
+ls ~/Downloads                 # Downloads folder
+ls ~/Documents                 # Documents folder
+```
+
+**What changed in v0.1.12:**
+- All mounts use `uid=1000,gid=1000` for ubuntu user access
+- Both `paths` and `app_data_paths` are properly mounted
+- No sudo needed to access any shared directories
 
 ### Mount Points Empty or Permission Denied
 
