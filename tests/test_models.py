@@ -6,7 +6,7 @@ from pathlib import Path
 import pytest
 import yaml
 
-from clonebox.models import CloneBoxConfig, VMSettings
+from clonebox.models import CloneBoxConfig, ContainerConfig, VMSettings
 
 
 class TestVMSettings:
@@ -212,3 +212,86 @@ services:
         assert config.vm.ram_mb == 8192
         assert config.generated == "2024-01-01T00:00:00"
         assert "/home/user/projects" in config.paths
+
+
+class TestContainerConfig:
+    def test_default_values(self):
+        cfg = ContainerConfig()
+        assert cfg.engine == "auto"
+        assert cfg.image == "ubuntu:22.04"
+        assert cfg.env_from_dotenv is True
+        assert cfg.packages == []
+        assert cfg.ports == []
+        assert cfg.name.startswith("clonebox-")
+
+    @pytest.mark.parametrize(
+        "name,valid",
+        [
+            ("cb", True),
+            ("my-container", True),
+            ("", False),
+            ("   ", False),
+            ("a" * 65, False),
+        ],
+    )
+    def test_name_validation(self, name, valid):
+        if valid:
+            cfg = ContainerConfig(name=name)
+            assert cfg.name == name.strip()
+        else:
+            with pytest.raises(ValueError):
+                ContainerConfig(name=name)
+
+    def test_mounts_include_workspace_and_extra(self, tmp_path):
+        workspace = tmp_path / "ws"
+        workspace.mkdir()
+
+        cfg = ContainerConfig(workspace=workspace, extra_mounts={"/opt/data": "/data"})
+        mounts = cfg.mounts
+        assert mounts[str(workspace.resolve())] == "/workspace"
+        assert mounts["/opt/data"] == "/data"
+
+    @pytest.mark.parametrize(
+        "ports,valid",
+        [
+            ([], True),
+            (["8080"], True),
+            (["8080:80"], True),
+            (["abc"], False),
+            (["8080:http"], False),
+            ([""], False),
+        ],
+    )
+    def test_ports_validation(self, ports, valid):
+        if valid:
+            cfg = ContainerConfig(ports=ports)
+            assert cfg.ports == ports
+        else:
+            with pytest.raises(ValueError):
+                ContainerConfig(ports=ports)
+
+    def test_to_docker_run_cmd_requires_resolved_engine(self):
+        cfg = ContainerConfig(engine="auto")
+        with pytest.raises(ValueError, match="engine must be resolved"):
+            cfg.to_docker_run_cmd()
+
+    def test_to_docker_run_cmd_builds_cmd(self, tmp_path):
+        workspace = tmp_path / "ws"
+        workspace.mkdir()
+
+        cfg = ContainerConfig(
+            name="test",
+            engine="podman",
+            image="ubuntu:22.04",
+            workspace=workspace,
+            extra_mounts={"/opt/data": "/data"},
+            ports=["8080:80"],
+        )
+        cmd = cfg.to_docker_run_cmd()
+        assert cmd[0] == "podman"
+        assert "run" in cmd
+        assert "--name" in cmd
+        assert "test" in cmd
+        assert "-p" in cmd
+        assert "8080:80" in cmd
+        assert cmd[-1] == "ubuntu:22.04"

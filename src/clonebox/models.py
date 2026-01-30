@@ -4,7 +4,8 @@ Pydantic models for CloneBox configuration validation.
 """
 
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Literal, Optional
+from uuid import uuid4
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 
@@ -122,6 +123,74 @@ class CloneBoxConfig(BaseModel):
             username=self.vm.username,
             password=self.vm.password,
         )
+
+
+class ContainerConfig(BaseModel):
+    name: str = Field(default_factory=lambda: f"clonebox-{uuid4().hex[:8]}")
+    engine: Literal["auto", "podman", "docker"] = "auto"
+    image: str = "ubuntu:22.04"
+    workspace: Path = Path(".")
+    extra_mounts: Dict[str, str] = Field(default_factory=dict)
+    env_from_dotenv: bool = True
+    packages: List[str] = Field(default_factory=list)
+    ports: List[str] = Field(default_factory=list)
+
+    @field_validator("name")
+    @classmethod
+    def name_must_be_valid(cls, v: str) -> str:
+        if not v or not v.strip():
+            raise ValueError("Container name cannot be empty")
+        if len(v) > 64:
+            raise ValueError("Container name must be <= 64 characters")
+        return v.strip()
+
+    @field_validator("extra_mounts")
+    @classmethod
+    def extra_mounts_must_be_absolute(cls, v: Dict[str, str]) -> Dict[str, str]:
+        for host_path, container_path in v.items():
+            if not str(host_path).startswith("/"):
+                raise ValueError(f"Host path must be absolute: {host_path}")
+            if not str(container_path).startswith("/"):
+                raise ValueError(f"Container path must be absolute: {container_path}")
+        return v
+
+    @field_validator("ports")
+    @classmethod
+    def ports_must_be_valid(cls, v: List[str]) -> List[str]:
+        for p in v:
+            if not isinstance(p, str) or not p.strip():
+                raise ValueError("Port mapping cannot be empty")
+            if ":" in p:
+                host, container = p.split(":", 1)
+                if not host.isdigit() or not container.isdigit():
+                    raise ValueError(f"Invalid port mapping: {p}")
+            else:
+                if not p.isdigit():
+                    raise ValueError(f"Invalid port value: {p}")
+        return v
+
+    @property
+    def mounts(self) -> Dict[str, str]:
+        mounts: Dict[str, str] = {
+            str(self.workspace.resolve()): "/workspace",
+        }
+        mounts.update(self.extra_mounts)
+        return mounts
+
+    def to_docker_run_cmd(self) -> List[str]:
+        if self.engine == "auto":
+            raise ValueError("engine must be resolved before generating run command")
+
+        cmd: List[str] = [self.engine, "run", "-it", "--rm", "--name", self.name]
+
+        for src, dst in self.mounts.items():
+            cmd.extend(["-v", f"{src}:{dst}"])
+
+        for p in self.ports:
+            cmd.extend(["-p", p])
+
+        cmd.append(self.image)
+        return cmd
 
 
 # Backwards compatibility alias
