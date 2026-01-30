@@ -241,6 +241,7 @@ class TestVMCreation:
     @patch("clonebox.cloner.libvirt")
     def test_create_vm_permission_error(self, mock_libvirt, mock_run):
         mock_conn = MagicMock()
+        mock_conn.lookupByName.side_effect = Exception("not found")
         mock_libvirt.open.return_value = mock_conn
 
         cloner = SelectiveVMCloner()

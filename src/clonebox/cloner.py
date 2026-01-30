@@ -194,8 +194,21 @@ class SelectiveVMCloner:
                 print(msg)
 
         # If VM already exists, optionally replace it
+        existing_vm = None
         try:
-            existing_vm = self.conn.lookupByName(config.name)
+            candidate_vm = self.conn.lookupByName(config.name)
+            if candidate_vm is not None:
+                # libvirt returns a domain object whose .name() should match the requested name.
+                # In tests, an unconfigured MagicMock may be returned here; avoid treating that as
+                # a real existing domain unless we can confirm the name matches.
+                try:
+                    if hasattr(candidate_vm, "name") and callable(candidate_vm.name):
+                        if candidate_vm.name() == config.name:
+                            existing_vm = candidate_vm
+                    else:
+                        existing_vm = candidate_vm
+                except Exception:
+                    existing_vm = candidate_vm
         except Exception:
             existing_vm = None
 

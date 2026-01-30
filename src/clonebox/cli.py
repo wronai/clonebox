@@ -508,6 +508,7 @@ def generate_clonebox_yaml(
     target_path: str = None,
     vm_name: str = None,
     network_mode: str = "auto",
+    base_image: str | None = None,
 ) -> str:
     """Generate YAML config from system snapshot."""
     sys_info = detector.get_system_info()
@@ -575,7 +576,7 @@ def generate_clonebox_yaml(
             "ram_mb": ram_mb,
             "vcpus": vcpus,
             "gui": True,
-            "base_image": None,
+            "base_image": base_image,
             "network_mode": network_mode,
         },
         "services": services,
@@ -686,6 +687,7 @@ def cmd_clone(args):
         target_path=str(target_path),
         vm_name=vm_name,
         network_mode=args.network,
+        base_image=getattr(args, "base_image", None),
     )
 
     # Save config file
@@ -948,6 +950,10 @@ def main():
         choices=["auto", "default", "user"],
         default="auto",
         help="Network mode: auto (default), default (libvirt network), user (slirp)",
+    )
+    clone_parser.add_argument(
+        "--base-image",
+        help="Path to a bootable qcow2 image to use as a base disk",
     )
     clone_parser.add_argument(
         "--replace",
