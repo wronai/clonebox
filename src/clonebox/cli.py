@@ -80,96 +80,98 @@ def _resolve_vm_name_and_config_file(name: Optional[str]) -> tuple[str, Optional
 
 
 def _qga_ping(vm_name: str, conn_uri: str) -> bool:
-    import subprocess
-
-    try:
-        result = subprocess.run(
-            [
-                "virsh",
-                "--connect",
-                conn_uri,
-                "qemu-agent-command",
-                vm_name,
-                json.dumps({"execute": "guest-ping"}),
-            ],
-            capture_output=True,
-            text=True,
-            timeout=5,
-        )
-        return result.returncode == 0
-    except Exception:
-        return False
-
-
-def _qga_exec(vm_name: str, conn_uri: str, command: str, timeout: int = 10) -> Optional[str]:
-    import subprocess
-
-    try:
-        payload = {
-            "execute": "guest-exec",
-            "arguments": {
-                "path": "/bin/sh",
-                "arg": ["-c", command],
-                "capture-output": True,
-            },
-        }
-        exec_result = subprocess.run(
-            [
-                "virsh",
-                "--connect",
-                conn_uri,
-                "qemu-agent-command",
-                vm_name,
-                json.dumps(payload),
-            ],
-            capture_output=True,
-            text=True,
-            timeout=timeout,
-        )
-        if exec_result.returncode != 0:
-            return None
-
-        resp = json.loads(exec_result.stdout)
-        pid = resp.get("return", {}).get("pid")
-        if not pid:
-            return None
-
-        import base64
-        import time
-
-        deadline = time.time() + timeout
-        while time.time() < deadline:
-            status_payload = {"execute": "guest-exec-status", "arguments": {"pid": pid}}
-            status_result = subprocess.run(
+    def _qga_ping() -> bool:
+        try:
+            result = subprocess.run(
                 [
                     "virsh",
                     "--connect",
                     conn_uri,
                     "qemu-agent-command",
                     vm_name,
-                    json.dumps(status_payload),
+                    json.dumps({"execute": "guest-ping"}),
                 ],
                 capture_output=True,
                 text=True,
                 timeout=5,
             )
-            if status_result.returncode != 0:
+            return result.returncode == 0
+        except Exception:
+            return False
+
+    return _qga_ping()
+
+
+def _qga_exec(vm_name: str, conn_uri: str, command: str, timeout: int = 10) -> Optional[str]:
+    def _qga_exec() -> Optional[str]:
+        try:
+            payload = {
+                "execute": "guest-exec",
+                "arguments": {
+                    "path": "/bin/sh",
+                    "arg": ["-c", command],
+                    "capture-output": True,
+                },
+            }
+            exec_result = subprocess.run(
+                [
+                    "virsh",
+                    "--connect",
+                    conn_uri,
+                    "qemu-agent-command",
+                    vm_name,
+                    json.dumps(payload),
+                ],
+                capture_output=True,
+                text=True,
+                timeout=timeout,
+            )
+            if exec_result.returncode != 0:
                 return None
 
-            status_resp = json.loads(status_result.stdout)
-            ret = status_resp.get("return", {})
-            if not ret.get("exited", False):
-                time.sleep(0.3)
-                continue
+            resp = json.loads(exec_result.stdout)
+            pid = resp.get("return", {}).get("pid")
+            if not pid:
+                return None
 
-            out_data = ret.get("out-data")
-            if out_data:
-                return base64.b64decode(out_data).decode().strip()
-            return ""
+            import base64
+            import time
 
-        return None
-    except Exception:
-        return None
+            deadline = time.time() + timeout
+            while time.time() < deadline:
+                status_payload = {"execute": "guest-exec-status", "arguments": {"pid": pid}}
+                status_result = subprocess.run(
+                    [
+                        "virsh",
+                        "--connect",
+                        conn_uri,
+                        "qemu-agent-command",
+                        vm_name,
+                        json.dumps(status_payload),
+                    ],
+                    capture_output=True,
+                    text=True,
+                    timeout=5,
+                )
+                if status_result.returncode != 0:
+                    return None
+
+                status_resp = json.loads(status_result.stdout)
+                ret = status_resp.get("return", {})
+                if not ret.get("exited", False):
+                    time.sleep(0.3)
+                    continue
+
+                out_data = ret.get("out-data")
+                if out_data:
+                    return base64.b64decode(out_data).decode().strip()
+                return ""
+
+            return None
+        except Exception:
+            return None
+
+    return _qga_exec()
 
 
 def run_vm_diagnostics(
@@ -698,13 +700,12 @@ def interactive_mode():
         if questionary.confirm("Start VM now?", default=True, style=custom_style).ask():
             cloner.start_vm(vm_name, open_viewer=enable_gui, console=console)
             console.print("\n[bold green]🎉 VM is running![/]")
+            console.print(f"\n[dim]UUID: {vm_uuid}[/]")
 
             if paths_mapping:
                 console.print("\n[bold]Inside the VM, mount shared folders with:[/]")
                 for idx, (host, guest) in enumerate(paths_mapping.items()):
                     console.print(f"  [cyan]sudo mount -t 9p -o trans=virtio mount{idx} {guest}[/]")
-
-        console.print(f"\n[dim]VM UUID: {vm_uuid}[/]")
 
     except Exception as e:
         console.print(f"\n[red]❌ Error: {e}[/]")
@@ -942,7 +943,7 @@ def cmd_container_up(args):
             "Container features require extra dependencies (e.g. pydantic). Install them to use 'clonebox container'."
         ) from e
 
-    mounts: dict[str, str] = {}
+    mounts = {}
     for m in getattr(args, "mount", []) or []:
         if ":" not in m:
             raise ValueError(f"Invalid mount: {m} (expected HOST:CONTAINER)")
