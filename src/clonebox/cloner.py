@@ -666,12 +666,16 @@ fi
         for idx, (host_path, guest_path) in enumerate(config.paths.items()):
             if Path(host_path).exists():
                 tag = f"mount{idx}"
+                # Use uid=1000,gid=1000 to give ubuntu user access to mounts
+                # mmap allows proper file mapping
+                mount_opts = "trans=virtio,version=9p2000.L,mmap,uid=1000,gid=1000"
                 mount_commands.append(f"  - mkdir -p {guest_path}")
+                mount_commands.append(f"  - chown 1000:1000 {guest_path}")
                 mount_commands.append(
-                    f"  - mount -t 9p -o trans=virtio,version=9p2000.L {tag} {guest_path} || true"
+                    f"  - mount -t 9p -o {mount_opts} {tag} {guest_path} || true"
                 )
                 # Add fstab entry for persistence after reboot
-                fstab_entries.append(f"{tag} {guest_path} 9p trans=virtio,version=9p2000.L,nofail 0 0")
+                fstab_entries.append(f"{tag} {guest_path} 9p {mount_opts},nofail 0 0")
 
         # User-data
         # Add desktop environment if GUI is enabled

@@ -647,6 +647,26 @@ If browser profiles or app data aren't available:
    ls -la ~/.mozilla/firefox
    ```
 
+### Mount Points Empty or Permission Denied
+
+If you get "must be superuser to use mount" error when accessing Downloads/Documents:
+
+**Solution:** VM was created with old mount configuration. Recreate VM:
+
+```bash
+# Stop and delete old VM
+clonebox stop . --user
+clonebox delete . --user --yes
+
+# Recreate with fixed permissions
+clonebox clone . --user --run --replace
+```
+
+**What was fixed:**
+- Mounts now use `uid=1000,gid=1000` so ubuntu user has access
+- No need for sudo to access shared directories
+- Applies to new VMs created after v0.1.12
+
 ### Mount Points Empty After Reboot
 
 If shared directories appear empty after VM restart:
@@ -663,7 +683,7 @@ If shared directories appear empty after VM restart:
 
 3. **Verify access mode:**
    - VMs created with `accessmode="mapped"` allow any user to access mounts
-   - Older VMs used `accessmode="passthrough"` which preserves host UIDs
+   - Mount options include `uid=1000,gid=1000` for user access
 
 ## Advanced Usage
 
