@@ -1,0 +1,196 @@
+project: clonebox
+generated: "2026-01-30T22:28:44.454407"
+modules[15]{path,lang,items}:
+  tests/conftest.py,python,8
+  tests/test_cloner.py,python,19
+  tests/__init__.py,python,0
+  tests/test_validator.py,python,12
+  tests/test_network.py,python,13
+  tests/test_detector.py,python,14
+  tests/test_cli.py,python,18
+  tests/e2e/test_full_workflow.py,python,10
+  tests/e2e/__init__.py,python,0
+  src/clonebox/validator.py,python,7
+  src/clonebox/cli.py,python,22
+  src/clonebox/detector.py,python,13
+  src/clonebox/__init__.py,python,0
+  src/clonebox/__main__.py,python,0
+  src/clonebox/cloner.py,python,18
+
+function_details:
+  tests/conftest.py:
+    functions[8]{name,kind,sig,loc,async,lines,cc,does}:
+      temp_dir,function,() -> None,14-17,false,4,1,Create a temporary directory for tests.
+      temp_config_dir,function,(temp_dir) -> None,21-59,false,39,1,Create a temporary directory with a basic .clonebox.yaml config.
+      mock_subprocess,function,() -> None,63-71,false,9,1,Mock subprocess.run for testing without actual command execution.
+      mock_virsh,function,() -> None,75-102,false,28,1,Mock virsh commands for VM testing.
+      mock_system_detector,function,() -> None,106-161,false,56,1,Mock SystemDetector for testing.
+      sample_vm_config,function,() -> None,165-188,false,24,1,Return a sample VMConfig dictionary.
+      pytest_configure,function,(config) -> None,191-193,false,3,1,Configure pytest with auto-skip for e2e tests when libvirt unavailable.
+      pytest_collection_modifyitems,function,"(config, items) -> None",196-219,false,24,8,Auto-skip e2e tests when libvirt/KVM not available.
+  tests/test_cloner.py:
+    functions[19]{name,kind,sig,loc,async,lines,cc,does}:
+      TestVMConfig.test_default_values,method,() -> None,15-26,false,12,1,checks default values
+      TestVMConfig.test_custom_values,method,() -> None,28-43,false,16,1,checks custom values
+      TestVMConfig.test_to_dict,method,() -> None,45-50,false,6,1,checks to dict
+      TestSelectiveVMClonerInit.test_system_images_dir,method,() -> None,56-57,false,2,1,checks system images dir
+      TestSelectiveVMClonerInit.test_user_images_dir,method,() -> None,59-61,false,3,1,checks user images dir
+      TestSelectiveVMClonerInit.test_init_system_session,method,(mock_libvirt) -> None,64-72,false,9,1,checks init system session
+      TestSelectiveVMClonerInit.test_init_user_session,method,(mock_libvirt) -> None,75-83,false,9,1,checks init user session
+      TestSelectiveVMClonerInit.test_init_custom_uri,method,(mock_libvirt) -> None,86-92,false,7,1,checks init custom uri
+      TestSelectiveVMClonerInit.test_init_no_libvirt,method,() -> None,95-98,false,4,1,checks init no libvirt
+      TestSelectiveVMClonerInit.test_init_connection_failed,method,(mock_libvirt) -> None,101-118,false,18,2,checks init connection failed
+      TestSelectiveVMClonerMethods.test_get_images_dir_system,method,(mock_libvirt) -> None,125-129,false,5,1,checks get images dir system
+      TestSelectiveVMClonerMethods.test_get_images_dir_user,method,(mock_libvirt) -> None,132-136,false,5,1,checks get images dir user
+      TestSelectiveVMClonerMethods.test_check_prerequisites_returns_dict,method,(mock_libvirt) -> None,139-153,false,15,1,checks check prerequisites returns dict
+      TestSelectiveVMClonerMethods.test_check_prerequisites_session_type,method,(mock_libvirt) -> None,156-165,false,10,1,checks check prerequisites session type
+      TestSelectiveVMClonerMethods.test_list_vms,method,(mock_libvirt) -> None,168-192,false,25,1,checks list vms
+      TestSelectiveVMClonerMethods.test_close,method,(mock_libvirt) -> None,195-202,false,8,1,checks close
+      TestVMXMLGeneration.test_generate_vm_xml_basic,method,(mock_libvirt) -> None,209-220,false,12,1,checks generate vm xml basic
+      TestVMXMLGeneration.test_generate_vm_xml_with_paths,method,(mock_libvirt) -> None,223-234,false,12,1,checks generate vm xml with paths
+      TestVMCreation.test_create_vm_permission_error,method,"(mock_libvirt, mock_run) -> None",242-256,false,15,1,checks create vm permission error
+  tests/test_validator.py:
+    functions[12]{name,kind,sig,loc,async,lines,cc,does}:
+      TestVMValidator.sample_config,method,() -> None,16-30,false,15,1,Sample config for testing.
+      TestVMValidator.mock_console,method,() -> None,33-37,false,5,1,Mock Rich console.
+      TestVMValidator.test_validator_init,method,"(sample_config, mock_console) -> None",39-50,false,12,1,Test validator initialization.
+      TestVMValidator.test_results_structure,method,"(sample_config, mock_console) -> None",52-71,false,20,2,Test that results have correct structure.
+      TestVMValidator.test_exec_in_vm_success,method,"(mock_run, sample_config, mock_console) -> None",74-90,false,17,1,Test successful command execution in VM.
+      TestVMValidator.test_exec_in_vm_failure,method,"(mock_run, sample_config, mock_console) -> None",93-105,false,13,1,Test failed command execution in VM.
+      TestVMValidator.test_validate_mounts_all_mounted,method,"(mock_run, sample_config, mock_console) -> None",108-141,false,34,1,Test mount validation when all mounts are active.
+      TestVMValidator.test_validate_packages_all_installed,method,"(mock_run, sample_config, mock_console) -> None",144-167,false,24,1,Test package validation when all packages are installed.
+      TestVMValidator.test_validate_empty_config,method,(mock_console) -> None,169-193,false,25,1,Test validation with empty config.
+      TestVMValidatorIntegration.test_validate_all_with_vm_not_running,method,"(mock_run, mock_console=None) -> None",200-228,false,29,1,Test validate_all when VM is not running.
+      TestValidatorResultsCalculation.test_overall_pass,method,() -> None,234-261,false,28,2,Test overall status is 'pass' when all checks pass.
+      TestValidatorResultsCalculation.test_overall_partial,method,() -> None,263-286,false,24,1,Test overall status is 'partial' when some checks fail.
+  tests/test_network.py:
+    functions[13]{name,kind,sig,loc,async,lines,cc,does}:
+      TestNetworkMode.test_vm_config_network_mode_default,method,(mock_libvirt) -> None,14-16,false,3,1,checks vm config network mode default
+      TestNetworkMode.test_vm_config_network_mode_custom,method,(mock_libvirt) -> None,19-21,false,3,1,checks vm config network mode custom
+      TestNetworkMode.test_resolve_network_mode_auto_system,method,(mock_libvirt) -> None,24-33,false,10,1,Test auto mode with system session uses default network.
+      TestNetworkMode.test_resolve_network_mode_auto_user_with_default,method,(mock_libvirt) -> None,36-48,false,13,1,Test auto mode with user session and default network available.
+      TestNetworkMode.test_resolve_network_mode_auto_user_no_default,method,(mock_libvirt) -> None,51-69,false,19,2,Test auto mode with user session and no default network falls back to user.
+      TestNetworkMode.test_resolve_network_mode_explicit_default,method,(mock_libvirt) -> None,72-81,false,10,1,Test explicit default mode.
+      TestNetworkMode.test_resolve_network_mode_explicit_user,method,(mock_libvirt) -> None,84-93,false,10,1,Test explicit user mode.
+      TestNetworkMode.test_resolve_network_mode_invalid,method,(mock_libvirt) -> None,96-105,false,10,1,Test invalid network mode falls back to default.
+      TestNetworkMode.test_default_network_active_true,method,(mock_libvirt) -> None,108-117,false,10,1,Test _default_network_active returns True when network is active.
+      TestNetworkMode.test_default_network_active_false,method,(mock_libvirt) -> None,120-130,false,11,1,Test _default_network_active returns False when network is inactive.
+      TestNetworkMode.test_default_network_active_not_found,method,(mock_libvirt) -> None,133-148,false,16,2,Test _default_network_active returns False when network not found.
+      TestNetworkMode.test_generate_vm_xml_user_network,method,(mock_libvirt) -> None,151-162,false,12,1,Test VM XML generation with user network.
+      TestNetworkMode.test_generate_vm_xml_default_network,method,(mock_libvirt) -> None,165-177,false,13,1,Test VM XML generation with default network.
+  tests/test_detector.py:
+    functions[14]{name,kind,sig,loc,async,lines,cc,does}:
+      TestDetectedDataclasses.test_detected_service,method,() -> None,19-25,false,7,1,checks detected service
+      TestDetectedDataclasses.test_detected_application,method,() -> None,27-38,false,12,1,checks detected application
+      TestDetectedDataclasses.test_detected_path,method,() -> None,40-45,false,6,1,checks detected path
+      TestDetectedDataclasses.test_system_snapshot_running_services,method,() -> None,47-57,false,11,2,checks system snapshot running services
+      TestSystemDetector.test_init,method,() -> None,63-66,false,4,1,checks init
+      TestSystemDetector.test_detect_services_parses_output,method,(mock_run) -> None,69-82,false,14,3,checks detect services parses output
+      TestSystemDetector.test_detect_applications,method,(mock_process_iter) -> None,85-100,false,16,1,checks detect applications
+      TestSystemDetector.test_detect_paths_finds_home_dirs,method,() -> None,102-112,false,11,2,checks detect paths finds home dirs
+      TestSystemDetector.test_get_system_info,method,() -> None,114-127,false,14,1,checks get system info
+      TestSystemDetector.test_detect_all,method,() -> None,129-136,false,8,1,checks detect all
+      TestDetectorHelpers.test_get_dir_size_nonexistent,method,() -> None,142-145,false,4,1,checks get dir size nonexistent
+      TestDetectorHelpers.test_get_dir_size_existing,method,(tmp_path) -> None,147-156,false,10,1,checks get dir size existing
+      TestDetectorHelpers.test_detect_docker_containers,method,(mock_run) -> None,159-169,false,11,1,checks detect docker containers
+      TestDetectorHelpers.test_detect_docker_containers_no_docker,method,(mock_run) -> None,172-178,false,7,1,checks detect docker containers no docker
+  tests/test_cli.py:
+    functions[18]{name,kind,sig,loc,async,lines,cc,does}:
+      TestDeduplicateList.test_dedupe_simple_list,method,() -> None,27-30,false,4,1,checks dedupe simple list
+      TestDeduplicateList.test_dedupe_strings,method,() -> None,32-35,false,4,1,checks dedupe strings
+      TestDeduplicateList.test_dedupe_preserves_order,method,() -> None,37-40,false,4,1,checks dedupe preserves order
+      TestDeduplicateList.test_dedupe_with_key,method,() -> None,42-46,false,5,1,checks dedupe with key
+      TestDeduplicateList.test_dedupe_empty_list,method,() -> None,48-50,false,3,1,checks dedupe empty list
+      TestGenerateCloneboxYaml.create_mock_snapshot,method,() -> None,56-75,false,20,1,Create a mock SystemSnapshot for testing.
+      TestGenerateCloneboxYaml.create_mock_detector,method,() -> None,77-89,false,13,1,Create a mock SystemDetector.
+      TestGenerateCloneboxYaml.test_generate_yaml_basic,method,() -> None,91-103,false,13,1,checks generate yaml basic
+      TestGenerateCloneboxYaml.test_generate_yaml_vm_name_from_path,method,() -> None,105-112,false,8,1,checks generate yaml vm name from path
+      TestGenerateCloneboxYaml.test_generate_yaml_custom_vm_name,method,() -> None,114-121,false,8,1,checks generate yaml custom vm name
+      TestGenerateCloneboxYaml.test_generate_yaml_deduplicate,method,() -> None,123-131,false,9,1,checks generate yaml deduplicate
+      TestGenerateCloneboxYaml.test_generate_yaml_includes_services,method,() -> None,133-141,false,9,1,checks generate yaml includes services
+      TestGenerateCloneboxYaml.test_generate_yaml_detected_section,method,() -> None,143-152,false,10,1,checks generate yaml detected section
+      TestGenerateCloneboxYaml.test_generate_yaml_base_image,method,() -> None,154-165,false,12,1,checks generate yaml base image
+      TestLoadCloneboxConfig.test_load_config_from_file,method,(tmp_path) -> None,171-186,false,16,1,checks load config from file
+      TestLoadCloneboxConfig.test_load_config_from_directory,method,(tmp_path) -> None,188-196,false,9,1,checks load config from directory
+      TestLoadCloneboxConfig.test_load_config_not_found,method,(tmp_path) -> None,198-200,false,3,1,checks load config not found
+      TestCLIConstants.test_config_file_name,method,() -> None,206-207,false,2,1,checks config file name
+  tests/e2e/test_full_workflow.py:
+    functions[10]{name,kind,sig,loc,async,lines,cc,does}:
+      TestFullWorkflow.e2e_config_dir,method,() -> None,29-65,false,37,1,Create a temporary directory with E2E test config.
+      TestFullWorkflow.test_detect_command,method,() -> None,67-93,false,27,3,Test clonebox detect command.
+      TestFullWorkflow.test_detect_yaml_output,method,() -> None,95-114,false,20,4,Test clonebox detect --yaml command.
+      TestFullWorkflow.test_clone_creates_config,method,(e2e_config_dir) -> None,120-129,false,10,1,Test that clone command uses existing config.
+      TestFullWorkflow.test_list_command,method,() -> None,135-145,false,11,1,Test clonebox list command.
+      TestVMLifecycle.lifecycle_config_dir,method,() -> None,156-184,false,29,1,Create config for lifecycle tests.
+      TestVMLifecycle.test_full_vm_lifecycle,method,(lifecycle_config_dir) -> None,191-275,false,85,4,"Test complete VM lifecycle:"
+      TestConfigValidation.test_invalid_yaml_rejected,method,(tmp_path) -> None,282-298,false,17,3,Test that invalid YAML is rejected.
+      TestConfigValidation.test_missing_vm_name_rejected,method,(tmp_path) -> None,300-319,false,20,3,Test that config without VM name is rejected.
+      TestExportImport.test_export_requires_existing_vm,method,(tmp_path) -> None,330-349,false,20,3,Test that export fails gracefully for non-existent VM.
+  src/clonebox/validator.py:
+    functions[7]{name,kind,sig,loc,async,lines,cc,does}:
+      VMValidator.__init__,method,"(config:dict, vm_name:str, conn_uri:str, console:Console=None) -> None",17-28,false,12,2,creates
+      VMValidator._exec_in_vm,method,"(command:str, timeout:int=10) -> Optional[str]",30-76,false,47,9,Execute command in VM using QEMU guest agent.
+      VMValidator.validate_mounts,method,() -> Dict,78-151,false,74,14,Validate all mount points are accessible and contain data.
+      VMValidator.validate_packages,method,() -> Dict,153-194,false,42,4,Validate APT packages are installed.
+      VMValidator.validate_snap_packages,method,() -> Dict,196-237,false,42,4,Validate snap packages are installed.
+      VMValidator.validate_services,method,() -> Dict,239-285,false,47,7,Validate services are enabled and running.
+      VMValidator.validate_all,method,() -> Dict,287-374,false,88,6,Run all validations and return comprehensive results.
+  src/clonebox/cli.py:
+    functions[22]{name,kind,sig,loc,async,lines,cc,does}:
+      print_banner,function,() -> None,44-58,false,15,1,Print the CloneBox banner.
+      interactive_mode,function,() -> None,61-358,false,298,49,Run the interactive VM creation wizard.
+      cmd_create,function,(args) -> None,361-382,false,22,2,Create VM from JSON config.
+      cmd_start,function,(args) -> None,385-449,false,65,15,Start a VM or create from .clonebox.yaml.
+      cmd_open,function,(args) -> None,452-513,false,62,16,Open VM viewer window.
+      cmd_stop,function,(args) -> None,516-532,false,17,7,Stop a VM.
+      cmd_delete,function,(args) -> None,535-558,false,24,9,Delete a VM.
+      cmd_list,function,(args) -> None,561-579,false,19,4,List all VMs.
+      cmd_status,function,(args) -> None,582-817,false,236,54,Check VM installation status and health from workstation.
+      cmd_export,function,(args) -> None,820-999,false,180,38,Export VM and data for migration to another workstation.
+      cmd_import,function,(args) -> None,1002-1141,false,140,23,Import VM from export archive.
+      cmd_test,function,(args) -> None,1144-1367,false,224,56,Test VM configuration and health.
+      load_env_file,function,"(env_path:Path) -> dict",1374-1389,false,16,6,Load environment variables from .env file.
+      expand_env_vars,function,"(value, env_vars:dict) -> None",1392-1404,false,13,6,"Expand environment variables in string values like ${VAR_NAME}."
+      deduplicate_list,function,"(items:list, key=None) -> list",1407-1416,false,10,4,"Remove duplicates from list, preserving order."
+      generate_clonebox_yaml,function,"(snapshot, detector, deduplicate:bool=True, target_path:str=None, vm_name:str=None, network_mode:str='auto', base_image:Optional[str]=None) -> str",1419-1566,false,148,29,Generate YAML config from system snapshot.
+      load_clonebox_config,function,"(path:Path) -> dict",1569-1588,false,20,3,Load .clonebox.yaml config file and expand environment variables from .env.
+      monitor_cloud_init_status,function,"(vm_name:str, user_session:bool=False, timeout:int=900) -> None",1591-1672,false,82,19,Monitor cloud-init status in VM and show progress.
+      create_vm_from_config,function,"(config:dict, start:bool=False, user_session:bool=False, replace:bool=False) -> str",1675-1731,false,57,7,Create VM from YAML config dict.
+      cmd_clone,function,(args) -> None,1734-1849,false,116,14,Generate clone config from path and optionally create VM.
+      cmd_detect,function,(args) -> None,1852-1936,false,85,18,Detect and show system state.
+      main,function,() -> None,1939-2151,false,213,4,Main entry point.
+  src/clonebox/detector.py:
+    functions[13]{name,kind,sig,loc,async,lines,cc,does}:
+      SystemSnapshot.running_services,method,() -> list,56-57,false,2,3,starts services
+      SystemSnapshot.running_apps,method,() -> list,60-61,false,2,1,starts apps
+      SystemDetector.__init__,method,() -> None,314-316,false,3,1,creates
+      SystemDetector.detect_app_data_dirs,method,"(applications:list) -> list",318-348,false,31,8,Detect config/data directories for running applications.
+      SystemDetector.detect_all,method,() -> SystemSnapshot,350-356,false,7,1,"Detect all services, applications and paths."
+      SystemDetector.detect_services,method,() -> list,358-406,false,49,9,Detect systemd services.
+      SystemDetector.detect_applications,method,() -> list,408-449,false,42,11,Detect running applications/processes.
+      SystemDetector.detect_paths,method,() -> list,451-551,false,101,15,"Detect important paths (projects, configs, data)."
+      SystemDetector._get_dir_size,method,"(path:Path, max_depth:int=2) -> int",553-569,false,17,9,Get approximate directory size in bytes.
+      SystemDetector.detect_docker_containers,method,() -> list,571-588,false,18,5,Detect running Docker containers.
+      SystemDetector.suggest_packages_for_apps,method,"(applications:list) -> dict",590-612,false,23,5,Suggest packages based on detected applications.
+      SystemDetector.suggest_packages_for_services,method,"(services:list) -> dict",614-636,false,23,5,Suggest packages based on detected services.
+      SystemDetector.get_system_info,method,() -> dict,638-649,false,12,1,Get basic system information.
+  src/clonebox/cloner.py:
+    functions[18]{name,kind,sig,loc,async,lines,cc,does}:
+      VMConfig.to_dict,method,() -> dict,42-47,false,6,1,converts dict
+      SelectiveVMCloner.__init__,method,"(conn_uri:str=None, user_session:bool=False) -> None",65-72,false,8,3,creates
+      SelectiveVMCloner._connect,method,() -> None,74-97,false,24,4,Connect to libvirt.
+      SelectiveVMCloner.get_images_dir,method,() -> Path,99-103,false,5,2,Get the appropriate images directory based on session type.
+      SelectiveVMCloner._get_downloads_dir,method,() -> Path,105-106,false,2,1,retrieves downloads dir
+      SelectiveVMCloner._ensure_default_base_image,method,(console=None) -> Path,108-154,false,47,7,ensure default base image
+      SelectiveVMCloner._default_network_active,method,() -> bool,156-162,false,7,2,Check if libvirt default network is active.
+      SelectiveVMCloner.resolve_network_mode,method,"(config:VMConfig) -> str",164-173,false,10,6,Resolve network mode based on config and session type.
+      SelectiveVMCloner.check_prerequisites,method,() -> dict,175-238,false,64,10,Check system prerequisites for VM creation.
+      SelectiveVMCloner.create_vm,method,"(config:VMConfig, console=None, replace:bool=False) -> str",240-370,false,131,17,Create a VM with only selected applications/paths.
+      SelectiveVMCloner._generate_vm_xml,method,"(config:VMConfig, root_disk:Path, cloudinit_iso:Optional[Path]) -> str",372-478,false,107,6,Generate libvirt XML for the VM.
+      SelectiveVMCloner._generate_health_check_script,method,"(config:VMConfig) -> str",480-651,false,172,9,Generate a health check script that validates all installed components.
+      SelectiveVMCloner._create_cloudinit_iso,method,"(vm_dir:Path, config:VMConfig) -> Path",653-800,false,148,17,Create cloud-init ISO with user-data and meta-data.
+      SelectiveVMCloner.start_vm,method,"(vm_name:str, open_viewer:bool=True, console=None) -> bool",802-834,false,33,5,Start a VM and optionally open virt-viewer.
+      SelectiveVMCloner.stop_vm,method,"(vm_name:str, force:bool=False, console=None) -> bool",836-863,false,28,4,Stop a VM.
+      SelectiveVMCloner.delete_vm,method,"(vm_name:str, delete_storage:bool=True, console=None, ignore_not_found:bool=False) -> bool",865-903,false,39,5,Delete a VM and optionally its storage.
+      SelectiveVMCloner.list_vms,method,() -> list,905-916,false,12,3,List all VMs.
+      SelectiveVMCloner.close,method,() -> None,918-921,false,4,2,Close libvirt connection.

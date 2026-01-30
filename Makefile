@@ -7,12 +7,16 @@ help:
 	@echo "CloneBox - Clone your workstation to an isolated VM"
 	@echo ""
 	@echo "Available targets:"
-	@echo "  install      Install package in editable mode"
-	@echo "  install-dev  Install package with dev dependencies"
-	@echo "  test         Run tests"
+	@echo "  install      Install clonebox in development mode"
+	@echo "  install-dev  Install with dev dependencies"
+	@echo "  test         Run unit tests (excludes e2e)"
+	@echo "  test-unit    Run fast unit tests only"
+	@echo "  test-e2e     Run end-to-end tests (requires libvirt/KVM)"
+	@echo "  test-all     Run all tests including e2e"
 	@echo "  test-verbose Run tests with verbose output"
-	@echo "  lint         Run linting (ruff, mypy)"
-	@echo "  format       Format code (ruff, black)"
+	@echo "  test-cov     Run tests with coverage"
+	@echo "  lint         Run linters (ruff, mypy)"
+	@echo "  format       Format code with black and ruff"
 	@echo "  clean        Clean build artifacts"
 	@echo "  build        Build package"
 	@echo "  upload       Upload to PyPI (requires twine)"
@@ -44,13 +48,29 @@ install-dev:
 # Testing
 test:
 	@if [ -d ".venv" ]; then \
-		.venv/bin/pytest tests/ -q --tb=short; \
+		.venv/bin/pytest tests/ -m "not e2e" -q --tb=short; \
 	else \
 		echo "No virtual environment found. Run 'make install-dev' first."; \
 		exit 1; \
 	fi
 
-test-verbose:
+test-unit:
+	@if [ -d ".venv" ]; then \
+		.venv/bin/pytest tests/ -m "not e2e and not slow" -q --tb=short; \
+	else \
+		echo "No virtual environment found. Run 'make install-dev' first."; \
+		exit 1; \
+	fi
+
+test-e2e:
+	@if [ -d ".venv" ]; then \
+		.venv/bin/pytest tests/e2e/ -m "e2e" -v --tb=short; \
+	else \
+		echo "No virtual environment found. Run 'make install-dev' first."; \
+		exit 1; \
+	fi
+
+test-all:
 	@if [ -d ".venv" ]; then \
 		.venv/bin/pytest tests/ -v --tb=short; \
 	else \
@@ -58,9 +78,17 @@ test-verbose:
 		exit 1; \
 	fi
 
+test-verbose:
+	@if [ -d ".venv" ]; then \
+		.venv/bin/pytest tests/ -m "not e2e" -v --tb=short; \
+	else \
+		echo "No virtual environment found. Run 'make install-dev' first."; \
+		exit 1; \
+	fi
+
 test-cov:
 	@if [ -d ".venv" ]; then \
-		.venv/bin/pytest tests/ --cov=clonebox --cov-report=html --cov-report=term; \
+		.venv/bin/pytest tests/ -m "not e2e" --cov=clonebox --cov-report=html --cov-report=term; \
 	else \
 		echo "No virtual environment found. Run 'make install-dev' first."; \
 		exit 1; \

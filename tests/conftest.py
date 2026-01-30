@@ -188,9 +188,32 @@ def sample_vm_config():
     }
 
 
-# Markers for test categories
 def pytest_configure(config):
-    """Configure pytest markers."""
-    config.addinivalue_line("markers", "e2e: End-to-end tests (require running VM)")
-    config.addinivalue_line("markers", "slow: Slow tests")
-    config.addinivalue_line("markers", "integration: Integration tests")
+    """Configure pytest with auto-skip for e2e tests when libvirt unavailable."""
+    pass
+
+
+def pytest_collection_modifyitems(config, items):
+    """Auto-skip e2e tests when libvirt/KVM not available."""
+    import os
+    
+    # Check if libvirt is available
+    try:
+        import libvirt
+        libvirt_available = True
+    except ImportError:
+        libvirt_available = False
+    
+    # Check if KVM is available
+    kvm_available = os.path.exists("/dev/kvm")
+    
+    # Check if running in CI
+    is_ci = os.environ.get("CI") == "true" or os.environ.get("GITHUB_ACTIONS") == "true"
+    
+    skip_e2e = pytest.mark.skip(reason="libvirt/KVM not available or running in CI")
+    
+    for item in items:
+        # Auto-skip e2e tests if prerequisites not met
+        if "e2e" in item.keywords:
+            if not libvirt_available or not kvm_available or is_ci:
+                item.add_marker(skip_e2e)

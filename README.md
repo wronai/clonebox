@@ -136,6 +136,61 @@ clonebox stop <name>         # Zatrzymaj VM
 clonebox delete <name>       # Usuń VM
 ```
 
+## Development and Testing
+
+### Running Tests
+
+CloneBox has comprehensive test coverage with unit tests and end-to-end tests:
+
+```bash
+# Run unit tests only (fast, no libvirt required)
+make test
+
+# Run fast unit tests (excludes slow tests)
+make test-unit
+
+# Run end-to-end tests (requires libvirt/KVM)
+make test-e2e
+
+# Run all tests including e2e
+make test-all
+
+# Run tests with coverage
+make test-cov
+
+# Run tests with verbose output
+make test-verbose
+```
+
+### Test Categories
+
+Tests are organized with pytest markers:
+
+- **Unit tests**: Fast tests that mock libvirt/system calls (default)
+- **E2E tests**: End-to-end tests requiring actual VM creation (marked with `@pytest.mark.e2e`)
+- **Slow tests**: Tests that take longer to run (marked with `@pytest.mark.slow`)
+
+E2E tests are automatically skipped when:
+- libvirt is not installed
+- `/dev/kvm` is not available
+- Running in CI environment (`CI=true` or `GITHUB_ACTIONS=true`)
+
+### Manual Test Execution
+
+```bash
+# Run only unit tests (exclude e2e)
+pytest tests/ -m "not e2e"
+
+# Run only e2e tests
+pytest tests/e2e/ -m "e2e" -v
+
+# Run specific test file
+pytest tests/test_cloner.py -v
+
+# Run with coverage
+pytest tests/ -m "not e2e" --cov=clonebox --cov-report=html
+```
+
 ## Quick Start
 
 ### Interactive Mode (Recommended)
