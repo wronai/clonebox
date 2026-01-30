@@ -144,53 +144,98 @@ class SystemDetector:
         "esbuild",
         "tmux",
         "screen",
+        # IDEs and desktop apps
+        "pycharm",
+        "idea",
+        "webstorm",
+        "phpstorm",
+        "goland",
+        "clion",
+        "rider",
+        "datagrip",
+        "sublime",
+        "atom",
+        "slack",
+        "discord",
+        "telegram",
+        "spotify",
+        "vlc",
+        "gimp",
+        "inkscape",
+        "blender",
+        "obs",
+        "postman",
+        "insomnia",
+        "dbeaver",
     ]
 
-    # Map process/service names to Ubuntu packages
+    # Map process/service names to Ubuntu packages or snap packages
+    # Format: "process_name": ("package_name", "install_type") where install_type is "apt" or "snap"
     APP_TO_PACKAGE_MAP = {
-        "python": "python3",
-        "python3": "python3",
-        "pip": "python3-pip",
-        "node": "nodejs",
-        "npm": "npm",
-        "yarn": "yarnpkg",
-        "docker": "docker.io",
-        "dockerd": "docker.io",
-        "docker-compose": "docker-compose",
-        "podman": "podman",
-        "nginx": "nginx",
-        "apache2": "apache2",
-        "httpd": "apache2",
-        "postgres": "postgresql",
-        "postgresql": "postgresql",
-        "mysql": "mysql-server",
-        "mysqld": "mysql-server",
-        "mongod": "mongodb",
-        "mongodb": "mongodb",
-        "redis-server": "redis-server",
-        "redis": "redis-server",
-        "vim": "vim",
-        "nvim": "neovim",
-        "emacs": "emacs",
-        "firefox": "firefox",
-        "chromium": "chromium-browser",
-        "jupyter": "jupyter-notebook",
-        "jupyter-lab": "jupyterlab",
-        "gunicorn": "gunicorn",
-        "uvicorn": "uvicorn",
-        "tmux": "tmux",
-        "screen": "screen",
-        "git": "git",
-        "curl": "curl",
-        "wget": "wget",
-        "ssh": "openssh-client",
-        "sshd": "openssh-server",
-        "go": "golang",
-        "cargo": "cargo",
-        "rustc": "rustc",
-        "java": "default-jdk",
-        "gradle": "gradle",
-        "mvn": "maven",
+        "python": ("python3", "apt"),
+        "python3": ("python3", "apt"),
+        "pip": ("python3-pip", "apt"),
+        "node": ("nodejs", "apt"),
+        "npm": ("npm", "apt"),
+        "yarn": ("yarnpkg", "apt"),
+        "docker": ("docker.io", "apt"),
+        "dockerd": ("docker.io", "apt"),
+        "docker-compose": ("docker-compose", "apt"),
+        "podman": ("podman", "apt"),
+        "nginx": ("nginx", "apt"),
+        "apache2": ("apache2", "apt"),
+        "httpd": ("apache2", "apt"),
+        "postgres": ("postgresql", "apt"),
+        "postgresql": ("postgresql", "apt"),
+        "mysql": ("mysql-server", "apt"),
+        "mysqld": ("mysql-server", "apt"),
+        "mongod": ("mongodb", "apt"),
+        "mongodb": ("mongodb", "apt"),
+        "redis-server": ("redis-server", "apt"),
+        "redis": ("redis-server", "apt"),
+        "vim": ("vim", "apt"),
+        "nvim": ("neovim", "apt"),
+        "emacs": ("emacs", "apt"),
+        "firefox": ("firefox", "apt"),
+        "chromium": ("chromium-browser", "apt"),
+        "jupyter": ("jupyter-notebook", "apt"),
+        "jupyter-lab": ("jupyterlab", "apt"),
+        "gunicorn": ("gunicorn", "apt"),
+        "uvicorn": ("uvicorn", "apt"),
+        "tmux": ("tmux", "apt"),
+        "screen": ("screen", "apt"),
+        "git": ("git", "apt"),
+        "curl": ("curl", "apt"),
+        "wget": ("wget", "apt"),
+        "ssh": ("openssh-client", "apt"),
+        "sshd": ("openssh-server", "apt"),
+        "go": ("golang", "apt"),
+        "cargo": ("cargo", "apt"),
+        "rustc": ("rustc", "apt"),
+        "java": ("default-jdk", "apt"),
+        "gradle": ("gradle", "apt"),
+        "mvn": ("maven", "apt"),
+        # Popular desktop apps (snap packages)
+        "chrome": ("chromium", "snap"),
+        "google-chrome": ("chromium", "snap"),
+        "pycharm": ("pycharm-community", "snap"),
+        "idea": ("intellij-idea-community", "snap"),
+        "code": ("code", "snap"),
+        "vscode": ("code", "snap"),
+        "slack": ("slack", "snap"),
+        "discord": ("discord", "snap"),
+        "spotify": ("spotify", "snap"),
+        "vlc": ("vlc", "apt"),
+        "gimp": ("gimp", "apt"),
+        "inkscape": ("inkscape", "apt"),
+        "blender": ("blender", "apt"),
+        "obs": ("obs-studio", "apt"),
+        "telegram": ("telegram-desktop", "snap"),
+        "postman": ("postman", "snap"),
+        "insomnia": ("insomnia", "snap"),
+        "dbeaver": ("dbeaver-ce", "snap"),
+        "sublime": ("sublime-text", "snap"),
+        "atom": ("atom", "snap"),
     }
 
     def __init__(self):
@@ -437,29 +482,53 @@ class SystemDetector:
             pass
         return containers
 
-    def suggest_packages_for_apps(self, applications: list) -> list:
-        """Suggest Ubuntu packages based on detected applications."""
-        packages = set()
+    def suggest_packages_for_apps(self, applications: list) -> dict:
+        """Suggest packages based on detected applications.
+        
+        Returns:
+            dict with 'apt' and 'snap' keys containing lists of packages
+        """
+        apt_packages = set()
+        snap_packages = set()
+        
         for app in applications:
             app_name = app.name.lower()
-            # Check if app name matches any known mapping
-            for key, package in self.APP_TO_PACKAGE_MAP.items():
+            for key, (package, install_type) in self.APP_TO_PACKAGE_MAP.items():
                 if key in app_name:
-                    packages.add(package)
+                    if install_type == "snap":
+                        snap_packages.add(package)
+                    else:
+                        apt_packages.add(package)
                     break
-        return sorted(list(packages))
+        
+        return {
+            "apt": sorted(list(apt_packages)),
+            "snap": sorted(list(snap_packages))
+        }
 
-    def suggest_packages_for_services(self, services: list) -> list:
-        """Suggest Ubuntu packages based on detected services."""
-        packages = set()
+    def suggest_packages_for_services(self, services: list) -> dict:
+        """Suggest packages based on detected services.
+        
+        Returns:
+            dict with 'apt' and 'snap' keys containing lists of packages
+        """
+        apt_packages = set()
+        snap_packages = set()
+        
         for service in services:
             service_name = service.name.lower()
-            # Check if service name matches any known mapping
-            for key, package in self.APP_TO_PACKAGE_MAP.items():
+            for key, (package, install_type) in self.APP_TO_PACKAGE_MAP.items():
                 if key in service_name:
-                    packages.add(package)
+                    if install_type == "snap":
+                        snap_packages.add(package)
+                    else:
+                        apt_packages.add(package)
                     break
-        return sorted(list(packages))
+        
+        return {
+            "apt": sorted(list(apt_packages)),
+            "snap": sorted(list(snap_packages))
+        }
 
     def get_system_info(self) -> dict:
         """Get basic system information."""

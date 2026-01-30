@@ -31,7 +31,9 @@ class VMConfig:
     base_image: Optional[str] = None
     paths: dict = field(default_factory=dict)
     packages: list = field(default_factory=list)
+    snap_packages: list = field(default_factory=list)  # Snap packages to install
     services: list = field(default_factory=list)
+    post_commands: list = field(default_factory=list)  # Commands to run after setup
     user_session: bool = False  # Use qemu:///session instead of qemu:///system
     network_mode: str = "auto"  # auto|default|user
     username: str = "ubuntu"  # VM default username
@@ -508,7 +510,7 @@ class SelectiveVMCloner:
             "\n".join(f"  - {pkg}" for pkg in all_packages) if all_packages else ""
         )
         
-        # Build runcmd - services and mounts
+        # Build runcmd - services, mounts, snaps, post_commands
         runcmd_lines = []
         
         # Add service enablement
@@ -519,6 +521,12 @@ class SelectiveVMCloner:
         for cmd in mount_commands:
             runcmd_lines.append(cmd)
         
+        # Install snap packages
+        if config.snap_packages:
+            runcmd_lines.append("  - echo 'Installing snap packages...'")
+            for snap_pkg in config.snap_packages:
+                runcmd_lines.append(f"  - snap install {snap_pkg} --classic || snap install {snap_pkg} || true")
+        
         # Add GUI setup if enabled - runs AFTER package installation completes
         if config.gui:
             runcmd_lines.extend([
@@ -526,7 +534,18 @@ class SelectiveVMCloner:
                 "  - systemctl enable gdm3 || systemctl enable gdm || true",
             ])
         
+        # Run user-defined post commands
+        if config.post_commands:
+            runcmd_lines.append("  - echo 'Running post-setup commands...'")
+            for cmd in config.post_commands:
+                runcmd_lines.append(f"  - {cmd}")
+        
+        # Validation - check installed packages and log results
+        runcmd_lines.append("  - echo '=== CloneBox Setup Validation ===' >> /var/log/clonebox-setup.log")
+        runcmd_lines.append("  - dpkg -l | grep -E 'ii' | wc -l >> /var/log/clonebox-setup.log")
+        runcmd_lines.append("  - snap list >> /var/log/clonebox-setup.log 2>/dev/null || true")
         runcmd_lines.append("  - echo 'CloneBox VM ready!' > /var/log/clonebox-ready")
+        runcmd_lines.append("  - echo 'Setup completed at:' $(date) >> /var/log/clonebox-setup.log")
         
         # Add reboot command at the end if GUI is enabled
         if config.gui:

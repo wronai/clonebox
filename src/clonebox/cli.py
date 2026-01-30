@@ -592,6 +592,16 @@ def generate_clonebox_yaml(
             paths_mapping[host_path] = f"/mnt/workdir{idx}"
             idx += 1
 
+    # Add default user folders (Downloads, Documents)
+    home_dir = Path.home()
+    default_folders = [
+        (home_dir / "Downloads", "/home/ubuntu/Downloads"),
+        (home_dir / "Documents", "/home/ubuntu/Documents"),
+    ]
+    for host_folder, guest_folder in default_folders:
+        if host_folder.exists() and str(host_folder) not in paths_mapping:
+            paths_mapping[str(host_folder)] = guest_folder
+
     # Determine VM name
     if not vm_name:
         if target_path:
@@ -604,10 +614,10 @@ def generate_clonebox_yaml(
     vcpus = max(2, sys_info["cpu_count"] // 2)
 
     # Auto-detect packages from running applications and services
-    suggested_app_packages = detector.suggest_packages_for_apps(snapshot.applications)
-    suggested_service_packages = detector.suggest_packages_for_services(snapshot.running_services)
+    app_packages = detector.suggest_packages_for_apps(snapshot.applications)
+    service_packages = detector.suggest_packages_for_services(snapshot.running_services)
     
-    # Combine with base packages
+    # Combine with base packages (apt only)
     base_packages = [
         "build-essential",
         "git",
@@ -615,10 +625,15 @@ def generate_clonebox_yaml(
         "vim",
     ]
     
-    # Merge all packages and deduplicate
-    all_packages = base_packages + suggested_app_packages + suggested_service_packages
+    # Merge apt packages and deduplicate
+    all_apt_packages = base_packages + app_packages["apt"] + service_packages["apt"]
     if deduplicate:
-        all_packages = deduplicate_list(all_packages)
+        all_apt_packages = deduplicate_list(all_apt_packages)
+    
+    # Merge snap packages and deduplicate
+    all_snap_packages = app_packages["snap"] + service_packages["snap"]
+    if deduplicate:
+        all_snap_packages = deduplicate_list(all_snap_packages)
 
     # Build config
     config = {
@@ -635,7 +650,9 @@ def generate_clonebox_yaml(
             "password": "${VM_PASSWORD}",
         },
         "services": services,
-        "packages": all_packages,
+        "packages": all_apt_packages,
+        "snap_packages": all_snap_packages,
+        "post_commands": [],  # User can add custom commands to run after setup
         "paths": paths_mapping,
         "detected": {
             "running_apps": [
@@ -772,7 +789,9 @@ def create_vm_from_config(
         base_image=config["vm"].get("base_image"),
         paths=config.get("paths", {}),
         packages=config.get("packages", []),
+        snap_packages=config.get("snap_packages", []),
         services=config.get("services", []),
+        post_commands=config.get("post_commands", []),
         user_session=user_session,
         network_mode=config["vm"].get("network_mode", "auto"),
         username=config["vm"].get("username", "ubuntu"),
