@@ -1145,11 +1145,13 @@ def cmd_test(args):
     """Test VM configuration and health."""
     import subprocess
     import json
+    from clonebox.validator import VMValidator
     
     name = args.name
     user_session = getattr(args, "user", False)
     quick = getattr(args, "quick", False)
     verbose = getattr(args, "verbose", False)
+    validate_all = getattr(args, "validate", False)
     conn_uri = "qemu:///session" if user_session else "qemu:///system"
     
     # If name is a path, load config
