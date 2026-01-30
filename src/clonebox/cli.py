@@ -1347,11 +1347,24 @@ def cmd_test(args):
     
     console.print()
     
-    # Summary
-    console.print("[bold]Test Summary[/]")
-    console.print("VM configuration is valid and VM is accessible.")
-    console.print("\n[dim]For detailed health report, run in VM:[/]")
-    console.print("[dim]  cat /var/log/clonebox-health.log[/]")
+    # Run full validation if requested
+    if validate_all and state == "running":
+        validator = VMValidator(config, vm_name, conn_uri, console)
+        results = validator.validate_all()
+        
+        # Exit with error code if validations failed
+        if results["overall"] == "partial":
+            return 1
+    else:
+        # Summary
+        console.print("[bold]Test Summary[/]")
+        console.print("VM configuration is valid and VM is accessible.")
+        console.print("\n[dim]For full validation including packages, services, and mounts:[/]")
+        console.print("[dim]  clonebox test . --user --validate[/]")
+        console.print("\n[dim]For detailed health report, run in VM:[/]")
+        console.print("[dim]  cat /var/log/clonebox-health.log[/]")
+    
+    return 0
 
 
 CLONEBOX_CONFIG_FILE = ".clonebox.yaml"
@@ -2117,6 +2130,9 @@ def main():
     )
     test_parser.add_argument(
         "--verbose", "-v", action="store_true", help="Verbose output"
+    )
+    test_parser.add_argument(
+        "--validate", action="store_true", help="Run full validation (mounts, packages, services)"
     )
     test_parser.set_defaults(func=cmd_test)
 

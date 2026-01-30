@@ -219,22 +219,53 @@ ls ~/.mozilla/firefox       # Firefox profile
 ls ~/.config/JetBrains      # PyCharm settings
 ```
 
-### Testing VM Configuration
+### Testing and Validating VM Configuration
 
 ```bash
 # Quick test - basic checks
 clonebox test . --user --quick
 
-# Full test with verbose output
-clonebox test . --user --verbose
+# Full validation - checks EVERYTHING against YAML config
+clonebox test . --user --validate
 
-# Test output shows:
-# ✅ VM is defined in libvirt
-# ✅ VM is running
-# ✅ VM has network access (IP: 192.168.122.89)
-# ✅ Cloud-init completed
-# ✅ All mount points accessible
-# ✅ Health check triggered
+# Validation checks:
+# ✅ All mount points (paths + app_data_paths) are mounted and accessible
+# ✅ All APT packages are installed
+# ✅ All snap packages are installed
+# ✅ All services are enabled and running
+# ✅ Reports file counts for each mount
+# ✅ Shows package versions
+# ✅ Comprehensive summary table
+
+# Example output:
+# 💾 Validating Mount Points...
+# ┌─────────────────────────┬─────────┬────────────┬────────┐
+# │ Guest Path              │ Mounted │ Accessible │ Files  │
+# ├─────────────────────────┼─────────┼────────────┼────────┤
+# │ /home/ubuntu/Downloads  │ ✅      │ ✅         │ 199    │
+# │ ~/.config/JetBrains     │ ✅      │ ✅         │ 45     │
+# └─────────────────────────┴─────────┴────────────┴────────┘
+# 12/14 mounts working
+#
+# 📦 Validating APT Packages...
+# ┌─────────────────┬──────────────┬────────────┐
+# │ Package         │ Status       │ Version    │
+# ├─────────────────┼──────────────┼────────────┤
+# │ firefox         │ ✅ Installed │ 122.0+b... │
+# │ docker.io       │ ✅ Installed │ 24.0.7-... │
+# └─────────────────┴──────────────┴────────────┘
+# 8/8 packages installed
+#
+# 📊 Validation Summary
+# ┌────────────────┬────────┬────────┬───────┐
+# │ Category       │ Passed │ Failed │ Total │
+# ├────────────────┼────────┼────────┼───────┤
+# │ Mounts         │ 12     │ 2      │ 14    │
+# │ APT Packages   │ 8      │ 0      │ 8     │
+# │ Snap Packages  │ 2      │ 0      │ 2     │
+# │ Services       │ 5      │ 1      │ 6     │
+# │ TOTAL          │ 27     │ 3      │ 30    │
+# └────────────────┴────────┴────────┴───────┘
 ```
 
 ### VM Health Monitoring and Mount Validation
@@ -562,7 +593,8 @@ clonebox clone . --network auto
 | `clonebox detect --json` | Output as JSON |
 | `clonebox status . --user` | Check VM health, cloud-init, IP, and mount status |
 | `clonebox status . --user --health` | Check VM status and run full health check |
-| `clonebox test . --user` | Test VM configuration and validate all settings |
+| `clonebox test . --user` | Test VM configuration (basic checks) |
+| `clonebox test . --user --validate` | Full validation: mounts, packages, services vs YAML |
 | `clonebox export . --user` | Export VM for migration to another workstation |
 | `clonebox export . --user --include-data` | Export VM with browser profiles and configs |
 | `clonebox import archive.tar.gz --user` | Import VM from export archive |
