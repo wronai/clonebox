@@ -1,23 +1,25 @@
 project: clonebox
-generated: "2026-01-30T22:44:43.831196"
-modules[17]{path,lang,items}:
+generated: "2026-01-30T23:46:32.270974"
+modules[19]{path,lang,items}:
   tests/conftest.py,python,17
   tests/test_cloner.py,python,17
   tests/__init__.py,python,0
   tests/test_validator.py,python,12
-  tests/test_models.py,python,16
+  tests/test_container.py,python,12
+  tests/test_models.py,python,22
   tests/test_network.py,python,13
   tests/test_detector.py,python,14
   tests/test_cli.py,python,24
   tests/e2e/test_full_workflow.py,python,10
   tests/e2e/__init__.py,python,0
   src/clonebox/validator.py,python,7
-  src/clonebox/cli.py,python,22
+  src/clonebox/cli.py,python,32
   src/clonebox/detector.py,python,13
   src/clonebox/__init__.py,python,0
   src/clonebox/__main__.py,python,0
+  src/clonebox/container.py,python,10
   src/clonebox/cloner.py,python,18
-  src/clonebox/models.py,python,7
+  src/clonebox/models.py,python,12
 
 function_details:
   tests/conftest.py:
@@ -72,8 +74,22 @@ function_details:
       TestVMValidatorIntegration.test_validate_all_with_vm_not_running,method,"(mock_run, mock_console=None) -> None",200-228,false,29,1,Test validate_all when VM is not running.
       TestValidatorResultsCalculation.test_overall_pass,method,() -> None,234-261,false,28,2,Test overall status is 'pass' when all checks pass.
       TestValidatorResultsCalculation.test_overall_partial,method,() -> None,263-286,false,24,1,Test overall status is 'partial' when some checks fail.
+  tests/test_container.py:
+    functions[12]{name,kind,sig,loc,async,lines,cc,does}:
+      _which_side_effect,function,(mapping) -> None,12-16,false,5,1,which side effect
+      TestContainerClonerEngineDetection.test_detect_engine_prefers_podman,method,(monkeypatch) -> None,20-32,false,13,1,checks detect engine prefers podman
+      TestContainerClonerEngineDetection.test_detect_engine_fallbacks_to_docker,method,(monkeypatch) -> None,34-48,false,15,1,checks detect engine fallbacks to docker
+      TestContainerClonerEngineDetection.test_detect_engine_errors_when_none_found,method,(monkeypatch) -> None,50-59,false,10,1,checks detect engine errors when none found
+      TestContainerClonerBuild.test_build_dockerfile_includes_packages,method,(tmp_path) -> None,63-76,false,14,1,checks build dockerfile includes packages
+      TestContainerClonerBuild.test_build_image_calls_engine_build,method,"(monkeypatch, tmp_path) -> None",78-103,false,26,2,checks build image calls engine build
+      TestContainerClonerUpAndPs.test_up_runs_interactive_with_env_file,method,"(monkeypatch, tmp_path) -> None",107-138,false,32,1,checks up runs interactive with env file
+      TestContainerClonerUpAndPs.test_up_detach_runs_sleep_infinity,method,"(monkeypatch, tmp_path) -> None",140-165,false,26,1,checks up detach runs sleep infinity
+      TestContainerClonerUpAndPs.test_ps_docker_parses_tab_format,method,(monkeypatch) -> None,167-183,false,17,1,checks ps docker parses tab format
+      TestContainerClonerUpAndPs.test_ps_podman_json_uses_a_when_all,method,(monkeypatch) -> None,185-205,false,21,1,checks ps podman json uses a when all
+      TestContainerClonerStopRm.test_stop_calls_engine,method,(monkeypatch) -> None,209-221,false,13,1,checks stop calls engine
+      TestContainerClonerStopRm.test_rm_force_adds_f,method,(monkeypatch) -> None,223-235,false,13,1,checks rm force adds f
   tests/test_models.py:
-    functions[16]{name,kind,sig,loc,async,lines,cc,does}:
+    functions[22]{name,kind,sig,loc,async,lines,cc,does}:
       TestVMSettings.test_default_values,method,() -> None,15-20,false,6,1,checks default values
       TestVMSettings.test_name_validation,method,"(name, valid) -> None",29-35,false,7,2,checks name validation
       TestVMSettings.test_network_mode_validation,method,"(network_mode, valid) -> None",44-50,false,7,2,checks network mode validation
@@ -90,6 +106,12 @@ function_details:
       TestCloneBoxConfig.test_to_vm_config_dataclass,method,() -> None,145-158,false,14,1,checks to vm config dataclass
       TestCloneBoxConfigYAML.test_yaml_roundtrip,method,(tmp_path) -> None,164-184,false,21,1,checks yaml roundtrip
       TestCloneBoxConfigYAML.test_parse_generated_yaml,method,(tmp_path) -> None,186-214,false,29,1,checks parse generated yaml
+      TestContainerConfig.test_default_values,method,() -> None,218-225,false,8,1,checks default values
+      TestContainerConfig.test_name_validation,method,"(name, valid) -> None",237-243,false,7,2,checks name validation
+      TestContainerConfig.test_mounts_include_workspace_and_extra,method,(tmp_path) -> None,245-252,false,8,1,checks mounts include workspace and extra
+      TestContainerConfig.test_ports_validation,method,"(ports, valid) -> None",265-271,false,7,2,checks ports validation
+      TestContainerConfig.test_to_docker_run_cmd_requires_resolved_engine,method,() -> None,273-276,false,4,1,checks to docker run cmd requires resolved engine
+      TestContainerConfig.test_to_docker_run_cmd_builds_cmd,method,(tmp_path) -> None,278-297,false,20,1,checks to docker run cmd builds cmd
   tests/test_network.py:
     functions[13]{name,kind,sig,loc,async,lines,cc,does}:
       TestNetworkMode.test_vm_config_network_mode_default,method,(mock_libvirt) -> None,14-16,false,3,1,checks vm config network mode default
@@ -141,12 +163,12 @@ function_details:
       TestLoadCloneboxConfig.test_load_config_from_directory,method,(tmp_path) -> None,194-202,false,9,1,checks load config from directory
       TestLoadCloneboxConfig.test_load_config_not_found,method,(tmp_path) -> None,204-206,false,3,1,checks load config not found
       TestCLIConstants.test_config_file_name,method,() -> None,212-213,false,2,1,checks config file name
-      TestCLIIntegration.test_cli_help_commands,method,"(command, expected_exit) -> None",226-233,false,8,1,Test CLI help and version commands.
-      TestCLIIntegration.test_detect_json_output,method,"(mock_console, mock_detector_class, tmp_path) -> None",237-262,false,26,1,Test detect command with JSON output.
-      TestCLIIntegration.test_detect_yaml_output,method,"(mock_console, mock_detector_class) -> None",266-291,false,26,1,Test detect command with YAML output.
-      TestCLIIntegration.test_clone_creates_config_file,method,"(mock_detector_class, mock_console, mock_progress, mock_questionary, mock_cloner, tmp_path) -> None",298-341,false,44,1,Test clone command creates .clonebox.yaml config file.
-      TestCLIParametrized.test_generate_yaml_custom_vm_names,method,"(vm_name, expected) -> None",352-373,false,22,1,Test YAML generation with various VM names.
-      TestCLIParametrized.test_generate_yaml_services_count,method,"(services, expected_count) -> None",381-405,false,25,2,Test YAML generation with various service configurations.
+      TestCLIIntegration.test_cli_help_commands,method,"(command, expected_exit) -> None",229-236,false,8,1,Test CLI help and version commands.
+      TestCLIIntegration.test_detect_json_output,method,"(mock_console, mock_detector_class, tmp_path) -> None",240-265,false,26,1,Test detect command with JSON output.
+      TestCLIIntegration.test_detect_yaml_output,method,"(mock_console, mock_detector_class) -> None",269-294,false,26,1,Test detect command with YAML output.
+      TestCLIIntegration.test_clone_creates_config_file,method,"(mock_detector_class, mock_console, mock_progress, mock_questionary, mock_cloner, tmp_path) -> None",301-344,false,44,1,Test clone command creates .clonebox.yaml config file.
+      TestCLIParametrized.test_generate_yaml_custom_vm_names,method,"(vm_name, expected) -> None",355-376,false,22,1,Test YAML generation with various VM names.
+      TestCLIParametrized.test_generate_yaml_services_count,method,"(services, expected_count) -> None",384-408,false,25,2,Test YAML generation with various service configurations.
   tests/e2e/test_full_workflow.py:
     functions[10]{name,kind,sig,loc,async,lines,cc,does}:
       TestFullWorkflow.e2e_config_dir,method,() -> None,29-65,false,37,1,Create a temporary directory with E2E test config.
@@ -166,47 +188,69 @@ function_details:
       VMValidator.validate_mounts,method,() -> Dict,78-151,false,74,14,Validate all mount points are accessible and contain data.
       VMValidator.validate_packages,method,() -> Dict,153-194,false,42,4,Validate APT packages are installed.
       VMValidator.validate_snap_packages,method,() -> Dict,196-237,false,42,4,Validate snap packages are installed.
-      VMValidator.validate_services,method,() -> Dict,239-285,false,47,7,Validate services are enabled and running.
-      VMValidator.validate_all,method,() -> Dict,287-374,false,88,6,Run all validations and return comprehensive results.
+      VMValidator.validate_services,method,() -> Dict,249-318,false,70,10,Validate services are enabled and running.
+      VMValidator.validate_all,method,() -> Dict,320-414,false,95,6,Run all validations and return comprehensive results.
   src/clonebox/cli.py:
-    functions[22]{name,kind,sig,loc,async,lines,cc,does}:
+    functions[32]{name,kind,sig,loc,async,lines,cc,does}:
       print_banner,function,() -> None,44-58,false,15,1,Print the CloneBox banner.
-      interactive_mode,function,() -> None,61-358,false,298,49,Run the interactive VM creation wizard.
-      cmd_create,function,(args) -> None,361-382,false,22,2,Create VM from JSON config.
-      cmd_start,function,(args) -> None,385-449,false,65,15,Start a VM or create from .clonebox.yaml.
-      cmd_open,function,(args) -> None,452-513,false,62,16,Open VM viewer window.
-      cmd_stop,function,(args) -> None,516-532,false,17,7,Stop a VM.
-      cmd_delete,function,(args) -> None,535-558,false,24,9,Delete a VM.
-      cmd_list,function,(args) -> None,561-579,false,19,4,List all VMs.
-      cmd_status,function,(args) -> None,582-817,false,236,54,Check VM installation status and health from workstation.
-      cmd_export,function,(args) -> None,820-999,false,180,38,Export VM and data for migration to another workstation.
-      cmd_import,function,(args) -> None,1002-1141,false,140,23,Import VM from export archive.
-      cmd_test,function,(args) -> None,1144-1367,false,224,56,Test VM configuration and health.
-      load_env_file,function,"(env_path:Path) -> dict",1374-1389,false,16,6,Load environment variables from .env file.
-      expand_env_vars,function,"(value, env_vars:dict) -> None",1392-1404,false,13,6,"Expand environment variables in string values like ${VAR_NAME}."
-      deduplicate_list,function,"(items:list, key=None) -> list",1407-1416,false,10,4,"Remove duplicates from list, preserving order."
-      generate_clonebox_yaml,function,"(snapshot, detector, deduplicate:bool=True, target_path:str=None, vm_name:str=None, network_mode:str='auto', base_image:Optional[str]=None) -> str",1419-1566,false,148,29,Generate YAML config from system snapshot.
-      load_clonebox_config,function,"(path:Path) -> dict",1569-1588,false,20,3,Load .clonebox.yaml config file and expand environment variables from .env.
-      monitor_cloud_init_status,function,"(vm_name:str, user_session:bool=False, timeout:int=900) -> None",1591-1672,false,82,19,Monitor cloud-init status in VM and show progress.
-      create_vm_from_config,function,"(config:dict, start:bool=False, user_session:bool=False, replace:bool=False) -> str",1675-1731,false,57,7,Create VM from YAML config dict.
-      cmd_clone,function,(args) -> None,1734-1872,false,139,16,Generate clone config from path and optionally create VM.
-      cmd_detect,function,(args) -> None,1875-1959,false,85,18,Detect and show system state.
-      main,function,() -> None,1962-2179,false,218,4,Main entry point.
+      _resolve_vm_name_and_config_file,function,"(name:Optional[str]) -> tuple[str, Optional[Path]]",61-79,false,19,9,resolve vm name and config file
+      _qga_ping,function,"(vm_name:str, conn_uri:str) -> bool",82-101,false,20,2,qga ping
+      _qga_exec,function,"(vm_name:str, conn_uri:str, command:str, timeout:int=10) -> Optional[str]",104-171,false,68,8,qga exec
+      run_vm_diagnostics,function,"(vm_name:str, conn_uri:str, config_file:Optional[Path]) -> dict",174-423,false,250,57,starts vm diagnostics
+      interactive_mode,function,() -> None,426-722,false,297,49,Run the interactive VM creation wizard.
+      cmd_create,function,(args) -> None,725-746,false,22,2,Create VM from JSON config.
+      cmd_start,function,(args) -> None,749-813,false,65,15,Start a VM or create from .clonebox.yaml.
+      cmd_open,function,(args) -> None,816-877,false,62,16,Open VM viewer window.
+      cmd_stop,function,(args) -> None,880-896,false,17,7,Stop a VM.
+      cmd_delete,function,(args) -> None,899-922,false,24,9,Delete a VM.
+      cmd_list,function,(args) -> None,925-943,false,19,4,List all VMs.
+      cmd_container_up,function,(args) -> None,946-970,false,25,7,Start a container sandbox.
+      cmd_container_ps,function,(args) -> None,973-1000,false,28,4,List containers.
+      cmd_container_stop,function,(args) -> None,1003-1006,false,4,1,Stop a container.
+      cmd_container_rm,function,(args) -> None,1009-1012,false,4,1,Remove a container.
+      cmd_container_down,function,(args) -> None,1015-1019,false,5,1,Stop and remove a container.
+      cmd_diagnose,function,(args) -> None,1022-1040,false,19,3,Run detailed VM diagnostics (standalone).
+      cmd_status,function,(args) -> None,1043-1083,false,41,5,Check VM installation status and health from workstation.
+      cmd_export,function,(args) -> None,1086-1265,false,180,38,Export VM and data for migration to another workstation.
+      cmd_import,function,(args) -> None,1268-1407,false,140,23,Import VM from export archive.
+      cmd_test,function,(args) -> None,1410-1628,false,219,55,Test VM configuration and health.
+      load_env_file,function,"(env_path:Path) -> dict",1635-1650,false,16,6,Load environment variables from .env file.
+      expand_env_vars,function,"(value, env_vars:dict) -> None",1653-1665,false,13,6,"Expand environment variables in string values like ${VAR_NAME}."
+      deduplicate_list,function,"(items:list, key=None) -> list",1668-1677,false,10,4,"Remove duplicates from list, preserving order."
+      generate_clonebox_yaml,function,"(snapshot, detector, deduplicate:bool=True, target_path:str=None, vm_name:str=None, network_mode:str='auto', base_image:Optional[str]=None) -> str",1680-1837,false,158,30,Generate YAML config from system snapshot.
+      load_clonebox_config,function,"(path:Path) -> dict",1840-1859,false,20,3,Load .clonebox.yaml config file and expand environment variables from .env.
+      monitor_cloud_init_status,function,"(vm_name:str, user_session:bool=False, timeout:int=900) -> None",1862-1943,false,82,19,Monitor cloud-init status in VM and show progress.
+      create_vm_from_config,function,"(config:dict, start:bool=False, user_session:bool=False, replace:bool=False) -> str",1946-2002,false,57,7,Create VM from YAML config dict.
+      cmd_clone,function,(args) -> None,2005-2143,false,139,16,Generate clone config from path and optionally create VM.
+      cmd_detect,function,(args) -> None,2146-2230,false,85,18,Detect and show system state.
+      main,function,() -> None,2233-2533,false,301,4,Main entry point.
   src/clonebox/detector.py:
     functions[13]{name,kind,sig,loc,async,lines,cc,does}:
       SystemSnapshot.running_services,method,() -> list,56-57,false,2,3,starts services
       SystemSnapshot.running_apps,method,() -> list,60-61,false,2,1,starts apps
-      SystemDetector.__init__,method,() -> None,314-316,false,3,1,creates
-      SystemDetector.detect_app_data_dirs,method,"(applications:list) -> list",318-348,false,31,8,Detect config/data directories for running applications.
-      SystemDetector.detect_all,method,() -> SystemSnapshot,350-356,false,7,1,"Detect all services, applications and paths."
-      SystemDetector.detect_services,method,() -> list,358-406,false,49,9,Detect systemd services.
-      SystemDetector.detect_applications,method,() -> list,408-449,false,42,11,Detect running applications/processes.
-      SystemDetector.detect_paths,method,() -> list,451-551,false,101,15,"Detect important paths (projects, configs, data)."
-      SystemDetector._get_dir_size,method,"(path:Path, max_depth:int=2) -> int",553-569,false,17,9,Get approximate directory size in bytes.
-      SystemDetector.detect_docker_containers,method,() -> list,571-588,false,18,5,Detect running Docker containers.
-      SystemDetector.suggest_packages_for_apps,method,"(applications:list) -> dict",590-612,false,23,5,Suggest packages based on detected applications.
-      SystemDetector.suggest_packages_for_services,method,"(services:list) -> dict",614-636,false,23,5,Suggest packages based on detected services.
-      SystemDetector.get_system_info,method,() -> dict,638-649,false,12,1,Get basic system information.
+      SystemDetector.__init__,method,() -> None,345-347,false,3,1,creates
+      SystemDetector.detect_app_data_dirs,method,"(applications:list) -> list",349-379,false,31,8,Detect config/data directories for running applications.
+      SystemDetector.detect_all,method,() -> SystemSnapshot,381-387,false,7,1,"Detect all services, applications and paths."
+      SystemDetector.detect_services,method,() -> list,389-437,false,49,9,Detect systemd services.
+      SystemDetector.detect_applications,method,() -> list,439-480,false,42,11,Detect running applications/processes.
+      SystemDetector.detect_paths,method,() -> list,482-582,false,101,15,"Detect important paths (projects, configs, data)."
+      SystemDetector._get_dir_size,method,"(path:Path, max_depth:int=2) -> int",584-600,false,17,9,Get approximate directory size in bytes.
+      SystemDetector.detect_docker_containers,method,() -> list,602-619,false,18,5,Detect running Docker containers.
+      SystemDetector.suggest_packages_for_apps,method,"(applications:list) -> dict",621-643,false,23,5,Suggest packages based on detected applications.
+      SystemDetector.suggest_packages_for_services,method,"(services:list) -> dict",645-667,false,23,5,Suggest packages based on detected services.
+      SystemDetector.get_system_info,method,() -> dict,669-680,false,12,1,Get basic system information.
+  src/clonebox/container.py:
+    functions[10]{name,kind,sig,loc,async,lines,cc,does}:
+      ContainerCloner.__init__,method,"(engine:str='auto') -> None",14-15,false,2,1,creates
+      ContainerCloner._resolve_engine,method,"(engine:str) -> str",17-25,false,9,4,resolve engine
+      ContainerCloner.detect_engine,method,() -> str,27-42,false,16,5,detect engine
+      ContainerCloner._run,method,"(cmd:List[str], check:bool=True, capture_output:bool=True, text:bool=True) -> subprocess.CompletedProcess",44-51,false,8,1,starts
+      ContainerCloner.build_dockerfile,method,"(config:ContainerConfig) -> str",53-66,false,14,2,creates dockerfile
+      ContainerCloner.build_image,method,"(config:ContainerConfig, tag:Optional[str]=None) -> str",68-98,false,31,3,creates image
+      ContainerCloner.up,method,"(config:ContainerConfig, detach:bool=False, remove:bool=True) -> None",100-133,false,34,10,up
+      ContainerCloner.stop,method,"(name:str) -> None",135-136,false,2,1,stops
+      ContainerCloner.rm,method,"(name:str, force:bool=False) -> None",138-143,false,6,2,rm
+      ContainerCloner.ps,method,"(all:bool=False) -> List[Dict[str, Any]]",145-190,false,46,22,ps
   src/clonebox/cloner.py:
     functions[18]{name,kind,sig,loc,async,lines,cc,does}:
       VMConfig.to_dict,method,() -> dict,42-47,false,6,1,converts dict
@@ -221,18 +265,23 @@ function_details:
       SelectiveVMCloner.create_vm,method,"(config:VMConfig, console=None, replace:bool=False) -> str",240-370,false,131,17,Create a VM with only selected applications/paths.
       SelectiveVMCloner._generate_vm_xml,method,"(config:VMConfig, root_disk:Path, cloudinit_iso:Optional[Path]) -> str",372-478,false,107,6,Generate libvirt XML for the VM.
       SelectiveVMCloner._generate_health_check_script,method,"(config:VMConfig) -> str",480-651,false,172,9,Generate a health check script that validates all installed components.
-      SelectiveVMCloner._create_cloudinit_iso,method,"(vm_dir:Path, config:VMConfig) -> Path",653-803,false,151,19,Create cloud-init ISO with user-data and meta-data.
-      SelectiveVMCloner.start_vm,method,"(vm_name:str, open_viewer:bool=True, console=None) -> bool",805-837,false,33,5,Start a VM and optionally open virt-viewer.
-      SelectiveVMCloner.stop_vm,method,"(vm_name:str, force:bool=False, console=None) -> bool",839-866,false,28,4,Stop a VM.
-      SelectiveVMCloner.delete_vm,method,"(vm_name:str, delete_storage:bool=True, console=None, ignore_not_found:bool=False) -> bool",868-906,false,39,5,Delete a VM and optionally its storage.
-      SelectiveVMCloner.list_vms,method,() -> list,908-919,false,12,3,List all VMs.
-      SelectiveVMCloner.close,method,() -> None,921-924,false,4,2,Close libvirt connection.
+      SelectiveVMCloner._create_cloudinit_iso,method,"(vm_dir:Path, config:VMConfig) -> Path",653-807,false,155,20,Create cloud-init ISO with user-data and meta-data.
+      SelectiveVMCloner.start_vm,method,"(vm_name:str, open_viewer:bool=True, console=None) -> bool",809-839,false,31,4,Start a VM and optionally open virt-viewer.
+      SelectiveVMCloner.stop_vm,method,"(vm_name:str, force:bool=False, console=None) -> bool",841-868,false,28,4,Stop a VM.
+      SelectiveVMCloner.delete_vm,method,"(vm_name:str, delete_storage:bool=True, console=None, ignore_not_found:bool=False) -> bool",870-908,false,39,5,Delete a VM and optionally its storage.
+      SelectiveVMCloner.list_vms,method,() -> list,910-921,false,12,3,List all VMs.
+      SelectiveVMCloner.close,method,() -> None,923-926,false,4,2,Close libvirt connection.
   src/clonebox/models.py:
-    functions[7]{name,kind,sig,loc,async,lines,cc,does}:
-      VMSettings.name_must_be_valid,method,"(v:str) -> str",27-32,false,6,4,name must be valid
-      VMSettings.network_mode_must_be_valid,method,"(v:str) -> str",36-40,false,5,2,network mode must be valid
-      CloneBoxConfig.paths_must_be_absolute,method,"(v:Dict[str,str]) -> Dict[str, str]",63-69,false,7,4,paths must be absolute
-      CloneBoxConfig.handle_nested_vm,method,"(data:Any) -> Any",73-84,false,12,9,Handle both dict and nested vm structures.
-      CloneBoxConfig.save,method,"(path:Path) -> None",86-91,false,6,1,Save configuration to YAML file.
-      CloneBoxConfig.load,method,"(path:Path) -> \"CloneBoxConfig\"",94-103,false,10,3,Load configuration from YAML file.
-      CloneBoxConfig.to_vm_config,method,"() -> \"VMConfigDataclass\"",105-124,false,20,1,Convert to legacy VMConfig dataclass for compatibility.
+    functions[12]{name,kind,sig,loc,async,lines,cc,does}:
+      VMSettings.name_must_be_valid,method,"(v:str) -> str",28-33,false,6,4,name must be valid
+      VMSettings.network_mode_must_be_valid,method,"(v:str) -> str",37-41,false,5,2,network mode must be valid
+      CloneBoxConfig.paths_must_be_absolute,method,"(v:Dict[str,str]) -> Dict[str, str]",64-70,false,7,4,paths must be absolute
+      CloneBoxConfig.handle_nested_vm,method,"(data:Any) -> Any",74-85,false,12,9,Handle both dict and nested vm structures.
+      CloneBoxConfig.save,method,"(path:Path) -> None",87-92,false,6,1,Save configuration to YAML file.
+      CloneBoxConfig.load,method,"(path:Path) -> \"CloneBoxConfig\"",95-104,false,10,3,Load configuration from YAML file.
+      CloneBoxConfig.to_vm_config,method,"() -> \"VMConfigDataclass\"",106-125,false,20,1,Convert to legacy VMConfig dataclass for compatibility.
+      ContainerConfig.name_must_be_valid,method,"(v:str) -> str",140-145,false,6,4,name must be valid
+      ContainerConfig.extra_mounts_must_be_absolute,method,"(v:Dict[str,str]) -> Dict[str, str]",149-155,false,7,4,extra mounts must be absolute
+      ContainerConfig.ports_must_be_valid,method,"(v:List[str]) -> List[str]",159-170,false,12,8,ports must be valid
+      ContainerConfig.mounts,method,"() -> Dict[str, str]",173-178,false,6,1,mounts
+      ContainerConfig.to_docker_run_cmd,method,"() -> List[str]",180-193,false,14,4,converts docker run cmd

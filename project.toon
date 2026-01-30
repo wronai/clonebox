@@ -1,23 +1,25 @@
-# clonebox | 17f 6589L | python:17
+# clonebox | 19f 7598L | python:19
 # Keys: M=modules, D=details, i=imports, c=classes, f=functions, m=methods
-M[17]:
+M[19]:
   tests/conftest.py,343
   tests/test_cloner.py,186
   tests/__init__.py,0
   tests/test_validator.py,225
-  tests/test_models.py,177
+  tests/test_container.py,168
+  tests/test_models.py,251
   tests/test_network.py,133
   tests/test_detector.py,154
-  tests/test_cli.py,330
+  tests/test_cli.py,333
   tests/e2e/test_full_workflow.py,271
   tests/e2e/__init__.py,1
-  src/clonebox/validator.py,287
-  src/clonebox/cli.py,1707
-  src/clonebox/detector.py,548
+  src/clonebox/validator.py,319
+  src/clonebox/cli.py,2017
+  src/clonebox/detector.py,571
   src/clonebox/__init__.py,10
   src/clonebox/__main__.py,4
-  src/clonebox/cloner.py,711
-  src/clonebox/models.py,106
+  src/clonebox/container.py,154
+  src/clonebox/cloner.py,712
+  src/clonebox/models.py,164
 D:
   tests/conftest.py:
     i: os,tempfile,pytest,yaml,pathlib.Path,unittest.mock.{MagicMock,patch}
@@ -44,12 +46,21 @@ D:
     TestVMValidator: sample_config(0),mock_console(0),test_validator_init(2),test_results_structure(2),test_exec_in_vm_success(3)  # Test VMValidator class.
     TestVMValidatorIntegration: test_validate_all_with_vm_not_running(2)  # Integration tests for VMValidator (re...
     TestValidatorResultsCalculation: test_overall_pass(0),test_overall_partial(0)  # Test results calculation logic.
+  tests/test_container.py:
+    i: pytest,clonebox.container.ContainerCloner,clonebox.models.ContainerConfig,pathlib.Path,unittest.mock.MagicMock
+    e: TestContainerClonerEngineDetection,TestContainerClonerBuild,TestContainerClonerUpAndPs,TestContainerClonerStopRm
+    TestContainerClonerEngineDetection: test_detect_engine_prefers_podman(1),test_detect_engine_fallbacks_to_docker(1),test_detect_engine_errors_when_none_found(1)
+    TestContainerClonerBuild: test_build_dockerfile_includes_packages(1),test_build_image_calls_engine_build(2)
+    TestContainerClonerUpAndPs: test_up_runs_interactive_with_env_file(2),test_up_detach_runs_sleep_infinity(2),test_ps_docker_parses_tab_format(1),test_ps_podman_json_uses_a_when_all(1)
+    TestContainerClonerStopRm: test_stop_calls_engine(1),test_rm_force_adds_f(1)
+    _which_side_effect(mapping)->None
   tests/test_models.py:
-    i: pytest,yaml,clonebox.models.{CloneBoxConfig,VMSettings},pathlib.Path
-    e: TestVMSettings,TestCloneBoxConfig,TestCloneBoxConfigYAML
+    i: pytest,yaml,clonebox.models.{CloneBoxConfig,ContainerConfig,VMSettings},pathlib.Path
+    e: TestVMSettings,TestCloneBoxConfig,TestCloneBoxConfigYAML,TestContainerConfig
     TestVMSettings: test_default_values(0),test_name_validation(2),test_network_mode_validation(2),test_ram_validation(2)  # Test VMSettings model.
     TestCloneBoxConfig: test_default_config(0),test_full_config(0),test_path_validation_host_absolute(0),test_path_validation_guest_absolute(0),test_handle_nested_vm_dict(0)  # Test CloneBoxConfig model.
     TestCloneBoxConfigYAML: test_yaml_roundtrip(1),test_parse_generated_yaml(1)  # Test YAML serialization/deserialization.
+    TestContainerConfig: test_default_values(0),test_name_validation(2),test_mounts_include_workspace_and_extra(1),test_ports_validation(2),test_to_docker_run_cmd_requires_resolved_engine(0)
   tests/test_network.py:
     i: clonebox.cloner.{SelectiveVMCloner,VMConfig},pathlib.Path,unittest.mock.{MagicMock,patch}
     e: TestNetworkMode
@@ -81,15 +92,15 @@ D:
     VMValidator: __init__(4),_exec_in_vm(2),validate_mounts(0),validate_packages(0),validate_snap_packages(0)  # Validates VM configuration against ex...
   src/clonebox/cli.py:
     i: argparse,json,os,re,sys,datetime,questionary,yaml,pathlib.Path,typing.Optional
-    e: print_banner,interactive_mode,cmd_create,cmd_start,cmd_open,cmd_stop,cmd_delete,cmd_list
+    e: print_banner,run_vm_diagnostics,interactive_mode,cmd_create,cmd_start,cmd_open,cmd_stop,cmd_delete
     print_banner()->None
+    _resolve_vm_name_and_config_file(name:Optional[str])->tuple[str, Optional[Path]]
+    _qga_ping(vm_name:str;conn_uri:str)->bool
+    _qga_exec(vm_name:str;conn_uri:str;command:str;timeout:int=10)->Optional[str]
+    run_vm_diagnostics(vm_name:str;conn_uri:str;config_file:Optional[Path])->dict
     interactive_mode()->None
     cmd_create(args)->None
     cmd_start(args)->None
-    cmd_open(args)->None
-    cmd_stop(args)->None
-    cmd_delete(args)->None
-    cmd_list(args)->None
   src/clonebox/detector.py:
     i: os,pwd,subprocess,psutil,dataclasses.{dataclass,field},pathlib.Path
     e: DetectedService,DetectedApplication,DetectedPath,SystemSnapshot,SystemDetector
@@ -98,13 +109,18 @@ D:
     DetectedPath:   # A detected important path.
     SystemSnapshot: running_services(0),running_apps(0)  # Complete snapshot of detected system...
     SystemDetector: __init__(0),detect_app_data_dirs(1),detect_all(0),detect_services(0),detect_applications(0)  # Detects running services, application...
+  src/clonebox/container.py:
+    i: json,shutil,subprocess,tempfile,clonebox.models.ContainerConfig,pathlib.Path,typing.{Any,Dict,List,Optional}
+    e: ContainerCloner
+    ContainerCloner: __init__(1),_resolve_engine(1),detect_engine(0),_run(4),build_dockerfile(1)
   src/clonebox/cloner.py:
     i: os,subprocess,tempfile,uuid,dataclasses.{dataclass,field},pathlib.Path,typing.Optional,urllib.request,xml.etree.ElementTree
     e: VMConfig,SelectiveVMCloner
     VMConfig: to_dict(0)  # Configuration for the VM to create.
     SelectiveVMCloner: __init__(2),_connect(0),get_images_dir(0),_get_downloads_dir(0),_ensure_default_base_image(1)  # Creates VMs with only selected applic...
   src/clonebox/models.py:
-    i: pathlib.Path,pydantic.{BaseModel,Field,field_validator,model_validator},typing.{Any,Dict,List,Optional}
-    e: VMSettings,CloneBoxConfig
+    i: pathlib.Path,pydantic.{BaseModel,Field,field_validator},typing.{Any,Dict,List,Literal,Optional},uuid.uuid4
+    e: VMSettings,CloneBoxConfig,ContainerConfig
     VMSettings: name_must_be_valid(1),network_mode_must_be_valid(1)  # VM-specific settings.
     CloneBoxConfig: paths_must_be_absolute(1),handle_nested_vm(1),save(1),load(1),to_vm_config(0)  # Complete CloneBox configuration with...
+    ContainerConfig: name_must_be_valid(1),extra_mounts_must_be_absolute(1),ports_must_be_valid(1),mounts(0),to_docker_run_cmd(0)
