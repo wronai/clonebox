@@ -7,7 +7,7 @@ name = "clonebox"
 version = "0.1.1"
 description = "Clone your workstation environment to an isolated VM with selective apps, paths and services"
 readme = "README.md"
-license = {text = "MIT"}
+license = {text = "Apache-2.0"}
 requires-python = ">=3.8"
 authors = [
     {name = "CloneBox Team"}
@@ -18,7 +18,7 @@ classifiers = [
     "Environment :: Console",
     "Intended Audience :: Developers",
     "Intended Audience :: System Administrators",
-    "License :: OSI Approved :: MIT License",
+    "License :: OSI Approved :: Apache Software License",
     "Operating System :: POSIX :: Linux",
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.8",

@@ -31,6 +31,7 @@ class VMConfig:
     paths: dict = field(default_factory=dict)
     packages: list = field(default_factory=list)
     services: list = field(default_factory=list)
+    user_session: bool = False  # Use qemu:///session instead of qemu:///system
     
     def to_dict(self) -> dict:
         return {
@@ -46,8 +47,16 @@ class SelectiveVMCloner:
     Uses bind mounts instead of full disk cloning.
     """
     
-    def __init__(self, conn_uri: str = "qemu:///system"):
-        self.conn_uri = conn_uri
+    # Default images directories
+    SYSTEM_IMAGES_DIR = Path("/var/lib/libvirt/images")
+    USER_IMAGES_DIR = Path.home() / ".local/share/libvirt/images"
+    
+    def __init__(self, conn_uri: str = None, user_session: bool = False):
+        self.user_session = user_session
+        if conn_uri:
+            self.conn_uri = conn_uri
+        else:
+            self.conn_uri = "qemu:///session" if user_session else "qemu:///system"
         self.conn = None
         self._connect()
     
@@ -59,17 +68,40 @@ class SelectiveVMCloner:
                 "Also ensure libvirt is installed: sudo apt install libvirt-daemon-system"
             )
         
-        self.conn = libvirt.open(self.conn_uri)
+        try:
+            self.conn = libvirt.open(self.conn_uri)
+        except libvirt.libvirtError as e:
+            raise ConnectionError(
+                f"Cannot connect to {self.conn_uri}\n"
+                f"Error: {e}\n\n"
+                f"Troubleshooting:\n"
+                f"  1. Check if libvirtd is running: sudo systemctl status libvirtd\n"
+                f"  2. Start libvirtd: sudo systemctl start libvirtd\n"
+                f"  3. Add user to libvirt group: sudo usermod -aG libvirt $USER\n"
+                f"  4. Re-login or run: newgrp libvirt\n"
+                f"  5. For user session (no sudo): use --user flag"
+            )
+        
         if self.conn is None:
             raise ConnectionError(f"Cannot connect to {self.conn_uri}")
     
+    def get_images_dir(self) -> Path:
+        """Get the appropriate images directory based on session type."""
+        if self.user_session:
+            return self.USER_IMAGES_DIR
+        return self.SYSTEM_IMAGES_DIR
+    
     def check_prerequisites(self) -> dict:
         """Check system prerequisites for VM creation."""
+        images_dir = self.get_images_dir()
+        
         checks = {
             "libvirt_connected": False,
             "kvm_available": False,
             "default_network": False,
             "images_dir_writable": False,
+            "images_dir": str(images_dir),
+            "session_type": "user" if self.user_session else "system",
         }
         
         # Check libvirt connection
@@ -77,18 +109,45 @@ class SelectiveVMCloner:
             checks["libvirt_connected"] = True
         
         # Check KVM
-        checks["kvm_available"] = Path("/dev/kvm").exists()
+        kvm_path = Path("/dev/kvm")
+        checks["kvm_available"] = kvm_path.exists()
+        if not checks["kvm_available"]:
+            checks["kvm_error"] = "KVM not available. Enable virtualization in BIOS."
+        elif not os.access(kvm_path, os.R_OK | os.W_OK):
+            checks["kvm_error"] = f"No access to /dev/kvm. Add user to kvm group: sudo usermod -aG kvm $USER"
         
         # Check default network
         try:
             net = self.conn.networkLookupByName("default")
             checks["default_network"] = net.isActive() == 1
         except libvirt.libvirtError:
-            pass
+            checks["network_error"] = (
+                "Default network not found or inactive.\n"
+                "  Start it with: sudo virsh net-start default\n"
+                "  Or create it: sudo virsh net-define /usr/share/libvirt/networks/default.xml"
+            )
         
         # Check images directory
-        images_dir = Path("/var/lib/libvirt/images")
-        checks["images_dir_writable"] = images_dir.exists() and os.access(images_dir, os.W_OK)
+        if images_dir.exists():
+            checks["images_dir_writable"] = os.access(images_dir, os.W_OK)
+            if not checks["images_dir_writable"]:
+                checks["images_dir_error"] = (
+                    f"Cannot write to {images_dir}\n"
+                    f"  Option 1: Run with sudo\n"
+                    f"  Option 2: Use --user flag for user session (no root needed)\n"
+                    f"  Option 3: Fix permissions: sudo chown -R $USER:libvirt {images_dir}"
+                )
+        else:
+            # Try to create it
+            try:
+                images_dir.mkdir(parents=True, exist_ok=True)
+                checks["images_dir_writable"] = True
+            except PermissionError:
+                checks["images_dir_writable"] = False
+                checks["images_dir_error"] = (
+                    f"Cannot create {images_dir}\n"
+                    f"  Use --user flag for user session (stores in ~/.local/share/libvirt/images/)"
+                )
         
         return checks
     
@@ -109,8 +168,25 @@ class SelectiveVMCloner:
             else:
                 print(msg)
         
-        vm_dir = Path(f"/var/lib/libvirt/images/{config.name}")
-        vm_dir.mkdir(parents=True, exist_ok=True)
+        # Determine images directory
+        images_dir = self.get_images_dir()
+        vm_dir = images_dir / config.name
+        
+        try:
+            vm_dir.mkdir(parents=True, exist_ok=True)
+        except PermissionError as e:
+            raise PermissionError(
+                f"Cannot create VM directory: {vm_dir}\n\n"
+                f"🔧 Solutions:\n"
+                f"  1. Use --user flag to run in user session (recommended):\n"
+                f"     clonebox clone . --user\n\n"
+                f"  2. Run with sudo (not recommended):\n"
+                f"     sudo clonebox clone .\n\n"
+                f"  3. Fix directory permissions:\n"
+                f"     sudo mkdir -p {images_dir}\n"
+                f"     sudo chown -R $USER:libvirt {images_dir}\n\n"
+                f"Original error: {e}"
+            ) from e
         
         # Create root disk
         root_disk = vm_dir / "root.qcow2"
