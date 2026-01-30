@@ -23,6 +23,7 @@ CloneBox lets you create isolated virtual machines with only the applications, d
 - ☁️ **Cloud-init** - Automatic package installation and service setup
 - 🖥️ **GUI support** - SPICE graphics with virt-viewer integration
 - ⚡ **Fast creation** - No full disk cloning, VMs are ready in seconds
+- 📥 **Auto-download** - Automatically downloads and caches Ubuntu cloud images (stored in ~/Downloads)
 
 ## Installation
 
@@ -100,6 +101,8 @@ Simply run `clonebox` to start the interactive wizard:
 
 ```bash
 clonebox
+clonebox clone . --user --run --replace --base-image ~/ubuntu-22.04-cloud.qcow2
+
 ```
 
 The wizard will:
@@ -220,6 +223,7 @@ The fastest way to clone your current working directory:
 
 ```bash
 # Clone current directory - generates .clonebox.yaml and asks to create VM
+# Base OS image is automatically downloaded to ~/Downloads on first run
 clonebox clone .
 
 # Clone specific path
@@ -230,6 +234,15 @@ clonebox clone ~/projects/my-app --name my-dev-vm --run
 
 # Clone and edit config before creating
 clonebox clone . --edit
+
+# Replace existing VM (stops, deletes, and recreates)
+clonebox clone . --replace
+
+# Use custom base image instead of auto-download
+clonebox clone . --base-image ~/ubuntu-22.04-cloud.qcow2
+
+# User session mode (no root required)
+clonebox clone . --user
 ```
 
 Later, start the VM from any directory with `.clonebox.yaml`:
@@ -250,6 +263,42 @@ clonebox detect --yaml --dedupe
 
 # Save to file
 clonebox detect --yaml --dedupe -o my-config.yaml
+```
+
+### Base Images
+
+CloneBox automatically downloads a bootable Ubuntu cloud image on first run:
+
+```bash
+# Auto-download (default) - downloads Ubuntu 22.04 to ~/Downloads on first run
+clonebox clone .
+
+# Use custom base image
+clonebox clone . --base-image ~/my-custom-image.qcow2
+
+# Manual download (optional - clonebox does this automatically)
+wget -O ~/Downloads/clonebox-ubuntu-jammy-amd64.qcow2 \
+  https://cloud-images.ubuntu.com/jammy/current/jammy-server-cloudimg-amd64.img
+```
+
+**Base image behavior:**
+- If no `--base-image` is specified, Ubuntu 22.04 cloud image is auto-downloaded
+- Downloaded images are cached in `~/Downloads/clonebox-ubuntu-jammy-amd64.qcow2`
+- Subsequent VMs reuse the cached image (no re-download)
+- Each VM gets its own disk using the base image as a backing file (copy-on-write)
+
+### VM Login Credentials
+
+All VMs are created with a default user configured via cloud-init:
+
+**Username:** `ubuntu`  
+**Password:** `ubuntu`
+
+The user has passwordless sudo access. You can change the password after first login:
+
+```bash
+# Inside the VM
+passwd
 ```
 
 ### User Session & Networking
@@ -283,7 +332,9 @@ clonebox clone . --network auto
 | `clonebox clone <path>` | Generate `.clonebox.yaml` from path + running processes |
 | `clonebox clone . --run` | Clone and immediately start VM |
 | `clonebox clone . --edit` | Clone, edit config, then create |
+| `clonebox clone . --replace` | Replace existing VM (stop, delete, recreate) |
 | `clonebox clone . --user` | Clone in user session (no root) |
+| `clonebox clone . --base-image <path>` | Use custom base image |
 | `clonebox clone . --network user` | Use user-mode networking (slirp) |
 | `clonebox clone . --network auto` | Auto-detect network mode (default) |
 | `clonebox start .` | Start VM from `.clonebox.yaml` in current dir |
@@ -338,18 +389,21 @@ sudo usermod -aG kvm $USER
 
 ### VM Already Exists
 
-If you get "domain already exists" error:
+If you get "VM already exists" error:
 
 ```bash
-# List VMs
-clonebox list
+# Option 1: Use --replace flag to automatically replace it
+clonebox clone . --replace
 
-# Stop and delete the existing VM
+# Option 2: Delete manually first
 clonebox delete <vm-name>
 
-# Or use virsh directly
+# Option 3: Use virsh directly
 virsh --connect qemu:///session destroy <vm-name>
 virsh --connect qemu:///session undefine <vm-name>
+
+# Option 4: Start the existing VM instead
+clonebox start <vm-name>
 ```
 
 ### virt-viewer not found

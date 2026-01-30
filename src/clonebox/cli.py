@@ -6,6 +6,7 @@ CloneBox CLI - Interactive command-line interface for creating VMs.
 import argparse
 import json
 import os
+import re
 import sys
 from typing import Optional
 from datetime import datetime
@@ -488,6 +489,40 @@ def cmd_list(args):
 
 
 CLONEBOX_CONFIG_FILE = ".clonebox.yaml"
+CLONEBOX_ENV_FILE = ".env"
+
+
+def load_env_file(env_path: Path) -> dict:
+    """Load environment variables from .env file."""
+    env_vars = {}
+    if not env_path.exists():
+        return env_vars
+    
+    with open(env_path) as f:
+        for line in f:
+            line = line.strip()
+            if not line or line.startswith('#'):
+                continue
+            if '=' in line:
+                key, value = line.split('=', 1)
+                env_vars[key.strip()] = value.strip()
+    
+    return env_vars
+
+
+def expand_env_vars(value, env_vars: dict):
+    """Expand environment variables in string values like ${VAR_NAME}."""
+    if isinstance(value, str):
+        # Replace ${VAR_NAME} with value from env_vars or os.environ
+        def replacer(match):
+            var_name = match.group(1)
+            return env_vars.get(var_name, os.environ.get(var_name, match.group(0)))
+        return re.sub(r'\$\{([^}]+)\}', replacer, value)
+    elif isinstance(value, dict):
+        return {k: expand_env_vars(v, env_vars) for k, v in value.items()}
+    elif isinstance(value, list):
+        return [expand_env_vars(item, env_vars) for item in value]
+    return value
 
 
 def deduplicate_list(items: list, key=None) -> list:
@@ -579,6 +614,8 @@ def generate_clonebox_yaml(
             "gui": True,
             "base_image": base_image,
             "network_mode": network_mode,
+            "username": "ubuntu",
+            "password": "${VM_PASSWORD}",
         },
         "services": services,
         "packages": [
@@ -607,14 +644,25 @@ def generate_clonebox_yaml(
 
 
 def load_clonebox_config(path: Path) -> dict:
-    """Load .clonebox.yaml config file."""
+    """Load .clonebox.yaml config file and expand environment variables from .env."""
     config_file = path / CLONEBOX_CONFIG_FILE if path.is_dir() else path
 
     if not config_file.exists():
         raise FileNotFoundError(f"Config file not found: {config_file}")
 
+    # Load .env file from same directory
+    config_dir = config_file.parent
+    env_file = config_dir / CLONEBOX_ENV_FILE
+    env_vars = load_env_file(env_file)
+
+    # Load YAML config
     with open(config_file) as f:
-        return yaml.safe_load(f)
+        config = yaml.safe_load(f)
+    
+    # Expand environment variables in config
+    config = expand_env_vars(config, env_vars)
+    
+    return config
 
 
 def create_vm_from_config(
@@ -635,6 +683,8 @@ def create_vm_from_config(
         services=config.get("services", []),
         user_session=user_session,
         network_mode=config["vm"].get("network_mode", "auto"),
+        username=config["vm"].get("username", "ubuntu"),
+        password=config["vm"].get("password", "ubuntu"),
     )
 
     cloner = SelectiveVMCloner(user_session=user_session)

@@ -5,6 +5,8 @@ SelectiveVMCloner - Creates isolated VMs with only selected apps/paths/services.
 
 import os
 import subprocess
+import tempfile
+import urllib.request
 import uuid
 import xml.etree.ElementTree as ET
 from dataclasses import dataclass, field
@@ -32,6 +34,8 @@ class VMConfig:
     services: list = field(default_factory=list)
     user_session: bool = False  # Use qemu:///session instead of qemu:///system
     network_mode: str = "auto"  # auto|default|user
+    username: str = "ubuntu"  # VM default username
+    password: str = "ubuntu"  # VM default password
 
     def to_dict(self) -> dict:
         return {
@@ -50,6 +54,11 @@ class SelectiveVMCloner:
     # Default images directories
     SYSTEM_IMAGES_DIR = Path("/var/lib/libvirt/images")
     USER_IMAGES_DIR = Path.home() / ".local/share/libvirt/images"
+
+    DEFAULT_BASE_IMAGE_URL = (
+        "https://cloud-images.ubuntu.com/jammy/current/jammy-server-cloudimg-amd64.img"
+    )
+    DEFAULT_BASE_IMAGE_FILENAME = "clonebox-ubuntu-jammy-amd64.qcow2"
 
     def __init__(self, conn_uri: str = None, user_session: bool = False):
         self.user_session = user_session
@@ -90,6 +99,57 @@ class SelectiveVMCloner:
         if self.user_session:
             return self.USER_IMAGES_DIR
         return self.SYSTEM_IMAGES_DIR
+
+    def _get_downloads_dir(self) -> Path:
+        return Path.home() / "Downloads"
+
+    def _ensure_default_base_image(self, console=None) -> Path:
+        def log(msg):
+            if console:
+                console.print(msg)
+            else:
+                print(msg)
+
+        downloads_dir = self._get_downloads_dir()
+        downloads_dir.mkdir(parents=True, exist_ok=True)
+        cached_path = downloads_dir / self.DEFAULT_BASE_IMAGE_FILENAME
+
+        if cached_path.exists() and cached_path.stat().st_size > 0:
+            return cached_path
+
+        log(
+            "[cyan]⬇️  Downloading base image (first run only). This will be cached in ~/Downloads...[/]"
+        )
+
+        try:
+            with tempfile.NamedTemporaryFile(
+                prefix=f"{self.DEFAULT_BASE_IMAGE_FILENAME}.",
+                dir=str(downloads_dir),
+                delete=False,
+            ) as tmp:
+                tmp_path = Path(tmp.name)
+
+            try:
+                urllib.request.urlretrieve(self.DEFAULT_BASE_IMAGE_URL, tmp_path)
+                tmp_path.replace(cached_path)
+            finally:
+                if tmp_path.exists() and tmp_path != cached_path:
+                    try:
+                        tmp_path.unlink()
+                    except Exception:
+                        pass
+        except Exception as e:
+            raise RuntimeError(
+                "Failed to download a default base image.\n\n"
+                "🔧 Solutions:\n"
+                "  1. Provide a base image explicitly:\n"
+                "     clonebox clone . --base-image /path/to/image.qcow2\n"
+                "  2. Download it manually and reuse it:\n"
+                f"     wget -O {cached_path} {self.DEFAULT_BASE_IMAGE_URL}\n\n"
+                f"Original error: {e}"
+            ) from e
+
+        return cached_path
 
     def _default_network_active(self) -> bool:
         """Check if libvirt default network is active."""
@@ -247,6 +307,9 @@ class SelectiveVMCloner:
 
         # Create root disk
         root_disk = vm_dir / "root.qcow2"
+
+        if not config.base_image:
+            config.base_image = str(self._ensure_default_base_image(console=console))
 
         if config.base_image and Path(config.base_image).exists():
             # Use backing file for faster creation
@@ -432,25 +495,57 @@ class SelectiveVMCloner:
                 )
 
         # User-data
+        # Add desktop environment if GUI is enabled
+        base_packages = []
+        if config.gui:
+            base_packages.extend([
+                "ubuntu-desktop-minimal",
+                "gdm3",
+                "firefox",
+                "gnome-terminal",
+            ])
+        
+        all_packages = base_packages + list(config.packages)
         packages_yaml = (
-            "\n".join(f"  - {pkg}" for pkg in config.packages) if config.packages else ""
+            "\n".join(f"  - {pkg}" for pkg in all_packages) if all_packages else ""
         )
-        services_enable = (
-            "\n".join(f"  - systemctl enable --now {svc}" for svc in config.services)
-            if config.services
-            else ""
-        )
+        
+        # Enable services
+        services_enable = []
+        if config.gui:
+            services_enable.append("  - systemctl set-default graphical.target")
+            services_enable.append("  - systemctl start gdm3")
+        
+        for svc in config.services:
+            services_enable.append(f"  - systemctl enable --now {svc} || true")
+        
+        services_yaml = "\n".join(services_enable) if services_enable else ""
         mounts_yaml = "\n".join(mount_commands) if mount_commands else ""
 
         user_data = f"""#cloud-config
 hostname: {config.name}
 manage_etc_hosts: true
 
+# Default user
+users:
+  - name: {config.username}
+    sudo: ALL=(ALL) NOPASSWD:ALL
+    shell: /bin/bash
+    lock_passwd: false
+    groups: sudo,adm,dialout,cdrom,floppy,audio,dip,video,plugdev,netdev
+
+# Allow password authentication
+ssh_pwauth: true
+chpasswd:
+  expire: false
+  list:
+    - {config.username}:{config.password}
+
 packages:
 {packages_yaml}
 
 runcmd:
-{services_enable}
+{services_yaml}
 {mounts_yaml}
   - echo "CloneBox VM ready!" > /var/log/clonebox-ready
 
