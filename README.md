@@ -1,4 +1,10 @@
 # CloneBox 📦
+
+[![CI](https://github.com/wronai/clonebox/workflows/CI/badge.svg)](https://github.com/wronai/clonebox/actions)
+[![PyPI version](https://badge.fury.io/py/clonebox.svg)](https://pypi.org/project/clonebox/)
+[![Python 3.8+](https://img.shields.io/badge/python-3.8+-blue.svg)](https://www.python.org/downloads/)
+[![License](https://img.shields.io/badge/license-Apache%202.0-green.svg)](LICENSE)
+
 ![img.png](img.png)
 
 ```commandline
@@ -12,7 +18,8 @@
 ║      Clone your workstation to an isolated VM         ║
 ╚═══════════════════════════════════════════════════════╝
 ```
-**Clone your workstation environment to an isolated VM with selective apps, paths and services.**
+
+> **Clone your workstation environment to an isolated VM in 60 seconds using bind mounts instead of disk cloning.**
 
 CloneBox lets you create isolated virtual machines with only the applications, directories and services you need - using bind mounts instead of full disk cloning. Perfect for development, testing, or creating reproducible environments.
 
