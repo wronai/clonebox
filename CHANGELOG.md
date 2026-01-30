@@ -1,3 +1,30 @@
+## [0.1.3] - 2026-01-30
+
+### Summary
+
+fix(goal): CLI interface improvements
+
+### Core
+
+- update src/clonebox/cli.py
+- update src/clonebox/cloner.py
+
+### Docs
+
+- docs: update README
+
+### Test
+
+- update tests/test_cloner.py
+
+### Other
+
+- scripts: update fix-network.sh
+- scripts: update setup.sh
+- update src/clonebox/__pycache__/cli.cpython-313.pyc
+- update src/clonebox/__pycache__/cloner.cpython-313.pyc
+
+
 ## [0.1.2] - 2026-01-30
 
 ### Summary

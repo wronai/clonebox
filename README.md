@@ -26,7 +26,28 @@ CloneBox lets you create isolated virtual machines with only the applications, d
 
 ## Installation
 
-### Prerequisites
+### Quick Setup (Recommended)
+
+Run the setup script to automatically install dependencies and configure the environment:
+
+```bash
+# Clone the repository
+git clone https://github.com/wronai/clonebox.git
+cd clonebox
+
+# Run the setup script
+./setup.sh
+```
+
+The setup script will:
+- Install all required packages (QEMU, libvirt, Python, etc.)
+- Add your user to the necessary groups
+- Configure libvirt networks
+- Install clonebox in development mode
+
+### Manual Installation
+
+#### Prerequisites
 
 ```bash
 # Install libvirt and QEMU/KVM
@@ -43,7 +64,7 @@ newgrp libvirt
 sudo apt install genisoimage
 ```
 
-### Install CloneBox
+#### Install CloneBox
 
 ```bash
 # From source
@@ -256,6 +277,63 @@ clonebox detect --yaml --dedupe -o my-config.yaml
 - libvirt daemon running
 - Python 3.8+
 - User in `libvirt` group
+
+## Troubleshooting
+
+### Network Issues
+
+If you encounter "Network not found" or "network 'default' is not active" errors:
+
+```bash
+# Run the network fix script
+./fix-network.sh
+
+# Or manually fix:
+virsh --connect qemu:///session net-destroy default 2>/dev/null
+virsh --connect qemu:///session net-undefine default 2>/dev/null
+virsh --connect qemu:///session net-define /tmp/default-network.xml
+virsh --connect qemu:///session net-start default
+```
+
+### Permission Issues
+
+If you get permission errors:
+
+```bash
+# Ensure user is in libvirt and kvm groups
+sudo usermod -aG libvirt $USER
+sudo usermod -aG kvm $USER
+
+# Log out and log back in for groups to take effect
+```
+
+### VM Already Exists
+
+If you get "domain already exists" error:
+
+```bash
+# List VMs
+clonebox list
+
+# Stop and delete the existing VM
+clonebox delete <vm-name>
+
+# Or use virsh directly
+virsh --connect qemu:///session destroy <vm-name>
+virsh --connect qemu:///session undefine <vm-name>
+```
+
+### virt-viewer not found
+
+If GUI doesn't open:
+
+```bash
+# Install virt-viewer
+sudo apt install virt-viewer
+
+# Then connect manually
+virt-viewer --connect qemu:///session <vm-name>
+```
 
 ## License
 

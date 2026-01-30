@@ -104,9 +104,16 @@ class TestSelectiveVMClonerInit:
     
     @patch('clonebox.cloner.libvirt')
     def test_init_connection_failed(self, mock_libvirt):
-        import libvirt as real_libvirt
-        mock_libvirt.libvirtError = real_libvirt.libvirtError
-        mock_libvirt.open.side_effect = real_libvirt.libvirtError("Connection refused")
+        try:
+            import libvirt as real_libvirt
+            mock_libvirt.libvirtError = real_libvirt.libvirtError
+            mock_libvirt.open.side_effect = real_libvirt.libvirtError("Connection refused")
+        except ImportError:
+            # If libvirt is not installed, create a mock exception
+            class MockLibvirtError(Exception):
+                pass
+            mock_libvirt.libvirtError = MockLibvirtError
+            mock_libvirt.open.side_effect = MockLibvirtError("Connection refused")
         
         with pytest.raises(ConnectionError) as exc_info:
             SelectiveVMCloner()

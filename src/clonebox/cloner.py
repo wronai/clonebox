@@ -32,6 +32,7 @@ class VMConfig:
     packages: list = field(default_factory=list)
     services: list = field(default_factory=list)
     user_session: bool = False  # Use qemu:///session instead of qemu:///system
+    network_mode: str = "auto"  # auto|default|user
     
     def to_dict(self) -> dict:
         return {
@@ -91,6 +92,25 @@ class SelectiveVMCloner:
             return self.USER_IMAGES_DIR
         return self.SYSTEM_IMAGES_DIR
     
+    def _default_network_active(self) -> bool:
+        """Check if libvirt default network is active."""
+        try:
+            net = self.conn.networkLookupByName("default")
+            return net.isActive() == 1
+        except libvirt.libvirtError:
+            return False
+    
+    def resolve_network_mode(self, config: VMConfig) -> str:
+        """Resolve network mode based on config and session type."""
+        mode = (config.network_mode or "auto").lower()
+        if mode == "auto":
+            if self.user_session and not self._default_network_active():
+                return "user"
+            return "default"
+        if mode in {"default", "user"}:
+            return mode
+        return "default"
+    
     def check_prerequisites(self) -> dict:
         """Check system prerequisites for VM creation."""
         images_dir = self.get_images_dir()
@@ -123,8 +143,11 @@ class SelectiveVMCloner:
         except libvirt.libvirtError:
             checks["network_error"] = (
                 "Default network not found or inactive.\n"
-                "  Start it with: sudo virsh net-start default\n"
-                "  Or create it: sudo virsh net-define /usr/share/libvirt/networks/default.xml"
+                "  For user session, CloneBox can use user-mode networking (slirp) automatically.\n"
+                "  Or create a user network:\n"
+                "    virsh --connect qemu:///session net-define /tmp/default-network.xml\n"
+                "    virsh --connect qemu:///session net-start default\n"
+                "  Or use system session: clonebox clone . (without --user)\n"
             )
         
         # Check images directory
@@ -215,6 +238,13 @@ class SelectiveVMCloner:
             cloudinit_iso = self._create_cloudinit_iso(vm_dir, config)
             log(f"[cyan]☁️  Created cloud-init ISO with {len(config.packages)} packages[/]")
         
+        # Resolve network mode
+        network_mode = self.resolve_network_mode(config)
+        if network_mode == "user":
+            log("[yellow]⚠️  Using user-mode networking (slirp) because default libvirt network is unavailable[/]")
+        else:
+            log(f"[dim]Network mode: {network_mode}[/]")
+        
         # Generate VM XML
         vm_xml = self._generate_vm_xml(config, root_disk, cloudinit_iso)
         
@@ -288,9 +318,14 @@ class SelectiveVMCloner:
                 ET.SubElement(fs, "target", dir=tag)
         
         # Network interface
-        iface = ET.SubElement(devices, "interface", type="network")
-        ET.SubElement(iface, "source", network="default")
-        ET.SubElement(iface, "model", type="virtio")
+        network_mode = self.resolve_network_mode(config)
+        if network_mode == "user":
+            iface = ET.SubElement(devices, "interface", type="user")
+            ET.SubElement(iface, "model", type="virtio")
+        else:
+            iface = ET.SubElement(devices, "interface", type="network")
+            ET.SubElement(iface, "source", network="default")
+            ET.SubElement(iface, "model", type="virtio")
         
         # Serial console
         serial = ET.SubElement(devices, "serial", type="pty")

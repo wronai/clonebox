@@ -492,7 +492,7 @@ def deduplicate_list(items: list, key=None) -> list:
 
 
 def generate_clonebox_yaml(snapshot, detector, deduplicate: bool = True, 
-                           target_path: str = None, vm_name: str = None) -> str:
+                           target_path: str = None, vm_name: str = None, network_mode: str = "auto") -> str:
     """Generate YAML config from system snapshot."""
     sys_info = detector.get_system_info()
     
@@ -559,6 +559,7 @@ def generate_clonebox_yaml(snapshot, detector, deduplicate: bool = True,
             "vcpus": vcpus,
             "gui": True,
             "base_image": None,
+            "network_mode": network_mode,
         },
         "services": services,
         "packages": [
@@ -605,6 +606,7 @@ def create_vm_from_config(config: dict, start: bool = False, user_session: bool 
         packages=config.get("packages", []),
         services=config.get("services", []),
         user_session=user_session,
+        network_mode=config["vm"].get("network_mode", "auto"),
     )
     
     cloner = SelectiveVMCloner(user_session=user_session)
@@ -655,7 +657,8 @@ def cmd_clone(args):
         snapshot, detector, 
         deduplicate=args.dedupe,
         target_path=str(target_path),
-        vm_name=vm_name
+        vm_name=vm_name,
+        network_mode=args.network
     )
     
     # Save config file
@@ -863,6 +866,8 @@ def main():
     clone_parser.add_argument("--dedupe", action="store_true", default=True, help="Remove duplicate entries")
     clone_parser.add_argument("--user", "-u", action="store_true", 
                              help="Use user session (qemu:///session) - no root required, stores in ~/.local/share/libvirt/")
+    clone_parser.add_argument("--network", choices=["auto", "default", "user"], default="auto",
+                             help="Network mode: auto (default), default (libvirt network), user (slirp)")
     clone_parser.set_defaults(func=cmd_clone)
     
     args = parser.parse_args()
