@@ -603,6 +603,23 @@ def generate_clonebox_yaml(
     ram_mb = min(4096, int(sys_info["memory_available_gb"] * 1024 * 0.5))
     vcpus = max(2, sys_info["cpu_count"] // 2)
 
+    # Auto-detect packages from running applications and services
+    suggested_app_packages = detector.suggest_packages_for_apps(snapshot.applications)
+    suggested_service_packages = detector.suggest_packages_for_services(snapshot.running_services)
+    
+    # Combine with base packages
+    base_packages = [
+        "build-essential",
+        "git",
+        "curl",
+        "vim",
+    ]
+    
+    # Merge all packages and deduplicate
+    all_packages = base_packages + suggested_app_packages + suggested_service_packages
+    if deduplicate:
+        all_packages = deduplicate_list(all_packages)
+
     # Build config
     config = {
         "version": "1",
@@ -618,14 +635,7 @@ def generate_clonebox_yaml(
             "password": "${VM_PASSWORD}",
         },
         "services": services,
-        "packages": [
-            "build-essential",
-            "git",
-            "curl",
-            "vim",
-            "python3",
-            "python3-pip",
-        ],
+        "packages": all_packages,
         "paths": paths_mapping,
         "detected": {
             "running_apps": [
@@ -663,6 +673,79 @@ def load_clonebox_config(path: Path) -> dict:
     config = expand_env_vars(config, env_vars)
     
     return config
+
+
+def monitor_cloud_init_status(vm_name: str, user_session: bool = False, timeout: int = 600):
+    """Monitor cloud-init status in VM and show progress."""
+    import subprocess
+    import time
+    
+    conn_uri = "qemu:///session" if user_session else "qemu:///system"
+    start_time = time.time()
+    restart_detected = False
+    
+    with Progress(
+        SpinnerColumn(),
+        TextColumn("[progress.description]{task.description}"),
+        console=console,
+    ) as progress:
+        task = progress.add_task("[cyan]Starting VM and initializing...", total=None)
+        
+        while time.time() - start_time < timeout:
+            try:
+                elapsed = int(time.time() - start_time)
+                minutes = elapsed // 60
+                seconds = elapsed % 60
+                
+                # Check VM state
+                result = subprocess.run(
+                    ["virsh", "--connect", conn_uri, "domstate", vm_name],
+                    capture_output=True,
+                    text=True,
+                    timeout=5
+                )
+                
+                vm_state = result.stdout.strip().lower()
+                
+                if "shut off" in vm_state or "shutting down" in vm_state:
+                    # VM is restarting
+                    if not restart_detected:
+                        restart_detected = True
+                        progress.update(task, description="[yellow]⟳ VM restarting after package installation...")
+                    time.sleep(3)
+                    continue
+                
+                if restart_detected and "running" in vm_state:
+                    # VM restarted successfully - GUI should be ready
+                    progress.update(task, description=f"[green]✓ GUI ready! Total time: {minutes}m {seconds}s")
+                    break
+                
+                # Estimate remaining time
+                if elapsed < 60:
+                    remaining = "~9-10 minutes"
+                elif elapsed < 180:
+                    remaining = f"~{8 - minutes} minutes"
+                elif elapsed < 300:
+                    remaining = f"~{6 - minutes} minutes"
+                else:
+                    remaining = "finishing soon"
+                
+                if restart_detected:
+                    progress.update(task, description=f"[cyan]Starting GUI... ({minutes}m {seconds}s, {remaining})")
+                else:
+                    progress.update(task, description=f"[cyan]Installing desktop packages... ({minutes}m {seconds}s, {remaining})")
+                
+            except (subprocess.TimeoutExpired, Exception) as e:
+                elapsed = int(time.time() - start_time)
+                minutes = elapsed // 60
+                seconds = elapsed % 60
+                progress.update(task, description=f"[cyan]Configuring VM... ({minutes}m {seconds}s)")
+            
+            time.sleep(3)
+        
+        # Final status
+        if time.time() - start_time >= timeout:
+            progress.update(task, description="[yellow]⚠ Monitoring timeout - VM continues in background")
 
 
 def create_vm_from_config(
@@ -704,6 +787,16 @@ def create_vm_from_config(
 
     if start:
         cloner.start_vm(vm_config.name, open_viewer=vm_config.gui, console=console)
+        
+        # Monitor cloud-init progress if GUI is enabled
+        if vm_config.gui:
+            console.print("\n[bold cyan]📊 Monitoring setup progress...[/]")
+            try:
+                monitor_cloud_init_status(vm_config.name, user_session=user_session)
+            except KeyboardInterrupt:
+                console.print("\n[yellow]Monitoring stopped. VM continues setup in background.[/]")
+            except Exception as e:
+                console.print(f"\n[dim]Note: Could not monitor status ({e}). VM continues setup in background.[/]")
 
     return vm_uuid
 
@@ -787,6 +880,17 @@ def cmd_clone(args):
             )
             console.print(f"\n[bold green]🎉 VM '{config['vm']['name']}' is running![/]")
             console.print(f"[dim]UUID: {vm_uuid}[/]")
+
+            # Show GUI startup info if GUI is enabled
+            if config.get("vm", {}).get("gui", False):
+                username = config['vm'].get('username', 'ubuntu')
+                password = config['vm'].get('password', 'ubuntu')
+                console.print("\n[bold yellow]⏰ GUI Setup Process:[/]")
+                console.print("  [yellow]•[/] Installing desktop environment (~5-10 minutes)")
+                console.print("  [yellow]•[/] Automatic restart after installation")
+                console.print("  [yellow]•[/] GUI login screen will appear")
+                console.print(f"  [yellow]•[/] Login: [cyan]{username}[/] / [cyan]{'*' * len(password)}[/] (from .env)")
+                console.print("\n[dim]💡 Progress will be monitored automatically below[/]")
 
             # Show mount instructions
             if config.get("paths"):

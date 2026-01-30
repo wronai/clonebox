@@ -500,9 +500,7 @@ class SelectiveVMCloner:
         if config.gui:
             base_packages.extend([
                 "ubuntu-desktop-minimal",
-                "gdm3",
                 "firefox",
-                "gnome-terminal",
             ])
         
         all_packages = base_packages + list(config.packages)
@@ -510,17 +508,34 @@ class SelectiveVMCloner:
             "\n".join(f"  - {pkg}" for pkg in all_packages) if all_packages else ""
         )
         
-        # Enable services
-        services_enable = []
-        if config.gui:
-            services_enable.append("  - systemctl set-default graphical.target")
-            services_enable.append("  - systemctl start gdm3")
+        # Build runcmd - services and mounts
+        runcmd_lines = []
         
+        # Add service enablement
         for svc in config.services:
-            services_enable.append(f"  - systemctl enable --now {svc} || true")
+            runcmd_lines.append(f"  - systemctl enable --now {svc} || true")
         
-        services_yaml = "\n".join(services_enable) if services_enable else ""
-        mounts_yaml = "\n".join(mount_commands) if mount_commands else ""
+        # Add mounts
+        for cmd in mount_commands:
+            runcmd_lines.append(cmd)
+        
+        # Add GUI setup if enabled - runs AFTER package installation completes
+        if config.gui:
+            runcmd_lines.extend([
+                "  - systemctl set-default graphical.target",
+                "  - systemctl enable gdm3 || systemctl enable gdm || true",
+            ])
+        
+        runcmd_lines.append("  - echo 'CloneBox VM ready!' > /var/log/clonebox-ready")
+        
+        # Add reboot command at the end if GUI is enabled
+        if config.gui:
+            runcmd_lines.append("  - shutdown -r +1 'Rebooting to start GUI' || reboot")
+        
+        runcmd_yaml = "\n".join(runcmd_lines) if runcmd_lines else ""
+
+        # Remove power_state - using shutdown -r instead
+        power_state_yaml = ""
 
         user_data = f"""#cloud-config
 hostname: {config.name}
@@ -540,13 +555,18 @@ ssh_pwauth: true
 chpasswd:
   expire: false
 
+# Update package cache and upgrade
+package_update: true
+package_upgrade: false
+
+# Install packages (cloud-init waits for completion before runcmd)
 packages:
 {packages_yaml}
 
+# Run after packages are installed
 runcmd:
-{services_yaml}
-{mounts_yaml}
-  - echo "CloneBox VM ready!" > /var/log/clonebox-ready
+{runcmd_yaml}
+{power_state_yaml}
 
 final_message: "CloneBox VM is ready after $UPTIME seconds"
 """

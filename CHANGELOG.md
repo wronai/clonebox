@@ -1,3 +1,22 @@
+## [0.1.6] - 2026-01-30
+
+### Summary
+
+feat(goal): CLI interface improvements
+
+### Core
+
+- update src/clonebox/cli.py
+- update src/clonebox/cloner.py
+- update src/clonebox/detector.py
+
+### Other
+
+- update src/clonebox/__pycache__/cli.cpython-313.pyc
+- update src/clonebox/__pycache__/cloner.cpython-313.pyc
+- update src/clonebox/__pycache__/detector.cpython-313.pyc
+
+
 ## [0.1.5] - 2026-01-30
 
 ### Summary

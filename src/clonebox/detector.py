@@ -146,6 +146,53 @@ class SystemDetector:
         "screen",
     ]
 
+    # Map process/service names to Ubuntu packages
+    APP_TO_PACKAGE_MAP = {
+        "python": "python3",
+        "python3": "python3",
+        "pip": "python3-pip",
+        "node": "nodejs",
+        "npm": "npm",
+        "yarn": "yarnpkg",
+        "docker": "docker.io",
+        "dockerd": "docker.io",
+        "docker-compose": "docker-compose",
+        "podman": "podman",
+        "nginx": "nginx",
+        "apache2": "apache2",
+        "httpd": "apache2",
+        "postgres": "postgresql",
+        "postgresql": "postgresql",
+        "mysql": "mysql-server",
+        "mysqld": "mysql-server",
+        "mongod": "mongodb",
+        "mongodb": "mongodb",
+        "redis-server": "redis-server",
+        "redis": "redis-server",
+        "vim": "vim",
+        "nvim": "neovim",
+        "emacs": "emacs",
+        "firefox": "firefox",
+        "chromium": "chromium-browser",
+        "jupyter": "jupyter-notebook",
+        "jupyter-lab": "jupyterlab",
+        "gunicorn": "gunicorn",
+        "uvicorn": "uvicorn",
+        "tmux": "tmux",
+        "screen": "screen",
+        "git": "git",
+        "curl": "curl",
+        "wget": "wget",
+        "ssh": "openssh-client",
+        "sshd": "openssh-server",
+        "go": "golang",
+        "cargo": "cargo",
+        "rustc": "rustc",
+        "java": "default-jdk",
+        "gradle": "gradle",
+        "mvn": "maven",
+    }
+
     def __init__(self):
         self.user = pwd.getpwuid(os.getuid()).pw_name
         self.home = Path.home()
@@ -389,6 +436,30 @@ class SystemDetector:
         except:
             pass
         return containers
+
+    def suggest_packages_for_apps(self, applications: list) -> list:
+        """Suggest Ubuntu packages based on detected applications."""
+        packages = set()
+        for app in applications:
+            app_name = app.name.lower()
+            # Check if app name matches any known mapping
+            for key, package in self.APP_TO_PACKAGE_MAP.items():
+                if key in app_name:
+                    packages.add(package)
+                    break
+        return sorted(list(packages))
+
+    def suggest_packages_for_services(self, services: list) -> list:
+        """Suggest Ubuntu packages based on detected services."""
+        packages = set()
+        for service in services:
+            service_name = service.name.lower()
+            # Check if service name matches any known mapping
+            for key, package in self.APP_TO_PACKAGE_MAP.items():
+                if key in service_name:
+                    packages.add(package)
+                    break
+        return sorted(list(packages))
 
     def get_system_info(self) -> dict:
         """Get basic system information."""
