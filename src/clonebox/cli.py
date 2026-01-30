@@ -22,7 +22,10 @@ from rich.table import Table
 
 from clonebox import __version__
 from clonebox.cloner import SelectiveVMCloner, VMConfig
+from clonebox.container import ContainerCloner
 from clonebox.detector import SystemDetector
+from clonebox.models import ContainerConfig
+from clonebox.profiles import merge_with_profile
 
 # Custom questionary style
 custom_style = Style(
@@ -716,7 +719,6 @@ def interactive_mode():
                 console.print("\n[bold]Inside the VM, mount shared folders with:[/]")
                 for idx, (host, guest) in enumerate(paths_mapping.items()):
                     console.print(f"  [cyan]sudo mount -t 9p -o trans=virtio mount{idx} {guest}[/]")
-
     except Exception as e:
         console.print(f"\n[red]❌ Error: {e}[/]")
         raise
@@ -917,15 +919,14 @@ def cmd_delete(args):
         ).ask():
             console.print("[yellow]Cancelled.[/]")
             return
-
-    cloner = SelectiveVMCloner(user_session=getattr(args, "user", False))
-    cloner.delete_vm(name, delete_storage=not args.keep_storage, console=console)
-
-
 def cmd_list(args):
     """List all VMs."""
     cloner = SelectiveVMCloner(user_session=getattr(args, "user", False))
     vms = cloner.list_vms()
+
+    if getattr(args, "json", False):
+        print(json.dumps(vms, indent=2))
+        return
 
     if not vms:
         console.print("[dim]No VMs found.[/]")
@@ -964,10 +965,17 @@ def cmd_container_up(args):
     if getattr(args, "name", None):
         cfg_kwargs["name"] = args.name
 
+    profile_name = getattr(args, "profile", None)
+    if profile_name:
+        merged = merge_with_profile({"container": cfg_kwargs}, profile_name)
+        if isinstance(merged, dict) and isinstance(merged.get("container"), dict):
+            cfg_kwargs = merged["container"]
+
     cfg = ContainerConfig(**cfg_kwargs)
 
     cloner = ContainerCloner(engine=cfg.engine)
-    cloner.up(cfg, detach=getattr(args, "detach", False))
+    detach = getattr(args, "detach", False)
+    cloner.up(cfg, detach=detach, remove=not detach)
 
 
 def cmd_container_ps(args):
@@ -2039,6 +2047,32 @@ def cmd_clone(args):
         base_image=getattr(args, "base_image", None),
     )
 
+    profile_name = getattr(args, "profile", None)
+    if profile_name:
+        merged_config = merge_with_profile(yaml.safe_load(yaml_content), profile_name)
+        if isinstance(merged_config, dict):
+            vm_section = merged_config.get("vm")
+            if isinstance(vm_section, dict):
+                vm_packages = vm_section.pop("packages", None)
+                if isinstance(vm_packages, list):
+                    packages = merged_config.get("packages")
+                    if not isinstance(packages, list):
+                        packages = []
+                    for p in vm_packages:
+                        if p not in packages:
+                            packages.append(p)
+                    merged_config["packages"] = packages
+
+            if "container" in merged_config:
+                merged_config.pop("container", None)
+
+            yaml_content = yaml.dump(
+                merged_config,
+                default_flow_style=False,
+                allow_unicode=True,
+                sort_keys=False,
+            )
+
     # Dry run - show what would be created and exit
     if dry_run:
         config = yaml.safe_load(yaml_content)
@@ -2319,6 +2353,7 @@ def main():
         action="store_true",
         help="Use user session (qemu:///session) - no root required",
     )
+    list_parser.add_argument("--json", action="store_true", help="Output JSON")
     list_parser.set_defaults(func=cmd_list)
 
     # Container command
@@ -2337,6 +2372,10 @@ def main():
     container_up.add_argument("--name", help="Container name")
     container_up.add_argument("--image", default="ubuntu:22.04", help="Container image")
     container_up.add_argument("--detach", action="store_true", help="Run container in background")
+    container_up.add_argument(
+        "--profile",
+        help="Profile name (loads ~/.clonebox.d/<name>.yaml, .clonebox.d/<name>.yaml, or built-in templates)",
+    )
     container_up.add_argument(
         "--mount",
         action="append",
@@ -2418,6 +2457,10 @@ def main():
     clone_parser.add_argument(
         "--base-image",
         help="Path to a bootable qcow2 image to use as a base disk",
+    )
+    clone_parser.add_argument(
+        "--profile",
+        help="Profile name (loads ~/.clonebox.d/<name>.yaml, .clonebox.d/<name>.yaml, or built-in templates)",
     )
     clone_parser.add_argument(
         "--replace",

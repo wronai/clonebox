@@ -1,0 +1,6 @@
+container:
+  image: python:3.11-slim
+  packages: ["pip", "jupyterlab"]
+  ports: ["8888:8888"]
+vm:
+  packages: ["python3-pip", "jupyterlab"]

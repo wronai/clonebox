@@ -1,6 +1,6 @@
-# clonebox | 19f 7598L | python:19
+# clonebox | 20f 7687L | python:20
 # Keys: M=modules, D=details, i=imports, c=classes, f=functions, m=methods
-M[19]:
+M[20]:
   tests/conftest.py,343
   tests/test_cloner.py,186
   tests/__init__.py,0
@@ -13,13 +13,14 @@ M[19]:
   tests/e2e/test_full_workflow.py,271
   tests/e2e/__init__.py,1
   src/clonebox/validator.py,319
-  src/clonebox/cli.py,2017
+  src/clonebox/cli.py,2054
   src/clonebox/detector.py,571
   src/clonebox/__init__.py,10
   src/clonebox/__main__.py,4
   src/clonebox/container.py,154
   src/clonebox/cloner.py,712
   src/clonebox/models.py,164
+  src/clonebox/profiles.py,37
 D:
   tests/conftest.py:
     i: os,tempfile,pytest,yaml,pathlib.Path,unittest.mock.{MagicMock,patch}
@@ -124,3 +125,9 @@ D:
     VMSettings: name_must_be_valid(1),network_mode_must_be_valid(1)  # VM-specific settings.
     CloneBoxConfig: paths_must_be_absolute(1),handle_nested_vm(1),save(1),load(1),to_vm_config(0)  # Complete CloneBox configuration with...
     ContainerConfig: name_must_be_valid(1),extra_mounts_must_be_absolute(1),ports_must_be_valid(1),mounts(0),to_docker_run_cmd(0)
+  src/clonebox/profiles.py:
+    i: pkgutil,yaml,pathlib.Path,typing.{Any,Dict,Optional}
+    e: load_profile,merge_with_profile
+    load_profile(profile_name:str;search_paths:list[Path])->Optional[Dict[str, Any]]
+    _deep_merge(base:Dict[str;Any];override:Dict[str;Any])->Dict[str, Any]
+    merge_with_profile(base_config:Dict[str;Any];profile_name:Optional[str]=None)->Dict[str, Any]

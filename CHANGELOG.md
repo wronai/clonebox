@@ -1,3 +1,26 @@
+## [0.1.19] - 2026-01-31
+
+### Summary
+
+refactor(config): CLI interface improvements
+
+### Core
+
+- update src/clonebox/__init__.py
+- update src/clonebox/cli.py
+- update src/clonebox/profiles.py
+
+### Build
+
+- update pyproject.toml
+
+### Other
+
+- update project.functions.toon
+- update project.toon
+- config: update ml-dev.yaml
+
+
 ## [0.1.18] - 2026-01-30
 
 ### Summary

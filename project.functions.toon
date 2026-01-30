@@ -1,6 +1,6 @@
 project: clonebox
-generated: "2026-01-30T23:46:32.270974"
-modules[19]{path,lang,items}:
+generated: "2026-01-31T00:08:06.930777"
+modules[20]{path,lang,items}:
   tests/conftest.py,python,17
   tests/test_cloner.py,python,17
   tests/__init__.py,python,0
@@ -20,6 +20,7 @@ modules[19]{path,lang,items}:
   src/clonebox/container.py,python,10
   src/clonebox/cloner.py,python,18
   src/clonebox/models.py,python,12
+  src/clonebox/profiles.py,python,3
 
 function_details:
   tests/conftest.py:
@@ -192,38 +193,38 @@ function_details:
       VMValidator.validate_all,method,() -> Dict,320-414,false,95,6,Run all validations and return comprehensive results.
   src/clonebox/cli.py:
     functions[32]{name,kind,sig,loc,async,lines,cc,does}:
-      print_banner,function,() -> None,44-58,false,15,1,Print the CloneBox banner.
-      _resolve_vm_name_and_config_file,function,"(name:Optional[str]) -> tuple[str, Optional[Path]]",61-79,false,19,9,resolve vm name and config file
-      _qga_ping,function,"(vm_name:str, conn_uri:str) -> bool",82-101,false,20,2,qga ping
-      _qga_exec,function,"(vm_name:str, conn_uri:str, command:str, timeout:int=10) -> Optional[str]",104-171,false,68,8,qga exec
-      run_vm_diagnostics,function,"(vm_name:str, conn_uri:str, config_file:Optional[Path]) -> dict",174-423,false,250,57,starts vm diagnostics
-      interactive_mode,function,() -> None,426-722,false,297,49,Run the interactive VM creation wizard.
-      cmd_create,function,(args) -> None,725-746,false,22,2,Create VM from JSON config.
-      cmd_start,function,(args) -> None,749-813,false,65,15,Start a VM or create from .clonebox.yaml.
-      cmd_open,function,(args) -> None,816-877,false,62,16,Open VM viewer window.
-      cmd_stop,function,(args) -> None,880-896,false,17,7,Stop a VM.
-      cmd_delete,function,(args) -> None,899-922,false,24,9,Delete a VM.
-      cmd_list,function,(args) -> None,925-943,false,19,4,List all VMs.
-      cmd_container_up,function,(args) -> None,946-970,false,25,7,Start a container sandbox.
-      cmd_container_ps,function,(args) -> None,973-1000,false,28,4,List containers.
-      cmd_container_stop,function,(args) -> None,1003-1006,false,4,1,Stop a container.
-      cmd_container_rm,function,(args) -> None,1009-1012,false,4,1,Remove a container.
-      cmd_container_down,function,(args) -> None,1015-1019,false,5,1,Stop and remove a container.
-      cmd_diagnose,function,(args) -> None,1022-1040,false,19,3,Run detailed VM diagnostics (standalone).
-      cmd_status,function,(args) -> None,1043-1083,false,41,5,Check VM installation status and health from workstation.
-      cmd_export,function,(args) -> None,1086-1265,false,180,38,Export VM and data for migration to another workstation.
-      cmd_import,function,(args) -> None,1268-1407,false,140,23,Import VM from export archive.
-      cmd_test,function,(args) -> None,1410-1628,false,219,55,Test VM configuration and health.
-      load_env_file,function,"(env_path:Path) -> dict",1635-1650,false,16,6,Load environment variables from .env file.
-      expand_env_vars,function,"(value, env_vars:dict) -> None",1653-1665,false,13,6,"Expand environment variables in string values like ${VAR_NAME}."
-      deduplicate_list,function,"(items:list, key=None) -> list",1668-1677,false,10,4,"Remove duplicates from list, preserving order."
-      generate_clonebox_yaml,function,"(snapshot, detector, deduplicate:bool=True, target_path:str=None, vm_name:str=None, network_mode:str='auto', base_image:Optional[str]=None) -> str",1680-1837,false,158,30,Generate YAML config from system snapshot.
-      load_clonebox_config,function,"(path:Path) -> dict",1840-1859,false,20,3,Load .clonebox.yaml config file and expand environment variables from .env.
-      monitor_cloud_init_status,function,"(vm_name:str, user_session:bool=False, timeout:int=900) -> None",1862-1943,false,82,19,Monitor cloud-init status in VM and show progress.
-      create_vm_from_config,function,"(config:dict, start:bool=False, user_session:bool=False, replace:bool=False) -> str",1946-2002,false,57,7,Create VM from YAML config dict.
-      cmd_clone,function,(args) -> None,2005-2143,false,139,16,Generate clone config from path and optionally create VM.
-      cmd_detect,function,(args) -> None,2146-2230,false,85,18,Detect and show system state.
-      main,function,() -> None,2233-2533,false,301,4,Main entry point.
+      print_banner,function,() -> None,47-61,false,15,1,Print the CloneBox banner.
+      _resolve_vm_name_and_config_file,function,"(name:Optional[str]) -> tuple[str, Optional[Path]]",64-82,false,19,9,resolve vm name and config file
+      _qga_ping,function,"(vm_name:str, conn_uri:str) -> bool",85-104,false,20,2,qga ping
+      _qga_exec,function,"(vm_name:str, conn_uri:str, command:str, timeout:int=10) -> Optional[str]",107-174,false,68,8,qga exec
+      run_vm_diagnostics,function,"(vm_name:str, conn_uri:str, config_file:Optional[Path]) -> dict",177-426,false,250,57,starts vm diagnostics
+      interactive_mode,function,() -> None,429-724,false,296,49,Run the interactive VM creation wizard.
+      cmd_create,function,(args) -> None,727-748,false,22,2,Create VM from JSON config.
+      cmd_start,function,(args) -> None,751-815,false,65,15,Start a VM or create from .clonebox.yaml.
+      cmd_open,function,(args) -> None,818-879,false,62,16,Open VM viewer window.
+      cmd_stop,function,(args) -> None,882-898,false,17,7,Stop a VM.
+      cmd_delete,function,(args) -> None,901-924,false,24,9,Delete a VM.
+      cmd_list,function,(args) -> None,927-945,false,19,4,List all VMs.
+      cmd_container_up,function,(args) -> None,948-978,false,31,10,Start a container sandbox.
+      cmd_container_ps,function,(args) -> None,981-1008,false,28,4,List containers.
+      cmd_container_stop,function,(args) -> None,1011-1014,false,4,1,Stop a container.
+      cmd_container_rm,function,(args) -> None,1017-1020,false,4,1,Remove a container.
+      cmd_container_down,function,(args) -> None,1023-1027,false,5,1,Stop and remove a container.
+      cmd_diagnose,function,(args) -> None,1030-1048,false,19,3,Run detailed VM diagnostics (standalone).
+      cmd_status,function,(args) -> None,1051-1091,false,41,5,Check VM installation status and health from workstation.
+      cmd_export,function,(args) -> None,1094-1273,false,180,38,Export VM and data for migration to another workstation.
+      cmd_import,function,(args) -> None,1276-1415,false,140,23,Import VM from export archive.
+      cmd_test,function,(args) -> None,1418-1636,false,219,55,Test VM configuration and health.
+      load_env_file,function,"(env_path:Path) -> dict",1643-1658,false,16,6,Load environment variables from .env file.
+      expand_env_vars,function,"(value, env_vars:dict) -> None",1661-1673,false,13,6,"Expand environment variables in string values like ${VAR_NAME}."
+      deduplicate_list,function,"(items:list, key=None) -> list",1676-1685,false,10,4,"Remove duplicates from list, preserving order."
+      generate_clonebox_yaml,function,"(snapshot, detector, deduplicate:bool=True, target_path:str=None, vm_name:str=None, network_mode:str='auto', base_image:Optional[str]=None) -> str",1688-1845,false,158,30,Generate YAML config from system snapshot.
+      load_clonebox_config,function,"(path:Path) -> dict",1848-1867,false,20,3,Load .clonebox.yaml config file and expand environment variables from .env.
+      monitor_cloud_init_status,function,"(vm_name:str, user_session:bool=False, timeout:int=900) -> None",1870-1951,false,82,19,Monitor cloud-init status in VM and show progress.
+      create_vm_from_config,function,"(config:dict, start:bool=False, user_session:bool=False, replace:bool=False) -> str",1954-2010,false,57,7,Create VM from YAML config dict.
+      cmd_clone,function,(args) -> None,2013-2174,false,162,23,Generate clone config from path and optionally create VM.
+      cmd_detect,function,(args) -> None,2177-2261,false,85,18,Detect and show system state.
+      main,function,() -> None,2264-2572,false,309,4,Main entry point.
   src/clonebox/detector.py:
     functions[13]{name,kind,sig,loc,async,lines,cc,does}:
       SystemSnapshot.running_services,method,() -> list,56-57,false,2,3,starts services
@@ -285,3 +286,8 @@ function_details:
       ContainerConfig.ports_must_be_valid,method,"(v:List[str]) -> List[str]",159-170,false,12,8,ports must be valid
       ContainerConfig.mounts,method,"() -> Dict[str, str]",173-178,false,6,1,mounts
       ContainerConfig.to_docker_run_cmd,method,"() -> List[str]",180-193,false,14,4,converts docker run cmd
+  src/clonebox/profiles.py:
+    functions[3]{name,kind,sig,loc,async,lines,cc,does}:
+      load_profile,function,"(profile_name:str, search_paths:list[Path]) -> Optional[Dict[str, Any]]",8-23,false,16,4,"Load profile YAML from ~/.clonebox.d/, .clonebox.d/, templates/profiles/"
+      _deep_merge,function,"(base:Dict[str,Any], override:Dict[str,Any]) -> Dict[str, Any]",26-37,false,12,5,deep merge
+      merge_with_profile,function,"(base_config:Dict[str,Any], profile_name:Optional[str]=None) -> Dict[str, Any]",40-49,false,10,4,Merge profile OVER base config (profile wins).
