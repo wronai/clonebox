@@ -138,7 +138,6 @@ Simply run `clonebox` to start the interactive wizard:
 ```bash
 clonebox
 clonebox clone . --user --run --replace --base-image ~/ubuntu-22.04-cloud.qcow2
-
 ```
 
 The wizard will:
@@ -176,6 +175,130 @@ clonebox detect --json
 ```
 
 ## Usage Examples
+
+### Basic Workflow
+
+```bash
+# 1. Clone current directory with auto-detection
+clonebox clone . --user
+
+# 2. Review generated config
+cat .clonebox.yaml
+
+# 3. Create and start VM
+clonebox start . --user --viewer
+
+# 4. Check VM status
+clonebox status . --user
+
+# 5. Open VM window later
+clonebox open . --user
+
+# 6. Stop VM when done
+clonebox stop . --user
+```
+
+### Development Environment with Browser Profiles
+
+```bash
+# Clone with app data (browser profiles, IDE settings)
+clonebox clone . --user --run
+
+# VM will have:
+# - All your project directories
+# - Browser profiles (Chrome, Firefox) with bookmarks and passwords
+# - IDE settings (PyCharm, VSCode)
+# - Docker containers and services
+
+# Access in VM:
+ls ~/.config/google-chrome  # Chrome profile
+ls ~/.mozilla/firefox       # Firefox profile
+ls ~/.config/JetBrains      # PyCharm settings
+```
+
+### Testing VM Configuration
+
+```bash
+# Quick test - basic checks
+clonebox test . --user --quick
+
+# Full test with verbose output
+clonebox test . --user --verbose
+
+# Test output shows:
+# ✅ VM is defined in libvirt
+# ✅ VM is running
+# ✅ VM has network access (IP: 192.168.122.89)
+# ✅ Cloud-init completed
+# ✅ All mount points accessible
+# ✅ Health check triggered
+```
+
+### VM Health Monitoring
+
+```bash
+# Check overall status
+clonebox status . --user
+
+# Output:
+# 📊 Checking VM status: clone-clonebox
+# ✅ VM State: running
+# ✅ VM has network access
+# ☁️ Cloud-init: Still running (packages installing)
+# 🏥 Health Check Status... ⏳ Health check not yet run
+
+# Trigger health check
+clonebox status . --user --health
+
+# View detailed health report in VM:
+# cat /var/log/clonebox-health.log
+```
+
+### Export/Import Workflow
+
+```bash
+# On workstation A - Export VM with all data
+clonebox export . --user --include-data -o my-dev-env.tar.gz
+
+# Transfer file to workstation B, then import
+clonebox import my-dev-env.tar.gz --user
+
+# Start VM on new workstation
+clonebox start . --user
+clonebox open . --user
+
+# VM includes:
+# - Complete disk image
+# - All browser profiles and settings
+# - Project files
+# - Docker images and containers
+```
+
+### Troubleshooting Common Issues
+
+```bash
+# If mounts are empty after reboot:
+clonebox status . --user  # Check VM status
+# Then in VM:
+sudo mount -a              # Remount all fstab entries
+
+# If browser profiles don't sync:
+rm .clonebox.yaml
+clonebox clone . --user --run --replace
+
+# If GUI doesn't open:
+clonebox open . --user     # Easiest way
+# or:
+virt-viewer --connect qemu:///session clone-clonebox
+
+# Check VM details:
+clonebox list              # List all VMs
+virsh --connect qemu:///session dominfo clone-clonebox
+```
+
+## Legacy Examples (Manual Config)
+
+These examples use the older `create` command with manual JSON config. For most users, the `clone` command with auto-detection is easier.
 
 ### Python Development Environment
 
