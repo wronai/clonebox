@@ -586,6 +586,8 @@ def cmd_status(args):
     name = args.name
     user_session = getattr(args, "user", False)
     conn_uri = "qemu:///session" if user_session else "qemu:///system"
+    cloud_init_complete = False
+    config_file = None
     
     # If name is a path, load config to get VM name
     if name and (name.startswith(".") or name.startswith("/") or name.startswith("~")):
@@ -665,7 +667,8 @@ def cmd_status(args):
              '{"execute":"guest-exec","arguments":{"path":"/bin/cat","arg":["/var/log/clonebox-ready"],"capture-output":true}}'],
             capture_output=True, text=True, timeout=10
         )
-        if "CloneBox VM ready" in result.stdout or result.returncode == 0:
+        if "CloneBox VM ready" in result.stdout:
+            cloud_init_complete = True
             console.print("[green]✅ Cloud-init: Complete[/]")
         else:
             console.print("[yellow]⏳ Cloud-init: Still running (packages installing)[/]")
@@ -675,8 +678,13 @@ def cmd_status(args):
     # Check mount status
     console.print("\n[bold]💾 Checking mount status...[/]")
     try:
+        if not cloud_init_complete:
+            console.print("[dim]Mounts may not be ready until cloud-init completes.[/]")
+
         # Load config to get expected mounts
-        config_file = Path.cwd() / ".clonebox.yaml"
+        if not config_file:
+            config_file = Path.cwd() / ".clonebox.yaml"
+
         if config_file.exists():
             config = load_clonebox_config(config_file)
             all_paths = config.get("paths", {}).copy()
@@ -778,6 +786,9 @@ def cmd_status(args):
     # Check health status if available
     console.print("\n[bold]🏥 Health Check Status...[/]")
     try:
+        if not cloud_init_complete:
+            console.print("[dim]Health check is generated and run at the end of cloud-init.[/]")
+
         result = subprocess.run(
             ["virsh", "--connect", conn_uri, "qemu-agent-command", name,
              '{"execute":"guest-exec","arguments":{"path":"/bin/cat","arg":["/var/log/clonebox-health-status"],"capture-output":true}}'],
@@ -800,6 +811,8 @@ def cmd_status(args):
     console.print("    [cyan]cat /var/log/clonebox-health.log[/]  # Full health report")
     console.print("    [cyan]sudo cloud-init status[/]  # Cloud-init status")
     console.print("    [cyan]clonebox-health[/]  # Re-run health check")
+    console.print("  [dim]On host:[/]")
+    console.print("    [cyan]clonebox test . --user --validate[/]  # Full validation (mounts/packages/services)")
     
     # Run full health check if requested
     if getattr(args, "health", False):

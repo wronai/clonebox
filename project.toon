@@ -1,21 +1,23 @@
-# clonebox | 15f 6212L | python:15
+# clonebox | 17f 6589L | python:17
 # Keys: M=modules, D=details, i=imports, c=classes, f=functions, m=methods
-M[15]:
+M[17]:
   tests/conftest.py,343
   tests/test_cloner.py,186
   tests/__init__.py,0
   tests/test_validator.py,225
+  tests/test_models.py,177
   tests/test_network.py,133
   tests/test_detector.py,154
-  tests/test_cli.py,328
+  tests/test_cli.py,330
   tests/e2e/test_full_workflow.py,271
   tests/e2e/__init__.py,1
   src/clonebox/validator.py,287
-  src/clonebox/cli.py,1681
+  src/clonebox/cli.py,1707
   src/clonebox/detector.py,548
   src/clonebox/__init__.py,10
   src/clonebox/__main__.py,4
-  src/clonebox/cloner.py,708
+  src/clonebox/cloner.py,711
+  src/clonebox/models.py,106
 D:
   tests/conftest.py:
     i: os,tempfile,pytest,yaml,pathlib.Path,unittest.mock.{MagicMock,patch}
@@ -42,6 +44,12 @@ D:
     TestVMValidator: sample_config(0),mock_console(0),test_validator_init(2),test_results_structure(2),test_exec_in_vm_success(3)  # Test VMValidator class.
     TestVMValidatorIntegration: test_validate_all_with_vm_not_running(2)  # Integration tests for VMValidator (re...
     TestValidatorResultsCalculation: test_overall_pass(0),test_overall_partial(0)  # Test results calculation logic.
+  tests/test_models.py:
+    i: pytest,yaml,clonebox.models.{CloneBoxConfig,VMSettings},pathlib.Path
+    e: TestVMSettings,TestCloneBoxConfig,TestCloneBoxConfigYAML
+    TestVMSettings: test_default_values(0),test_name_validation(2),test_network_mode_validation(2),test_ram_validation(2)  # Test VMSettings model.
+    TestCloneBoxConfig: test_default_config(0),test_full_config(0),test_path_validation_host_absolute(0),test_path_validation_guest_absolute(0),test_handle_nested_vm_dict(0)  # Test CloneBoxConfig model.
+    TestCloneBoxConfigYAML: test_yaml_roundtrip(1),test_parse_generated_yaml(1)  # Test YAML serialization/deserialization.
   tests/test_network.py:
     i: clonebox.cloner.{SelectiveVMCloner,VMConfig},pathlib.Path,unittest.mock.{MagicMock,patch}
     e: TestNetworkMode
@@ -59,7 +67,7 @@ D:
     TestGenerateCloneboxYaml: create_mock_snapshot(0),create_mock_detector(0),test_generate_yaml_basic(0),test_generate_yaml_vm_name_from_path(0),test_generate_yaml_custom_vm_name(0)  # Test YAML config generation.
     TestLoadCloneboxConfig: test_load_config_from_file(1),test_load_config_from_directory(1),test_load_config_not_found(1)  # Test loading .clonebox.yaml configs.
     TestCLIConstants: test_config_file_name(0)  # Test CLI constants.
-    TestCLIIntegration: test_cli_help_commands(2),test_detect_json_output(3),test_detect_yaml_output(2),test_clone_creates_config_file(1)  # Integration tests for CLI commands.
+    TestCLIIntegration: test_cli_help_commands(2),test_detect_json_output(3),test_detect_yaml_output(2),test_clone_creates_config_file(6)  # Integration tests for CLI commands.
   tests/e2e/test_full_workflow.py:
     i: os,shutil,subprocess,tempfile,time,pytest,yaml,pathlib.Path
     e: TestFullWorkflow,TestVMLifecycle,TestConfigValidation,TestExportImport
@@ -95,3 +103,8 @@ D:
     e: VMConfig,SelectiveVMCloner
     VMConfig: to_dict(0)  # Configuration for the VM to create.
     SelectiveVMCloner: __init__(2),_connect(0),get_images_dir(0),_get_downloads_dir(0),_ensure_default_base_image(1)  # Creates VMs with only selected applic...
+  src/clonebox/models.py:
+    i: pathlib.Path,pydantic.{BaseModel,Field,field_validator,model_validator},typing.{Any,Dict,List,Optional}
+    e: VMSettings,CloneBoxConfig
+    VMSettings: name_must_be_valid(1),network_mode_must_be_valid(1)  # VM-specific settings.
+    CloneBoxConfig: paths_must_be_absolute(1),handle_nested_vm(1),save(1),load(1),to_vm_config(0)  # Complete CloneBox configuration with...

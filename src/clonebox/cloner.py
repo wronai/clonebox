@@ -668,7 +668,7 @@ fi
                 tag = f"mount{idx}"
                 # Use uid=1000,gid=1000 to give ubuntu user access to mounts
                 # mmap allows proper file mapping
-                mount_opts = "trans=virtio,version=9p2000.L,mmap,uid=1000,gid=1000"
+                mount_opts = "trans=virtio,version=9p2000.L,mmap,uid=1000,gid=1000,users"
                 mount_commands.append(f"  - mkdir -p {guest_path}")
                 mount_commands.append(f"  - chown 1000:1000 {guest_path}")
                 mount_commands.append(
@@ -679,7 +679,7 @@ fi
 
         # User-data
         # Add desktop environment if GUI is enabled
-        base_packages = []
+        base_packages = ["qemu-guest-agent"]
         if config.gui:
             base_packages.extend([
                 "ubuntu-desktop-minimal",
@@ -693,6 +693,8 @@ fi
         
         # Build runcmd - services, mounts, snaps, post_commands
         runcmd_lines = []
+
+        runcmd_lines.append("  - systemctl enable --now qemu-guest-agent || true")
         
         # Add service enablement
         for svc in config.services:
@@ -700,9 +702,10 @@ fi
         
         # Add fstab entries for persistent mounts after reboot
         if fstab_entries:
-            runcmd_lines.append("  - echo '# CloneBox 9p mounts' >> /etc/fstab")
+            runcmd_lines.append("  - grep -q '^# CloneBox 9p mounts' /etc/fstab || echo '# CloneBox 9p mounts' >> /etc/fstab")
             for entry in fstab_entries:
-                runcmd_lines.append(f"  - echo '{entry}' >> /etc/fstab")
+                runcmd_lines.append(f"  - grep -qF \"{entry}\" /etc/fstab || echo '{entry}' >> /etc/fstab")
+            runcmd_lines.append("  - mount -a || true")
         
         # Add mounts (immediate, before reboot)
         for cmd in mount_commands:
@@ -740,6 +743,8 @@ fi
             runcmd_lines.append("  - sleep 10 && reboot")
         
         runcmd_yaml = "\n".join(runcmd_lines) if runcmd_lines else ""
+        bootcmd_yaml = "\n".join(mount_commands) if mount_commands else ""
+        bootcmd_block = f"\nbootcmd:\n{bootcmd_yaml}\n" if bootcmd_yaml else ""
 
         # Remove power_state - using shutdown -r instead
         power_state_yaml = ""
@@ -765,6 +770,7 @@ chpasswd:
 # Update package cache and upgrade
 package_update: true
 package_upgrade: false
+{bootcmd_block}
 
 # Install packages (cloud-init waits for completion before runcmd)
 packages:
