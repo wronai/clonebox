@@ -1,3 +1,14 @@
+## [0.1.17] - 2026-01-30
+
+### Summary
+
+refactor(goal): CLI interface improvements
+
+### Core
+
+- update src/clonebox/cli.py
+
+
 ## [0.1.16] - 2026-01-30
 
 ### Summary

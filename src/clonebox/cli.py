@@ -58,6 +58,359 @@ def print_banner():
     console.print(f"  Version {__version__}\n", style="dim")
 
 
+def _resolve_vm_name_and_config_file(name: Optional[str]) -> tuple[str, Optional[Path]]:
+    config_file: Optional[Path] = None
+
+    if name and (name.startswith(".") or name.startswith("/") or name.startswith("~")):
+        target_path = Path(name).expanduser().resolve()
+        config_file = target_path / ".clonebox.yaml" if target_path.is_dir() else target_path
+        if config_file.exists():
+            config = load_clonebox_config(config_file)
+            return config["vm"]["name"], config_file
+        raise FileNotFoundError(f"Config not found: {config_file}")
+
+    if not name:
+        config_file = Path.cwd() / ".clonebox.yaml"
+        if config_file.exists():
+            config = load_clonebox_config(config_file)
+            return config["vm"]["name"], config_file
+        raise FileNotFoundError("No VM name specified and no .clonebox.yaml found")
+
+    return name, None
+
+
+def _qga_ping(vm_name: str, conn_uri: str) -> bool:
+    import subprocess
+
+    try:
+        result = subprocess.run(
+            [
+                "virsh",
+                "--connect",
+                conn_uri,
+                "qemu-agent-command",
+                vm_name,
+                json.dumps({"execute": "guest-ping"}),
+            ],
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+        return result.returncode == 0
+    except Exception:
+        return False
+
+
+def _qga_exec(vm_name: str, conn_uri: str, command: str, timeout: int = 10) -> Optional[str]:
+    import subprocess
+
+    try:
+        payload = {
+            "execute": "guest-exec",
+            "arguments": {
+                "path": "/bin/sh",
+                "arg": ["-c", command],
+                "capture-output": True,
+            },
+        }
+        exec_result = subprocess.run(
+            [
+                "virsh",
+                "--connect",
+                conn_uri,
+                "qemu-agent-command",
+                vm_name,
+                json.dumps(payload),
+            ],
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+        )
+        if exec_result.returncode != 0:
+            return None
+
+        resp = json.loads(exec_result.stdout)
+        pid = resp.get("return", {}).get("pid")
+        if not pid:
+            return None
+
+        import base64
+        import time
+
+        deadline = time.time() + timeout
+        while time.time() < deadline:
+            status_payload = {"execute": "guest-exec-status", "arguments": {"pid": pid}}
+            status_result = subprocess.run(
+                [
+                    "virsh",
+                    "--connect",
+                    conn_uri,
+                    "qemu-agent-command",
+                    vm_name,
+                    json.dumps(status_payload),
+                ],
+                capture_output=True,
+                text=True,
+                timeout=5,
+            )
+            if status_result.returncode != 0:
+                return None
+
+            status_resp = json.loads(status_result.stdout)
+            ret = status_resp.get("return", {})
+            if not ret.get("exited", False):
+                time.sleep(0.3)
+                continue
+
+            out_data = ret.get("out-data")
+            if out_data:
+                return base64.b64decode(out_data).decode().strip()
+            return ""
+
+        return None
+    except Exception:
+        return None
+
+
+def run_vm_diagnostics(
+    vm_name: str,
+    conn_uri: str,
+    config_file: Optional[Path],
+    *,
+    verbose: bool = False,
+    json_output: bool = False,
+) -> dict:
+    import subprocess
+
+    result: dict = {
+        "vm": {"name": vm_name, "conn_uri": conn_uri},
+        "state": {},
+        "network": {},
+        "qga": {},
+        "cloud_init": {},
+        "mounts": {},
+        "health": {},
+    }
+
+    console.print(f"[bold cyan]🧪 Diagnostics: {vm_name}[/]\n")
+
+    try:
+        domstate = subprocess.run(
+            ["virsh", "--connect", conn_uri, "domstate", vm_name],
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+        result["state"] = {
+            "returncode": domstate.returncode,
+            "stdout": domstate.stdout.strip(),
+            "stderr": domstate.stderr.strip(),
+        }
+        if domstate.returncode == 0 and domstate.stdout.strip():
+            console.print(f"[green]✅ VM State: {domstate.stdout.strip()}[/]")
+        else:
+            console.print("[red]❌ VM State: unable to read[/]")
+            if verbose and domstate.stderr.strip():
+                console.print(f"[dim]{domstate.stderr.strip()}[/]")
+    except subprocess.TimeoutExpired:
+        result["state"] = {"error": "timeout"}
+        console.print("[red]❌ VM State: timeout[/]")
+        if json_output:
+            console.print_json(json.dumps(result))
+        return result
+
+    console.print("\n[bold]🔍 Checking VM network...[/]")
+    try:
+        domifaddr = subprocess.run(
+            ["virsh", "--connect", conn_uri, "domifaddr", vm_name],
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+        result["network"] = {
+            "returncode": domifaddr.returncode,
+            "stdout": domifaddr.stdout.strip(),
+            "stderr": domifaddr.stderr.strip(),
+        }
+        if domifaddr.stdout.strip():
+            console.print(f"[dim]{domifaddr.stdout.strip()}[/]")
+        else:
+            console.print("[yellow]⚠️  No interface address detected yet[/]")
+            if verbose and domifaddr.stderr.strip():
+                console.print(f"[dim]{domifaddr.stderr.strip()}[/]")
+    except Exception as e:
+        result["network"] = {"error": str(e)}
+        console.print(f"[yellow]⚠️  Cannot get IP: {e}[/]")
+
+    guest_agent_ready = _qga_ping(vm_name, conn_uri)
+    result["qga"]["ready"] = guest_agent_ready
+    if verbose:
+        console.print("\n[bold]🤖 QEMU Guest Agent...[/]")
+        console.print(f"{'[green]✅' if guest_agent_ready else '[red]❌'} QGA connected")
+
+        if not guest_agent_ready:
+            try:
+                dumpxml = subprocess.run(
+                    ["virsh", "--connect", conn_uri, "dumpxml", vm_name],
+                    capture_output=True,
+                    text=True,
+                    timeout=10,
+                )
+                has_qga_channel = False
+                if dumpxml.returncode == 0:
+                    has_qga_channel = "org.qemu.guest_agent.0" in dumpxml.stdout
+                result["qga"]["dumpxml_returncode"] = dumpxml.returncode
+                result["qga"]["has_channel"] = has_qga_channel
+                if dumpxml.stderr.strip():
+                    result["qga"]["dumpxml_stderr"] = dumpxml.stderr.strip()
+
+                console.print(
+                    f"[dim]Guest agent channel in VM XML: {'present' if has_qga_channel else 'missing'}[/]"
+                )
+            except Exception as e:
+                result["qga"]["dumpxml_error"] = str(e)
+
+            try:
+                ping_attempt = subprocess.run(
+                    [
+                        "virsh",
+                        "--connect",
+                        conn_uri,
+                        "qemu-agent-command",
+                        vm_name,
+                        json.dumps({"execute": "guest-ping"}),
+                    ],
+                    capture_output=True,
+                    text=True,
+                    timeout=10,
+                )
+                result["qga"]["ping_returncode"] = ping_attempt.returncode
+                result["qga"]["ping_stdout"] = ping_attempt.stdout.strip()
+                result["qga"]["ping_stderr"] = ping_attempt.stderr.strip()
+                if ping_attempt.stderr.strip():
+                    console.print(f"[dim]qemu-agent-command stderr: {ping_attempt.stderr.strip()}[/]")
+            except Exception as e:
+                result["qga"]["ping_error"] = str(e)
+
+            console.print("[dim]If channel is present, the agent inside VM may not be running yet.[/]")
+            console.print("[dim]Inside VM try: sudo systemctl status qemu-guest-agent && sudo systemctl restart qemu-guest-agent[/]")
+
+    console.print("\n[bold]☁️  Checking cloud-init status...[/]")
+    cloud_init_complete = False
+    if not guest_agent_ready:
+        result["cloud_init"] = {"status": "unknown", "reason": "qga_not_ready"}
+        console.print("[yellow]⏳ Cloud-init status: Unknown (QEMU guest agent not connected yet)[/]")
+    else:
+        ready_msg = _qga_exec(vm_name, conn_uri, "cat /var/log/clonebox-ready 2>/dev/null || true", timeout=10)
+        result["cloud_init"]["clonebox_ready_file"] = ready_msg
+        if ready_msg and "CloneBox VM ready" in ready_msg:
+            cloud_init_complete = True
+            result["cloud_init"]["status"] = "complete"
+            console.print("[green]✅ Cloud-init: Complete[/]")
+        else:
+            ci_status = _qga_exec(vm_name, conn_uri, "cloud-init status 2>/dev/null || true", timeout=10)
+            result["cloud_init"]["cloud_init_status"] = ci_status
+            result["cloud_init"]["status"] = "running"
+            console.print("[yellow]⏳ Cloud-init: Still running[/]")
+            if verbose and ci_status:
+                console.print(f"[dim]{ci_status}[/]")
+
+    console.print("\n[bold]💾 Checking mount status...[/]")
+    if not cloud_init_complete:
+        console.print("[dim]Mounts may not be ready until cloud-init completes.[/]")
+
+    mounts_detail: list[dict] = []
+    result["mounts"]["details"] = mounts_detail
+    if not guest_agent_ready:
+        console.print("[yellow]⏳ QEMU guest agent not connected yet - cannot verify mounts.[/]")
+        result["mounts"]["status"] = "unknown"
+    else:
+        if not config_file:
+            config_file = Path.cwd() / ".clonebox.yaml"
+
+        if not config_file.exists():
+            console.print("[dim]No .clonebox.yaml found - cannot check mounts[/]")
+            result["mounts"]["status"] = "no_config"
+        else:
+            config = load_clonebox_config(config_file)
+            all_paths = config.get("paths", {}).copy()
+            all_paths.update(config.get("app_data_paths", {}))
+            result["mounts"]["expected"] = list(all_paths.values())
+            mount_output = _qga_exec(vm_name, conn_uri, "mount | grep 9p || true", timeout=10) or ""
+            mounted_paths = [line.split()[2] for line in mount_output.split("\n") if line.strip()]
+            result["mounts"]["mounted_paths"] = mounted_paths
+
+            mount_table = Table(title="Mount Points", border_style="cyan", show_header=True)
+            mount_table.add_column("Guest Path", style="bold")
+            mount_table.add_column("Mounted", justify="center")
+            mount_table.add_column("Accessible", justify="center")
+            mount_table.add_column("Files", justify="right")
+
+            working_mounts = 0
+            total_mounts = 0
+            for _, guest_path in all_paths.items():
+                total_mounts += 1
+                is_mounted = any(guest_path == mp or guest_path in mp for mp in mounted_paths)
+                accessible = False
+                file_count: str = "?"
+
+                if is_mounted:
+                    test_out = _qga_exec(vm_name, conn_uri, f"test -d {guest_path} && echo yes || echo no", timeout=5)
+                    accessible = test_out == "yes"
+                    if accessible:
+                        count_str = _qga_exec(vm_name, conn_uri, f"ls -A {guest_path} 2>/dev/null | wc -l", timeout=5)
+                        if count_str and count_str.strip().isdigit():
+                            file_count = count_str.strip()
+
+                if is_mounted and accessible:
+                    working_mounts += 1
+
+                mount_table.add_row(
+                    guest_path,
+                    "[green]✅[/]" if is_mounted else "[red]❌[/]",
+                    "[green]✅[/]" if accessible else ("[red]❌[/]" if is_mounted else "[dim]N/A[/]"),
+                    file_count,
+                )
+                mounts_detail.append(
+                    {
+                        "guest_path": guest_path,
+                        "mounted": is_mounted,
+                        "accessible": accessible,
+                        "files": file_count,
+                    }
+                )
+
+            result["mounts"]["working"] = working_mounts
+            result["mounts"]["total"] = total_mounts
+            result["mounts"]["status"] = "ok" if working_mounts == total_mounts else "partial"
+
+            console.print(mount_table)
+            console.print(f"[dim]{working_mounts}/{total_mounts} mounts working[/]")
+
+    console.print("\n[bold]🏥 Health Check Status...[/]")
+    if not guest_agent_ready:
+        result["health"]["status"] = "unknown"
+        console.print("[dim]Health status: Not available yet (QEMU guest agent not ready)[/]")
+    else:
+        health_status = _qga_exec(vm_name, conn_uri, "cat /var/log/clonebox-health-status 2>/dev/null || true", timeout=10)
+        result["health"]["raw"] = health_status
+        if health_status and "HEALTH_STATUS=OK" in health_status:
+            result["health"]["status"] = "ok"
+            console.print("[green]✅ Health: All checks passed[/]")
+        elif health_status and "HEALTH_STATUS=FAILED" in health_status:
+            result["health"]["status"] = "failed"
+            console.print("[red]❌ Health: Some checks failed[/]")
+        else:
+            result["health"]["status"] = "not_run"
+            console.print("[yellow]⏳ Health check not yet run[/]")
+            if verbose and health_status:
+                console.print(f"[dim]{health_status}[/]")
+
+    if json_output:
+        console.print_json(json.dumps(result))
+    return result
+
+
 def interactive_mode():
     """Run the interactive VM creation wizard."""
     print_banner()
@@ -579,282 +932,159 @@ def cmd_list(args):
     console.print(table)
 
 
-def cmd_status(args):
-    """Check VM installation status and health from workstation."""
-    import subprocess
-    
+def cmd_container_up(args):
+    """Start a container sandbox."""
+    try:
+        from clonebox.container import ContainerCloner
+        from clonebox.models import ContainerConfig
+    except ModuleNotFoundError as e:
+        raise ModuleNotFoundError(
+            "Container features require extra dependencies (e.g. pydantic). Install them to use 'clonebox container'."
+        ) from e
+
+    mounts: dict[str, str] = {}
+    for m in getattr(args, "mount", []) or []:
+        if ":" not in m:
+            raise ValueError(f"Invalid mount: {m} (expected HOST:CONTAINER)")
+        host, container_path = m.split(":", 1)
+        mounts[host] = container_path
+
+    cfg_kwargs: dict = {
+        "engine": getattr(args, "engine", "auto"),
+        "image": getattr(args, "image", "ubuntu:22.04"),
+        "workspace": Path(getattr(args, "path", ".")),
+        "extra_mounts": mounts,
+        "env_from_dotenv": not getattr(args, "no_dotenv", False),
+        "packages": getattr(args, "package", []) or [],
+        "ports": getattr(args, "port", []) or [],
+    }
+    if getattr(args, "name", None):
+        cfg_kwargs["name"] = args.name
+
+    cfg = ContainerConfig(**cfg_kwargs)
+
+    cloner = ContainerCloner(engine=cfg.engine)
+    cloner.up(cfg, detach=getattr(args, "detach", False))
+
+
+def cmd_container_ps(args):
+    """List containers."""
+    try:
+        from clonebox.container import ContainerCloner
+    except ModuleNotFoundError as e:
+        raise ModuleNotFoundError(
+            "Container features require extra dependencies (e.g. pydantic). Install them to use 'clonebox container'."
+        ) from e
+
+    cloner = ContainerCloner(engine=getattr(args, "engine", "auto"))
+    items = cloner.ps(all=getattr(args, "all", False))
+
+    if getattr(args, "json", False):
+        print(json.dumps(items, indent=2))
+        return
+
+    if not items:
+        console.print("[dim]No containers found.[/]")
+        return
+
+    table = Table(title="Containers", border_style="cyan")
+    table.add_column("Name", style="bold")
+    table.add_column("Image")
+    table.add_column("Status")
+    table.add_column("Ports")
+
+    for c in items:
+        table.add_row(
+            str(c.get("name", "")),
+            str(c.get("image", "")),
+            str(c.get("status", "")),
+            str(c.get("ports", "")),
+        )
+
+    console.print(table)
+
+
+def cmd_container_stop(args):
+    """Stop a container."""
+    try:
+        from clonebox.container import ContainerCloner
+    except ModuleNotFoundError as e:
+        raise ModuleNotFoundError(
+            "Container features require extra dependencies (e.g. pydantic). Install them to use 'clonebox container'."
+        ) from e
+
+    cloner = ContainerCloner(engine=getattr(args, "engine", "auto"))
+    cloner.stop(args.name)
+
+
+def cmd_container_rm(args):
+    """Remove a container."""
+    try:
+        from clonebox.container import ContainerCloner
+    except ModuleNotFoundError as e:
+        raise ModuleNotFoundError(
+            "Container features require extra dependencies (e.g. pydantic). Install them to use 'clonebox container'."
+        ) from e
+
+    cloner = ContainerCloner(engine=getattr(args, "engine", "auto"))
+    cloner.rm(args.name, force=getattr(args, "force", False))
+
+
+def cmd_container_down(args):
+    """Stop and remove a container."""
+    try:
+        from clonebox.container import ContainerCloner
+    except ModuleNotFoundError as e:
+        raise ModuleNotFoundError(
+            "Container features require extra dependencies (e.g. pydantic). Install them to use 'clonebox container'."
+        ) from e
+
+    cloner = ContainerCloner(engine=getattr(args, "engine", "auto"))
+    cloner.stop(args.name)
+    cloner.rm(args.name, force=True)
+
+
+def cmd_diagnose(args):
+    """Run detailed VM diagnostics (standalone)."""
     name = args.name
     user_session = getattr(args, "user", False)
     conn_uri = "qemu:///session" if user_session else "qemu:///system"
-    cloud_init_complete = False
-    config_file = None
-    
-    # If name is a path, load config to get VM name
-    if name and (name.startswith(".") or name.startswith("/") or name.startswith("~")):
-        target_path = Path(name).expanduser().resolve()
-        config_file = target_path / ".clonebox.yaml" if target_path.is_dir() else target_path
-        if config_file.exists():
-            config = load_clonebox_config(config_file)
-            name = config["vm"]["name"]
-        else:
-            console.print(f"[red]❌ Config not found: {config_file}[/]")
-            return
-    
-    if not name:
-        # Try current directory
-        config_file = Path.cwd() / ".clonebox.yaml"
-        if config_file.exists():
-            config = load_clonebox_config(config_file)
-            name = config["vm"]["name"]
-        else:
-            console.print("[red]❌ No VM name specified and no .clonebox.yaml found[/]")
-            return
-    
-    console.print(f"[bold cyan]📊 Checking VM status: {name}[/]\n")
-    
-    # Check VM state
+
     try:
-        result = subprocess.run(
-            ["virsh", "--connect", conn_uri, "domstate", name],
-            capture_output=True, text=True, timeout=5
-        )
-        vm_state = result.stdout.strip()
-        
-        if "running" in vm_state.lower():
-            console.print(f"[green]✅ VM State: {vm_state}[/]")
-        elif "shut off" in vm_state.lower():
-            console.print(f"[yellow]⏸️  VM State: {vm_state}[/]")
-            console.print("[dim]Start with: clonebox start .[/]")
-            return
-        else:
-            console.print(f"[dim]VM State: {vm_state}[/]")
-    except subprocess.TimeoutExpired:
-        console.print("[red]❌ Timeout checking VM state[/]")
-        return
-    except Exception as e:
-        console.print(f"[red]❌ Error: {e}[/]")
+        vm_name, config_file = _resolve_vm_name_and_config_file(name)
+    except FileNotFoundError as e:
+        console.print(f"[red]❌ {e}[/]")
         return
 
-    def _qga_ping() -> bool:
-         try:
-             result = subprocess.run(
-                 [
-                     "virsh",
-                     "--connect",
-                     conn_uri,
-                     "qemu-agent-command",
-                     name,
-                     json.dumps({"execute": "guest-ping"}),
-                 ],
-                 capture_output=True,
-                 text=True,
-                 timeout=5,
-             )
-             return result.returncode == 0
-         except Exception:
-             return False
+    run_vm_diagnostics(
+        vm_name,
+        conn_uri,
+        config_file,
+        verbose=getattr(args, "verbose", False),
+        json_output=getattr(args, "json", False),
+    )
 
-    def _qga_exec(command: str, timeout: int = 10) -> Optional[str]:
-         try:
-             payload = {
-                 "execute": "guest-exec",
-                 "arguments": {
-                     "path": "/bin/sh",
-                     "arg": ["-c", command],
-                     "capture-output": True,
-                 },
-             }
-             exec_result = subprocess.run(
-                 [
-                     "virsh",
-                     "--connect",
-                     conn_uri,
-                     "qemu-agent-command",
-                     name,
-                     json.dumps(payload),
-                 ],
-                 capture_output=True,
-                 text=True,
-                 timeout=timeout,
-             )
-             if exec_result.returncode != 0:
-                 return None
 
-             resp = json.loads(exec_result.stdout)
-             pid = resp.get("return", {}).get("pid")
-             if not pid:
-                 return None
+def cmd_status(args):
+    """Check VM installation status and health from workstation."""
+    import subprocess
 
-             import base64
-             import time
+    name = args.name
+    user_session = getattr(args, "user", False)
+    conn_uri = "qemu:///session" if user_session else "qemu:///system"
 
-             deadline = time.time() + timeout
-             while time.time() < deadline:
-                 status_payload = {"execute": "guest-exec-status", "arguments": {"pid": pid}}
-                 status_result = subprocess.run(
-                     [
-                         "virsh",
-                         "--connect",
-                         conn_uri,
-                         "qemu-agent-command",
-                         name,
-                         json.dumps(status_payload),
-                     ],
-                     capture_output=True,
-                     text=True,
-                     timeout=5,
-                 )
-                 if status_result.returncode != 0:
-                     return None
-
-                 status_resp = json.loads(status_result.stdout)
-                 ret = status_resp.get("return", {})
-                 if not ret.get("exited", False):
-                     time.sleep(0.3)
-                     continue
-
-                 out_data = ret.get("out-data")
-                 if out_data:
-                     return base64.b64decode(out_data).decode().strip()
-                 return ""
-
-             return None
-         except Exception:
-             return None
-
-    guest_agent_ready = _qga_ping()
-    
-    # Get VM IP address
-    console.print("\n[bold]🔍 Checking VM network...[/]")
     try:
-        result = subprocess.run(
-            ["virsh", "--connect", conn_uri, "domifaddr", name],
-            capture_output=True, text=True, timeout=10
-        )
-        if result.stdout.strip():
-            console.print(f"[dim]{result.stdout.strip()}[/]")
-            # Extract IP
-            for line in result.stdout.split('\n'):
-                if 'ipv4' in line.lower():
-                    parts = line.split()
-                    for p in parts:
-                        if '/' in p and '.' in p:
-                            ip = p.split('/')[0]
-                            console.print(f"[green]IP Address: {ip}[/]")
-                            break
-        else:
-            console.print("[yellow]⚠️  No IP address yet (VM may still be booting)[/]")
-    except Exception as e:
-        console.print(f"[yellow]⚠️  Cannot get IP: {e}[/]")
-    
-    # Check cloud-init status via console
-    console.print("\n[bold]☁️  Checking cloud-init status...[/]")
-    try:
-        if not guest_agent_ready:
-            console.print("[yellow]⏳ Cloud-init status: Unknown (QEMU guest agent not connected yet)[/]")
-        else:
-            ready_msg = _qga_exec("cat /var/log/clonebox-ready 2>/dev/null || true", timeout=10)
-            if ready_msg and "CloneBox VM ready" in ready_msg:
-                cloud_init_complete = True
-                console.print("[green]✅ Cloud-init: Complete[/]")
-            else:
-                console.print("[yellow]⏳ Cloud-init: Still running (packages installing)[/]")
-    except Exception:
-        console.print("[yellow]⏳ Cloud-init status: Unknown (QEMU agent may not be ready)[/]")
-    
-    # Check mount status
-    console.print("\n[bold]💾 Checking mount status...[/]")
-    try:
-        if not cloud_init_complete:
-            console.print("[dim]Mounts may not be ready until cloud-init completes.[/]")
+        vm_name, config_file = _resolve_vm_name_and_config_file(name)
+    except FileNotFoundError as e:
+        console.print(f"[red]❌ {e}[/]")
+        return
 
-        if not guest_agent_ready:
-            console.print("[yellow]⏳ QEMU guest agent not connected yet - cannot verify mounts.[/]")
-            console.print("[dim]Wait a few minutes, then re-run: clonebox status . --user[/]")
-        else:
-            # Load config to get expected mounts
-            if not config_file:
-                config_file = Path.cwd() / ".clonebox.yaml"
+    run_vm_diagnostics(vm_name, conn_uri, config_file, verbose=False, json_output=False)
 
-            if config_file.exists():
-                config = load_clonebox_config(config_file)
-                all_paths = config.get("paths", {}).copy()
-                all_paths.update(config.get("app_data_paths", {}))
-                
-                if all_paths:
-                    mount_output = _qga_exec("mount | grep 9p || true", timeout=10) or ""
-                    
-                    mount_table = Table(title="Mount Points", border_style="cyan", show_header=True)
-                    mount_table.add_column("Guest Path", style="bold")
-                    mount_table.add_column("Status", justify="center")
-                    mount_table.add_column("Files", justify="right")
-                    
-                    mounted_paths = [
-                        line.split()[2] for line in mount_output.split("\n") if line.strip()
-                    ]
-                    
-                    # Check each expected mount
-                    working_mounts = 0
-                    total_mounts = 0
-                    for host_path, guest_path in all_paths.items():
-                        total_mounts += 1
-                        is_mounted = any(guest_path in mp for mp in mounted_paths)
-                        
-                        # Try to get file count
-                        file_count = "?"
-                        if is_mounted:
-                            try:
-                                count_str = _qga_exec(
-                                    f"ls -A {guest_path} 2>/dev/null | wc -l", timeout=5
-                                )
-                                if count_str and count_str.strip().isdigit():
-                                    file_count = count_str.strip()
-                            except:
-                                pass
-                        
-                        if is_mounted:
-                            status = "[green]✅ Mounted[/]"
-                            working_mounts += 1
-                        else:
-                            status = "[red]❌ Not mounted[/]"
-                        
-                        mount_table.add_row(guest_path, status, str(file_count))
-                    
-                    console.print(mount_table)
-                    console.print(f"[dim]{working_mounts}/{total_mounts} mounts active[/]")
-                    
-                    if working_mounts < total_mounts:
-                        console.print("[yellow]⚠️  Some mounts are missing. Try remounting in VM:[/]")
-                        console.print("[dim]  sudo mount -a[/]")
-                        console.print("[dim]Or rebuild VM with: clonebox clone . --user --run --replace[/]")
-                else:
-                    console.print("[dim]No mount points configured[/]")
-            else:
-                console.print("[dim]No .clonebox.yaml found - cannot check mounts[/]")
-    except Exception as e:
-        console.print(f"[yellow]⚠️  Cannot check mounts: {e}[/]")
-        console.print("[dim]QEMU guest agent may not be ready yet[/]")
-    
-    # Check health status if available
-    console.print("\n[bold]🏥 Health Check Status...[/]")
-    try:
-        if not guest_agent_ready:
-            console.print("[dim]Health status: Not available yet (QEMU guest agent not connected)[/]")
-        else:
-            health_status = _qga_exec("cat /var/log/clonebox-health-status 2>/dev/null || true")
-            if health_status and "HEALTH_STATUS=OK" in health_status:
-                console.print("[green]✅ Health: All checks passed[/]")
-            elif health_status and "HEALTH_STATUS=FAILED" in health_status:
-                console.print("[red]❌ Health: Some checks failed[/]")
-            else:
-                console.print("[yellow]⏳ Health check not yet run[/]")
-    except Exception:
-        console.print("[dim]Health status: Not available yet[/]")
-    
     # Show useful commands
     console.print("\n[bold]📋 Useful commands:[/]")
-    console.print(f"  [cyan]virt-viewer --connect {conn_uri} {name}[/]  # Open GUI")
-    console.print(f"  [cyan]virsh --connect {conn_uri} console {name}[/]  # Console access")
+    console.print(f"  [cyan]virt-viewer --connect {conn_uri} {vm_name}[/]  # Open GUI")
+    console.print(f"  [cyan]virsh --connect {conn_uri} console {vm_name}[/]  # Console access")
     console.print("  [dim]Inside VM:[/]")
     console.print("    [cyan]cat /var/log/clonebox-health.log[/]  # Full health report")
     console.print("    [cyan]sudo cloud-init status[/]  # Cloud-init status")
@@ -867,12 +1097,12 @@ def cmd_status(args):
         console.print("\n[bold]🔄 Running full health check...[/]")
         try:
             result = subprocess.run(
-                ["virsh", "--connect", conn_uri, "qemu-agent-command", name,
+                ["virsh", "--connect", conn_uri, "qemu-agent-command", vm_name,
                  '{"execute":"guest-exec","arguments":{"path":"/usr/local/bin/clonebox-health","capture-output":true}}'],
                 capture_output=True, text=True, timeout=60
             )
             console.print("[green]Health check triggered. View results with:[/]")
-            console.print(f"  [cyan]virsh --connect {conn_uri} console {name}[/]")
+            console.print(f"  [cyan]virsh --connect {conn_uri} console {vm_name}[/]")
             console.print("  Then run: [cyan]cat /var/log/clonebox-health.log[/]")
         except Exception as e:
             console.print(f"[yellow]⚠️  Could not trigger health check: {e}[/]")
@@ -2111,6 +2341,64 @@ def main():
     )
     list_parser.set_defaults(func=cmd_list)
 
+    # Container command
+    container_parser = subparsers.add_parser("container", help="Manage container sandboxes")
+    container_parser.add_argument(
+        "--engine",
+        choices=["auto", "podman", "docker"],
+        default="auto",
+        help="Container engine: auto (default), podman, docker",
+    )
+    container_sub = container_parser.add_subparsers(dest="container_command", help="Container commands")
+
+    container_up = container_sub.add_parser("up", help="Start container")
+    container_up.add_argument("path", nargs="?", default=".", help="Workspace path")
+    container_up.add_argument("--name", help="Container name")
+    container_up.add_argument("--image", default="ubuntu:22.04", help="Container image")
+    container_up.add_argument("--detach", action="store_true", help="Run container in background")
+    container_up.add_argument(
+        "--mount",
+        action="append",
+        default=[],
+        help="Extra mount HOST:CONTAINER (repeatable)",
+    )
+    container_up.add_argument(
+        "--port",
+        action="append",
+        default=[],
+        help="Port mapping (e.g. 8080:80) (repeatable)",
+    )
+    container_up.add_argument(
+        "--package",
+        action="append",
+        default=[],
+        help="APT package to install in image (repeatable)",
+    )
+    container_up.add_argument(
+        "--no-dotenv",
+        action="store_true",
+        help="Do not load env vars from workspace .env",
+    )
+    container_up.set_defaults(func=cmd_container_up)
+
+    container_ps = container_sub.add_parser("ps", aliases=["ls"], help="List containers")
+    container_ps.add_argument("-a", "--all", action="store_true", help="Show all containers")
+    container_ps.add_argument("--json", action="store_true", help="Output JSON")
+    container_ps.set_defaults(func=cmd_container_ps)
+
+    container_stop = container_sub.add_parser("stop", help="Stop container")
+    container_stop.add_argument("name", help="Container name")
+    container_stop.set_defaults(func=cmd_container_stop)
+
+    container_rm = container_sub.add_parser("rm", help="Remove container")
+    container_rm.add_argument("name", help="Container name")
+    container_rm.add_argument("-f", "--force", action="store_true", help="Force remove")
+    container_rm.set_defaults(func=cmd_container_rm)
+
+    container_down = container_sub.add_parser("down", help="Stop and remove container")
+    container_down.add_argument("name", help="Container name")
+    container_down.set_defaults(func=cmd_container_down)
+
     # Detect command
     detect_parser = subparsers.add_parser("detect", help="Detect system state")
     detect_parser.add_argument("--json", action="store_true", help="Output as JSON")
@@ -2177,6 +2465,27 @@ def main():
         "--health", "-H", action="store_true", help="Run full health check"
     )
     status_parser.set_defaults(func=cmd_status)
+
+    # Diagnose command - detailed diagnostics from workstation
+    diagnose_parser = subparsers.add_parser(
+        "diagnose", aliases=["diag"], help="Run detailed VM diagnostics"
+    )
+    diagnose_parser.add_argument(
+        "name", nargs="?", default=None, help="VM name or '.' to use .clonebox.yaml"
+    )
+    diagnose_parser.add_argument(
+        "-u",
+        "--user",
+        action="store_true",
+        help="Use user session (qemu:///session)",
+    )
+    diagnose_parser.add_argument(
+        "--verbose", "-v", action="store_true", help="Show more low-level details"
+    )
+    diagnose_parser.add_argument(
+        "--json", action="store_true", help="Print diagnostics as JSON"
+    )
+    diagnose_parser.set_defaults(func=cmd_diagnose)
 
     # Export command - package VM for migration
     export_parser = subparsers.add_parser("export", help="Export VM and data for migration")
