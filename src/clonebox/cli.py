@@ -770,7 +770,8 @@ def cmd_clone(args):
         ).ask()
 
     if create_now:
-        config = yaml.safe_load(yaml_content)
+        # Load config with environment variable expansion
+        config = load_clonebox_config(config_file.parent)
         user_session = getattr(args, "user", False)
 
         console.print("\n[bold cyan]🔧 Creating VM...[/]\n")

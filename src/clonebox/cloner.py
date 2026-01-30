@@ -533,13 +533,12 @@ users:
     shell: /bin/bash
     lock_passwd: false
     groups: sudo,adm,dialout,cdrom,floppy,audio,dip,video,plugdev,netdev
+    plain_text_passwd: {config.password}
 
 # Allow password authentication
 ssh_pwauth: true
 chpasswd:
   expire: false
-  list:
-    - {config.username}:{config.password}
 
 packages:
 {packages_yaml}

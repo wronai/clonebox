@@ -289,17 +289,38 @@ wget -O ~/Downloads/clonebox-ubuntu-jammy-amd64.qcow2 \
 
 ### VM Login Credentials
 
-All VMs are created with a default user configured via cloud-init:
+VM credentials are managed through `.env` file for security:
 
-**Username:** `ubuntu`  
-**Password:** `ubuntu`
+**Setup:**
+1. Copy `.env.example` to `.env`:
+   ```bash
+   cp .env.example .env
+   ```
 
-The user has passwordless sudo access. You can change the password after first login:
+2. Edit `.env` and set your password:
+   ```bash
+   # .env file
+   VM_PASSWORD=your_secure_password
+   VM_USERNAME=ubuntu
+   ```
 
-```bash
-# Inside the VM
-passwd
-```
+3. The `.clonebox.yaml` file references the password from `.env`:
+   ```yaml
+   vm:
+     username: ubuntu
+     password: ${VM_PASSWORD}  # Loaded from .env
+   ```
+
+**Default credentials (if .env not configured):**
+- **Username:** `ubuntu`
+- **Password:** `ubuntu`
+
+**Security notes:**
+- `.env` is automatically gitignored (never committed)
+- Username is stored in YAML (not sensitive)
+- Password is stored in `.env` (sensitive, not committed)
+- Change password after first login: `passwd`
+- User has passwordless sudo access
 
 ### User Session & Networking
 
