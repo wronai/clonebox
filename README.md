@@ -26,6 +26,37 @@ CloneBox lets you create isolated virtual machines with only the applications, d
 - ⚡ **Fast creation** - No full disk cloning, VMs are ready in seconds
 - 📥 **Auto-download** - Automatically downloads and caches Ubuntu cloud images (stored in ~/Downloads)
 
+
+
+
+CloneBox to narzędzie CLI do **szybkiego klonowania aktualnego środowiska workstation do izolowanej maszyny wirtualnej (VM)**. 
+Zamiast pełnego kopiowania dysku, używa **bind mounts** (udostępnianie katalogów na żywo) i **cloud-init** do selektywnego przeniesienia tylko potrzebnych elementów: uruchomionych usług (Docker, PostgreSQL, nginx), aplikacji, ścieżek projektów i konfiguracji. Automatycznie pobiera obrazy Ubuntu, instaluje pakiety i uruchamia VM z SPICE GUI. Idealne dla deweloperów na Linuxie – VM powstaje w minuty, bez duplikowania danych.
+
+Kluczowe komendy:
+- `clonebox` – interaktywny wizard (detect + create + start)
+- `clonebox detect` – skanuje usługi/apps/ścieżki
+- `clonebox clone . --user --run` – szybki klon bieżącego katalogu z użytkownikiem i autostartem
+
+### Dlaczego wirtualne klony workstation mają sens?
+
+**Problem**: Developerzy/Vibecoderzy nie izolują środowisk dev/test (np. dla AI agentów), bo ręczne odtwarzanie setupu to ból – godziny na instalację apps, usług, configów, dotfiles. Przechodzenie z fizycznego PC na VM wymagałoby pełnego rebuilda, co blokuje workflow.
+
+**Rozwiązanie CloneBox**: Automatycznie **skanuje i klonuje stan "tu i teraz"** (usługi z `ps`, dockery z `docker ps`, projekty z git/.env). VM dziedziczy środowisko bez kopiowania całego śmietnika – tylko wybrane bind mounty. 
+
+**Korzyści w twoim kontekście (embedded/distributed systems, AI automation)**:
+- **Sandbox dla eksperymentów**: Testuj AI agenty, edge computing (RPi/ESP32 symulacje) czy Camel/ERP integracje w izolacji, bez psucia hosta.
+- **Reprodukcja workstation**: Na firmowym PC masz setup z domu (Python/Rust/Go envs, Docker compose, Postgres dev DB) – klonujesz i pracujesz identycznie.
+- **Szybkość > dotfiles**: Dotfiles odtwarzają configi, ale nie łapią runtime stanu (uruchomione serwery, otwarte projekty). CloneBox to "snapshot na sterydach".
+- **Bezpieczeństwo/cost-optymalizacja**: Izolacja od plików hosta (tylko mounts), zero downtime, tanie w zasobach (libvirt/QEMU). Dla SME: szybki onboarding dev env bez migracji fizycznej.
+- **AI-friendly**: Agenci LLMs (jak te z twoich hobby) mogą działać w VM z pełnym kontekstem, bez ryzyka "zasmiecania" main PC.
+
+Przykład: Masz uruchomiony Kubernetes Podman z twoim home labem + projekt automotive leasing. `clonebox clone ~/projects --run` → VM gotowa w 30s, z tymi samymi serwisami, ale izolowana. Lepsze niż Docker (brak GUI/full OS) czy pełna migracja.
+
+**Dlaczego ludzie tego nie robią?** Brak automatyzacji – nikt nie chce ręcznie rebuildować. 
+- CloneBox rozwiązuje to jednym poleceniem. Super match dla twoich interesów (distributed infra, AI tools, business automation).
+
+
+
 ## Installation
 
 ### Quick Setup (Recommended)
