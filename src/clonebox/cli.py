@@ -80,98 +80,95 @@ def _resolve_vm_name_and_config_file(name: Optional[str]) -> tuple[str, Optional
 
 
 def _qga_ping(vm_name: str, conn_uri: str) -> bool:
-    def _qga_ping() -> bool:
-        try:
-            result = subprocess.run(
+    import subprocess
+
+    try:
+        result = subprocess.run(
+            [
+                "virsh",
+                "--connect",
+                conn_uri,
+                "qemu-agent-command",
+                vm_name,
+                json.dumps({"execute": "guest-ping"}),
+            ],
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+        return result.returncode == 0
+    except Exception:
+        return False
+
+
+def _qga_exec(vm_name: str, conn_uri: str, command: str, timeout: int = 10) -> Optional[str]:
+    import subprocess
+    import base64
+    import time
+
+    try:
+        payload = {
+            "execute": "guest-exec",
+            "arguments": {
+                "path": "/bin/sh",
+                "arg": ["-c", command],
+                "capture-output": True,
+            },
+        }
+        exec_result = subprocess.run(
+            [
+                "virsh",
+                "--connect",
+                conn_uri,
+                "qemu-agent-command",
+                vm_name,
+                json.dumps(payload),
+            ],
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+        )
+        if exec_result.returncode != 0:
+            return None
+
+        resp = json.loads(exec_result.stdout)
+        pid = resp.get("return", {}).get("pid")
+        if not pid:
+            return None
+
+        deadline = time.time() + timeout
+        while time.time() < deadline:
+            status_payload = {"execute": "guest-exec-status", "arguments": {"pid": pid}}
+            status_result = subprocess.run(
                 [
                     "virsh",
                     "--connect",
                     conn_uri,
                     "qemu-agent-command",
                     vm_name,
-                    json.dumps({"execute": "guest-ping"}),
+                    json.dumps(status_payload),
                 ],
                 capture_output=True,
                 text=True,
                 timeout=5,
             )
-            return result.returncode == 0
-        except Exception:
-            return False
-
-    return _qga_ping()
-
-
-def _qga_exec(vm_name: str, conn_uri: str, command: str, timeout: int = 10) -> Optional[str]:
-    def _qga_exec() -> Optional[str]:
-        try:
-            payload = {
-                "execute": "guest-exec",
-                "arguments": {
-                    "path": "/bin/sh",
-                    "arg": ["-c", command],
-                    "capture-output": True,
-                },
-            }
-            exec_result = subprocess.run(
-                [
-                    "virsh",
-                    "--connect",
-                    conn_uri,
-                    "qemu-agent-command",
-                    vm_name,
-                    json.dumps(payload),
-                ],
-                capture_output=True,
-                text=True,
-                timeout=timeout,
-            )
-            if exec_result.returncode != 0:
+            if status_result.returncode != 0:
                 return None
 
-            resp = json.loads(exec_result.stdout)
-            pid = resp.get("return", {}).get("pid")
-            if not pid:
-                return None
+            status_resp = json.loads(status_result.stdout)
+            ret = status_resp.get("return", {})
+            if not ret.get("exited", False):
+                time.sleep(0.3)
+                continue
 
-            import base64
-            import time
+            out_data = ret.get("out-data")
+            if out_data:
+                return base64.b64decode(out_data).decode().strip()
+            return ""
 
-            deadline = time.time() + timeout
-            while time.time() < deadline:
-                status_payload = {"execute": "guest-exec-status", "arguments": {"pid": pid}}
-                status_result = subprocess.run(
-                    [
-                        "virsh",
-                        "--connect",
-                        conn_uri,
-                        "qemu-agent-command",
-                        vm_name,
-                        json.dumps(status_payload),
-                    ],
-                    capture_output=True,
-                    text=True,
-                    timeout=5,
-                )
-                if status_result.returncode != 0:
-                    return None
-
-                status_resp = json.loads(status_result.stdout)
-                ret = status_resp.get("return", {})
-                if not ret.get("exited", False):
-                    time.sleep(0.3)
-                    continue
-
-                out_data = ret.get("out-data")
-                if out_data:
-                    return base64.b64decode(out_data).decode().strip()
-                return ""
-
-            return None
-        except Exception:
-            return None
-
-    return _qga_exec()
+        return None
+    except Exception:
+        return None
 
 
 def run_vm_diagnostics(
