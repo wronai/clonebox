@@ -236,6 +236,16 @@ class VMValidator:
         
         return self.results["snap_packages"]
     
+    # Services that should NOT be validated in VM (host-specific)
+    VM_EXCLUDED_SERVICES = {
+        "libvirtd", "virtlogd", "libvirt-guests", "qemu-guest-agent",
+        "bluetooth", "bluez", "upower", "thermald", "tlp", "power-profiles-daemon",
+        "gdm", "gdm3", "sddm", "lightdm",
+        "snap.cups.cups-browsed", "snap.cups.cupsd",
+        "ModemManager", "wpa_supplicant",
+        "accounts-daemon", "colord", "switcheroo-control",
+    }
+
     def validate_services(self) -> Dict:
         """Validate services are enabled and running."""
         self.console.print("\n[bold]⚙️  Validating Services...[/]")
@@ -245,12 +255,30 @@ class VMValidator:
             self.console.print("[dim]No services configured[/]")
             return self.results["services"]
         
+        # Initialize skipped counter
+        if "skipped" not in self.results["services"]:
+            self.results["services"]["skipped"] = 0
+        
         svc_table = Table(title="Service Validation", border_style="cyan")
         svc_table.add_column("Service", style="bold")
         svc_table.add_column("Enabled", justify="center")
         svc_table.add_column("Running", justify="center")
+        svc_table.add_column("Note", style="dim")
         
         for service in services:
+            # Check if service should be skipped (host-specific)
+            if service in self.VM_EXCLUDED_SERVICES:
+                svc_table.add_row(service, "[dim]—[/]", "[dim]—[/]", "host-only")
+                self.results["services"]["skipped"] += 1
+                self.results["services"]["details"].append({
+                    "service": service,
+                    "enabled": None,
+                    "running": None,
+                    "skipped": True,
+                    "reason": "host-specific service"
+                })
+                continue
+            
             self.results["services"]["total"] += 1
             
             # Check if enabled
@@ -266,7 +294,7 @@ class VMValidator:
             enabled_icon = "[green]✅[/]" if is_enabled else "[yellow]⚠️[/]"
             running_icon = "[green]✅[/]" if is_running else "[red]❌[/]"
             
-            svc_table.add_row(service, enabled_icon, running_icon)
+            svc_table.add_row(service, enabled_icon, running_icon, "")
             
             if is_enabled and is_running:
                 self.results["services"]["passed"] += 1
@@ -276,11 +304,16 @@ class VMValidator:
             self.results["services"]["details"].append({
                 "service": service,
                 "enabled": is_enabled,
-                "running": is_running
+                "running": is_running,
+                "skipped": False
             })
         
         self.console.print(svc_table)
-        self.console.print(f"[dim]{self.results['services']['passed']}/{self.results['services']['total']} services active[/]")
+        skipped = self.results["services"].get("skipped", 0)
+        msg = f"{self.results['services']['passed']}/{self.results['services']['total']} services active"
+        if skipped > 0:
+            msg += f" ({skipped} host-only skipped)"
+        self.console.print(f"[dim]{msg}[/]")
         
         return self.results["services"]
     
@@ -334,28 +367,35 @@ class VMValidator:
             self.results["services"]["failed"]
         )
         
+        # Get skipped services count
+        skipped_services = self.results["services"].get("skipped", 0)
+        
         # Print summary
         self.console.print("\n[bold]📊 Validation Summary[/]")
         summary_table = Table(border_style="cyan")
         summary_table.add_column("Category", style="bold")
         summary_table.add_column("Passed", justify="right", style="green")
         summary_table.add_column("Failed", justify="right", style="red")
+        summary_table.add_column("Skipped", justify="right", style="dim")
         summary_table.add_column("Total", justify="right")
         
         summary_table.add_row("Mounts", str(self.results["mounts"]["passed"]), 
-                             str(self.results["mounts"]["failed"]), 
+                             str(self.results["mounts"]["failed"]), "—",
                              str(self.results["mounts"]["total"]))
         summary_table.add_row("APT Packages", str(self.results["packages"]["passed"]), 
-                             str(self.results["packages"]["failed"]), 
+                             str(self.results["packages"]["failed"]), "—",
                              str(self.results["packages"]["total"]))
         summary_table.add_row("Snap Packages", str(self.results["snap_packages"]["passed"]), 
-                             str(self.results["snap_packages"]["failed"]), 
+                             str(self.results["snap_packages"]["failed"]), "—",
                              str(self.results["snap_packages"]["total"]))
         summary_table.add_row("Services", str(self.results["services"]["passed"]), 
                              str(self.results["services"]["failed"]), 
+                             str(skipped_services),
                              str(self.results["services"]["total"]))
         summary_table.add_row("[bold]TOTAL", f"[bold green]{total_passed}", 
-                             f"[bold red]{total_failed}", f"[bold]{total_checks}")
+                             f"[bold red]{total_failed}", 
+                             f"[dim]{skipped_services}[/]",
+                             f"[bold]{total_checks}")
         
         self.console.print(summary_table)
         

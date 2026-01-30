@@ -1689,8 +1689,18 @@ def generate_clonebox_yaml(
     """Generate YAML config from system snapshot."""
     sys_info = detector.get_system_info()
 
-    # Collect services
-    services = [s.name for s in snapshot.running_services]
+    # Services that should NOT be cloned to VM (host-specific)
+    VM_EXCLUDED_SERVICES = {
+        "libvirtd", "virtlogd", "libvirt-guests", "qemu-guest-agent",
+        "bluetooth", "bluez", "upower", "thermald", "tlp", "power-profiles-daemon",
+        "gdm", "gdm3", "sddm", "lightdm",
+        "snap.cups.cups-browsed", "snap.cups.cupsd",
+        "ModemManager", "wpa_supplicant",
+        "accounts-daemon", "colord", "switcheroo-control",
+    }
+
+    # Collect services (excluding host-specific ones)
+    services = [s.name for s in snapshot.running_services if s.name not in VM_EXCLUDED_SERVICES]
     if deduplicate:
         services = deduplicate_list(services)
 
