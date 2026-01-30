@@ -488,6 +488,442 @@ def cmd_list(args):
     console.print(table)
 
 
+def cmd_status(args):
+    """Check VM installation status and health from workstation."""
+    import subprocess
+    
+    name = args.name
+    user_session = getattr(args, "user", False)
+    conn_uri = "qemu:///session" if user_session else "qemu:///system"
+    
+    # If name is a path, load config to get VM name
+    if name and (name.startswith(".") or name.startswith("/") or name.startswith("~")):
+        target_path = Path(name).expanduser().resolve()
+        config_file = target_path / ".clonebox.yaml" if target_path.is_dir() else target_path
+        if config_file.exists():
+            config = load_clonebox_config(config_file)
+            name = config["vm"]["name"]
+        else:
+            console.print(f"[red]❌ Config not found: {config_file}[/]")
+            return
+    
+    if not name:
+        # Try current directory
+        config_file = Path.cwd() / ".clonebox.yaml"
+        if config_file.exists():
+            config = load_clonebox_config(config_file)
+            name = config["vm"]["name"]
+        else:
+            console.print("[red]❌ No VM name specified and no .clonebox.yaml found[/]")
+            return
+    
+    console.print(f"[bold cyan]📊 Checking VM status: {name}[/]\n")
+    
+    # Check VM state
+    try:
+        result = subprocess.run(
+            ["virsh", "--connect", conn_uri, "domstate", name],
+            capture_output=True, text=True, timeout=5
+        )
+        vm_state = result.stdout.strip()
+        
+        if "running" in vm_state.lower():
+            console.print(f"[green]✅ VM State: {vm_state}[/]")
+        elif "shut off" in vm_state.lower():
+            console.print(f"[yellow]⏸️  VM State: {vm_state}[/]")
+            console.print("[dim]Start with: clonebox start .[/]")
+            return
+        else:
+            console.print(f"[dim]VM State: {vm_state}[/]")
+    except subprocess.TimeoutExpired:
+        console.print("[red]❌ Timeout checking VM state[/]")
+        return
+    except Exception as e:
+        console.print(f"[red]❌ Error: {e}[/]")
+        return
+    
+    # Get VM IP address
+    console.print("\n[bold]🔍 Checking VM network...[/]")
+    try:
+        result = subprocess.run(
+            ["virsh", "--connect", conn_uri, "domifaddr", name],
+            capture_output=True, text=True, timeout=10
+        )
+        if result.stdout.strip():
+            console.print(f"[dim]{result.stdout.strip()}[/]")
+            # Extract IP
+            for line in result.stdout.split('\n'):
+                if 'ipv4' in line.lower():
+                    parts = line.split()
+                    for p in parts:
+                        if '/' in p and '.' in p:
+                            ip = p.split('/')[0]
+                            console.print(f"[green]IP Address: {ip}[/]")
+                            break
+        else:
+            console.print("[yellow]⚠️  No IP address yet (VM may still be booting)[/]")
+    except Exception as e:
+        console.print(f"[yellow]⚠️  Cannot get IP: {e}[/]")
+    
+    # Check cloud-init status via console
+    console.print("\n[bold]☁️  Checking cloud-init status...[/]")
+    try:
+        # Use virsh console to check - this is tricky, so we check for the ready file
+        result = subprocess.run(
+            ["virsh", "--connect", conn_uri, "qemu-agent-command", name, 
+             '{"execute":"guest-exec","arguments":{"path":"/bin/cat","arg":["/var/log/clonebox-ready"],"capture-output":true}}'],
+            capture_output=True, text=True, timeout=10
+        )
+        if "CloneBox VM ready" in result.stdout or result.returncode == 0:
+            console.print("[green]✅ Cloud-init: Complete[/]")
+        else:
+            console.print("[yellow]⏳ Cloud-init: Still running (packages installing)[/]")
+    except Exception:
+        console.print("[yellow]⏳ Cloud-init status: Unknown (QEMU agent may not be ready)[/]")
+    
+    # Check health status if available
+    console.print("\n[bold]🏥 Health Check Status...[/]")
+    try:
+        result = subprocess.run(
+            ["virsh", "--connect", conn_uri, "qemu-agent-command", name,
+             '{"execute":"guest-exec","arguments":{"path":"/bin/cat","arg":["/var/log/clonebox-health-status"],"capture-output":true}}'],
+            capture_output=True, text=True, timeout=10
+        )
+        if "HEALTH_STATUS=OK" in result.stdout:
+            console.print("[green]✅ Health: All checks passed[/]")
+        elif "HEALTH_STATUS=FAILED" in result.stdout:
+            console.print("[red]❌ Health: Some checks failed[/]")
+        else:
+            console.print("[yellow]⏳ Health check not yet run[/]")
+    except Exception:
+        console.print("[dim]Health status: Not available yet[/]")
+    
+    # Show useful commands
+    console.print("\n[bold]📋 Useful commands:[/]")
+    console.print(f"  [cyan]virt-viewer --connect {conn_uri} {name}[/]  # Open GUI")
+    console.print(f"  [cyan]virsh --connect {conn_uri} console {name}[/]  # Console access")
+    console.print("  [dim]Inside VM:[/]")
+    console.print("    [cyan]cat /var/log/clonebox-health.log[/]  # Full health report")
+    console.print("    [cyan]sudo cloud-init status[/]  # Cloud-init status")
+    console.print("    [cyan]clonebox-health[/]  # Re-run health check")
+    
+    # Run full health check if requested
+    if getattr(args, "health", False):
+        console.print("\n[bold]🔄 Running full health check...[/]")
+        try:
+            result = subprocess.run(
+                ["virsh", "--connect", conn_uri, "qemu-agent-command", name,
+                 '{"execute":"guest-exec","arguments":{"path":"/usr/local/bin/clonebox-health","capture-output":true}}'],
+                capture_output=True, text=True, timeout=60
+            )
+            console.print("[green]Health check triggered. View results with:[/]")
+            console.print(f"  [cyan]virsh --connect {conn_uri} console {name}[/]")
+            console.print("  Then run: [cyan]cat /var/log/clonebox-health.log[/]")
+        except Exception as e:
+            console.print(f"[yellow]⚠️  Could not trigger health check: {e}[/]")
+
+
+def cmd_export(args):
+    """Export VM and data for migration to another workstation."""
+    import subprocess
+    import tarfile
+    import shutil
+    
+    name = args.name
+    user_session = getattr(args, "user", False)
+    conn_uri = "qemu:///session" if user_session else "qemu:///system"
+    include_data = getattr(args, "include_data", False)
+    output = getattr(args, "output", None)
+    
+    # If name is a path, load config
+    if name and (name.startswith(".") or name.startswith("/") or name.startswith("~")):
+        target_path = Path(name).expanduser().resolve()
+        config_file = target_path / ".clonebox.yaml" if target_path.is_dir() else target_path
+        if config_file.exists():
+            config = load_clonebox_config(config_file)
+            name = config["vm"]["name"]
+        else:
+            console.print(f"[red]❌ Config not found: {config_file}[/]")
+            return
+    
+    if not name:
+        config_file = Path.cwd() / ".clonebox.yaml"
+        if config_file.exists():
+            config = load_clonebox_config(config_file)
+            name = config["vm"]["name"]
+        else:
+            console.print("[red]❌ No VM name specified[/]")
+            return
+    
+    console.print(f"[bold cyan]📦 Exporting VM: {name}[/]\n")
+    
+    # Determine storage path
+    if user_session:
+        storage_base = Path.home() / ".local/share/libvirt/images"
+    else:
+        storage_base = Path("/var/lib/libvirt/images")
+    
+    vm_dir = storage_base / name
+    
+    if not vm_dir.exists():
+        console.print(f"[red]❌ VM storage not found: {vm_dir}[/]")
+        return
+    
+    # Create export directory
+    export_name = output or f"{name}-export.tar.gz"
+    if not export_name.endswith(".tar.gz"):
+        export_name += ".tar.gz"
+    
+    export_path = Path(export_name).resolve()
+    temp_dir = Path(f"/tmp/clonebox-export-{name}")
+    
+    try:
+        # Clean up temp dir if exists
+        if temp_dir.exists():
+            shutil.rmtree(temp_dir)
+        temp_dir.mkdir(parents=True)
+        
+        # Stop VM if running
+        console.print("[cyan]Stopping VM for export...[/]")
+        subprocess.run(
+            ["virsh", "--connect", conn_uri, "shutdown", name],
+            capture_output=True, timeout=30
+        )
+        import time
+        time.sleep(5)
+        subprocess.run(
+            ["virsh", "--connect", conn_uri, "destroy", name],
+            capture_output=True, timeout=10
+        )
+        
+        # Export VM XML
+        console.print("[cyan]Exporting VM definition...[/]")
+        result = subprocess.run(
+            ["virsh", "--connect", conn_uri, "dumpxml", name],
+            capture_output=True, text=True, timeout=30
+        )
+        (temp_dir / "vm.xml").write_text(result.stdout)
+        
+        # Copy disk image
+        console.print("[cyan]Copying disk image (this may take a while)...[/]")
+        disk_image = vm_dir / f"{name}.qcow2"
+        if disk_image.exists():
+            shutil.copy2(disk_image, temp_dir / "disk.qcow2")
+        
+        # Copy cloud-init ISO
+        cloudinit_iso = vm_dir / "cloud-init.iso"
+        if cloudinit_iso.exists():
+            shutil.copy2(cloudinit_iso, temp_dir / "cloud-init.iso")
+        
+        # Copy config file
+        config_file = Path.cwd() / ".clonebox.yaml"
+        if config_file.exists():
+            shutil.copy2(config_file, temp_dir / ".clonebox.yaml")
+        
+        # Copy .env file (without sensitive data warning)
+        env_file = Path.cwd() / ".env"
+        if env_file.exists():
+            shutil.copy2(env_file, temp_dir / ".env")
+        
+        # Include shared data if requested
+        if include_data:
+            console.print("[cyan]Bundling shared data (browser profiles, configs)...[/]")
+            data_dir = temp_dir / "data"
+            data_dir.mkdir()
+            
+            # Load config to get paths
+            if config_file.exists():
+                config = load_clonebox_config(config_file)
+                all_paths = config.get("paths", {}).copy()
+                all_paths.update(config.get("app_data_paths", {}))
+                
+                for idx, (host_path, guest_path) in enumerate(all_paths.items()):
+                    host_p = Path(host_path)
+                    if host_p.exists():
+                        dest = data_dir / f"mount{idx}"
+                        console.print(f"  [dim]Copying {host_path}...[/]")
+                        try:
+                            if host_p.is_dir():
+                                shutil.copytree(host_p, dest, symlinks=True, 
+                                              ignore=shutil.ignore_patterns('*.pyc', '__pycache__', '.git'))
+                            else:
+                                shutil.copy2(host_p, dest)
+                        except Exception as e:
+                            console.print(f"  [yellow]⚠️  Skipped {host_path}: {e}[/]")
+                
+                # Save path mapping
+                import json
+                (data_dir / "paths.json").write_text(json.dumps(all_paths, indent=2))
+        
+        # Create tarball
+        console.print(f"[cyan]Creating archive: {export_path}[/]")
+        with tarfile.open(export_path, "w:gz") as tar:
+            tar.add(temp_dir, arcname=name)
+        
+        # Get size
+        size_mb = export_path.stat().st_size / 1024 / 1024
+        
+        console.print(f"\n[bold green]✅ Export complete![/]")
+        console.print(f"   File: [cyan]{export_path}[/]")
+        console.print(f"   Size: [cyan]{size_mb:.1f} MB[/]")
+        console.print(f"\n[bold]To import on another workstation:[/]")
+        console.print(f"   [cyan]clonebox import {export_path.name}[/]")
+        
+    finally:
+        # Cleanup
+        if temp_dir.exists():
+            shutil.rmtree(temp_dir)
+        
+        # Restart VM
+        console.print("\n[cyan]Restarting VM...[/]")
+        subprocess.run(
+            ["virsh", "--connect", conn_uri, "start", name],
+            capture_output=True, timeout=30
+        )
+
+
+def cmd_import(args):
+    """Import VM from export archive."""
+    import subprocess
+    import tarfile
+    import shutil
+    
+    archive_path = Path(args.archive).resolve()
+    user_session = getattr(args, "user", False)
+    conn_uri = "qemu:///session" if user_session else "qemu:///system"
+    
+    if not archive_path.exists():
+        console.print(f"[red]❌ Archive not found: {archive_path}[/]")
+        return
+    
+    console.print(f"[bold cyan]📥 Importing VM from: {archive_path}[/]\n")
+    
+    # Determine storage path
+    if user_session:
+        storage_base = Path.home() / ".local/share/libvirt/images"
+    else:
+        storage_base = Path("/var/lib/libvirt/images")
+    
+    storage_base.mkdir(parents=True, exist_ok=True)
+    
+    temp_dir = Path(f"/tmp/clonebox-import-{archive_path.stem}")
+    
+    try:
+        # Extract archive
+        console.print("[cyan]Extracting archive...[/]")
+        if temp_dir.exists():
+            shutil.rmtree(temp_dir)
+        temp_dir.mkdir(parents=True)
+        
+        with tarfile.open(archive_path, "r:gz") as tar:
+            tar.extractall(temp_dir)
+        
+        # Find extracted VM directory
+        vm_dirs = list(temp_dir.iterdir())
+        if not vm_dirs:
+            console.print("[red]❌ Empty archive[/]")
+            return
+        
+        extracted_dir = vm_dirs[0]
+        vm_name = extracted_dir.name
+        
+        console.print(f"[cyan]VM Name: {vm_name}[/]")
+        
+        # Create VM storage directory
+        vm_storage = storage_base / vm_name
+        if vm_storage.exists():
+            if not getattr(args, "replace", False):
+                console.print(f"[red]❌ VM '{vm_name}' already exists. Use --replace to overwrite.[/]")
+                return
+            shutil.rmtree(vm_storage)
+        
+        vm_storage.mkdir(parents=True)
+        
+        # Copy disk image
+        console.print("[cyan]Copying disk image...[/]")
+        disk_src = extracted_dir / "disk.qcow2"
+        if disk_src.exists():
+            shutil.copy2(disk_src, vm_storage / f"{vm_name}.qcow2")
+        
+        # Copy cloud-init ISO
+        cloudinit_src = extracted_dir / "cloud-init.iso"
+        if cloudinit_src.exists():
+            shutil.copy2(cloudinit_src, vm_storage / "cloud-init.iso")
+        
+        # Copy config files to current directory
+        config_src = extracted_dir / ".clonebox.yaml"
+        if config_src.exists():
+            shutil.copy2(config_src, Path.cwd() / ".clonebox.yaml")
+            console.print("[green]✅ Copied .clonebox.yaml[/]")
+        
+        env_src = extracted_dir / ".env"
+        if env_src.exists():
+            shutil.copy2(env_src, Path.cwd() / ".env")
+            console.print("[green]✅ Copied .env[/]")
+        
+        # Restore data if included
+        data_dir = extracted_dir / "data"
+        if data_dir.exists():
+            import json
+            paths_file = data_dir / "paths.json"
+            if paths_file.exists():
+                paths_mapping = json.loads(paths_file.read_text())
+                console.print("\n[cyan]Restoring shared data...[/]")
+                
+                for idx, (host_path, guest_path) in enumerate(paths_mapping.items()):
+                    src = data_dir / f"mount{idx}"
+                    if src.exists():
+                        dest = Path(host_path)
+                        console.print(f"  [dim]Restoring to {host_path}...[/]")
+                        try:
+                            if dest.exists():
+                                console.print(f"    [yellow]⚠️  Skipped (already exists)[/]")
+                            else:
+                                dest.parent.mkdir(parents=True, exist_ok=True)
+                                if src.is_dir():
+                                    shutil.copytree(src, dest)
+                                else:
+                                    shutil.copy2(src, dest)
+                        except Exception as e:
+                            console.print(f"    [yellow]⚠️  Error: {e}[/]")
+        
+        # Modify and define VM XML
+        console.print("\n[cyan]Defining VM...[/]")
+        xml_src = extracted_dir / "vm.xml"
+        if xml_src.exists():
+            xml_content = xml_src.read_text()
+            
+            # Update paths in XML to new storage location
+            # This is a simple replacement - may need more sophisticated handling
+            xml_content = xml_content.replace(
+                f"/home/", f"{Path.home()}/"
+            )
+            
+            # Write modified XML
+            modified_xml = temp_dir / "vm-modified.xml"
+            modified_xml.write_text(xml_content)
+            
+            # Define VM
+            result = subprocess.run(
+                ["virsh", "--connect", conn_uri, "define", str(modified_xml)],
+                capture_output=True, text=True, timeout=30
+            )
+            
+            if result.returncode == 0:
+                console.print(f"[green]✅ VM '{vm_name}' defined successfully![/]")
+            else:
+                console.print(f"[yellow]⚠️  VM definition warning: {result.stderr}[/]")
+        
+        console.print(f"\n[bold green]✅ Import complete![/]")
+        console.print(f"\n[bold]To start the VM:[/]")
+        console.print(f"   [cyan]clonebox start . {'--user' if user_session else ''}[/]")
+        
+    finally:
+        # Cleanup
+        if temp_dir.exists():
+            shutil.rmtree(temp_dir)
+
+
 CLONEBOX_CONFIG_FILE = ".clonebox.yaml"
 CLONEBOX_ENV_FILE = ".env"
 
@@ -709,7 +1145,7 @@ def load_clonebox_config(path: Path) -> dict:
     return config
 
 
-def monitor_cloud_init_status(vm_name: str, user_session: bool = False, timeout: int = 600):
+def monitor_cloud_init_status(vm_name: str, user_session: bool = False, timeout: int = 900):
     """Monitor cloud-init status in VM and show progress."""
     import subprocess
     import time
@@ -763,15 +1199,17 @@ def monitor_cloud_init_status(vm_name: str, user_session: bool = False, timeout:
                     time.sleep(2)
                     break
                 
-                # Estimate remaining time
+                # Estimate remaining time (total ~12-15 minutes for full desktop install)
                 if elapsed < 60:
-                    remaining = "~9-10 minutes"
-                elif elapsed < 180:
-                    remaining = f"~{8 - minutes} minutes"
+                    remaining = "~12-15 minutes"
                 elif elapsed < 300:
-                    remaining = f"~{6 - minutes} minutes"
+                    remaining = f"~{12 - minutes} minutes"
+                elif elapsed < 600:
+                    remaining = f"~{10 - minutes} minutes"
+                elif elapsed < 800:
+                    remaining = "finishing soon..."
                 else:
-                    remaining = "finishing soon"
+                    remaining = "almost done"
                 
                 if restart_detected:
                     progress.update(task, description=f"[cyan]Starting GUI... ({minutes}m {seconds}s, {remaining})")
@@ -1177,6 +1615,22 @@ def main():
         help="If VM already exists, stop+undefine it and recreate (also deletes its storage)",
     )
     clone_parser.set_defaults(func=cmd_clone)
+
+    # Status command - check VM health from workstation
+    status_parser = subparsers.add_parser("status", help="Check VM installation status and health")
+    status_parser.add_argument(
+        "name", nargs="?", default=None, help="VM name or '.' to use .clonebox.yaml"
+    )
+    status_parser.add_argument(
+        "-u",
+        "--user",
+        action="store_true",
+        help="Use user session (qemu:///session)",
+    )
+    status_parser.add_argument(
+        "--health", "-H", action="store_true", help="Run full health check"
+    )
+    status_parser.set_defaults(func=cmd_status)
 
     args = parser.parse_args()
 

@@ -659,15 +659,18 @@ fi
         meta_data = f"instance-id: {config.name}\nlocal-hostname: {config.name}\n"
         (cloudinit_dir / "meta-data").write_text(meta_data)
 
-        # Generate mount commands for 9p filesystems
+        # Generate mount commands and fstab entries for 9p filesystems
         mount_commands = []
+        fstab_entries = []
         for idx, (host_path, guest_path) in enumerate(config.paths.items()):
             if Path(host_path).exists():
                 tag = f"mount{idx}"
                 mount_commands.append(f"  - mkdir -p {guest_path}")
                 mount_commands.append(
-                    f"  - mount -t 9p -o trans=virtio,version=9p2000.L {tag} {guest_path}"
+                    f"  - mount -t 9p -o trans=virtio,version=9p2000.L {tag} {guest_path} || true"
                 )
+                # Add fstab entry for persistence after reboot
+                fstab_entries.append(f"{tag} {guest_path} 9p trans=virtio,version=9p2000.L,nofail 0 0")
 
         # User-data
         # Add desktop environment if GUI is enabled
@@ -690,7 +693,13 @@ fi
         for svc in config.services:
             runcmd_lines.append(f"  - systemctl enable --now {svc} || true")
         
-        # Add mounts
+        # Add fstab entries for persistent mounts after reboot
+        if fstab_entries:
+            runcmd_lines.append("  - echo '# CloneBox 9p mounts' >> /etc/fstab")
+            for entry in fstab_entries:
+                runcmd_lines.append(f"  - echo '{entry}' >> /etc/fstab")
+        
+        # Add mounts (immediate, before reboot)
         for cmd in mount_commands:
             runcmd_lines.append(cmd)
         
@@ -722,7 +731,8 @@ fi
         
         # Add reboot command at the end if GUI is enabled
         if config.gui:
-            runcmd_lines.append("  - shutdown -r +1 'Rebooting to start GUI' || reboot")
+            runcmd_lines.append("  - echo 'Rebooting in 10 seconds to start GUI...'")
+            runcmd_lines.append("  - sleep 10 && reboot")
         
         runcmd_yaml = "\n".join(runcmd_lines) if runcmd_lines else ""
 
