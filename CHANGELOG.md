@@ -1,3 +1,36 @@
+## [0.1.15] - 2026-01-30
+
+### Summary
+
+feat(tests): CLI interface improvements
+
+### Core
+
+- update src/clonebox/cli.py
+- update src/clonebox/models.py
+
+### Test
+
+- update tests/conftest.py
+- update tests/test_cli.py
+- update tests/test_cloner.py
+- update tests/test_detector.py
+- update tests/test_models.py
+
+### Build
+
+- update pyproject.toml
+
+### Ci
+
+- config: update ci.yml
+
+### Other
+
+- update project.functions.toon
+- update project.toon
+
+
 ## [0.1.14] - 2026-01-30
 
 ### Summary
