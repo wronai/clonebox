@@ -237,24 +237,33 @@ clonebox test . --user --verbose
 # ✅ Health check triggered
 ```
 
-### VM Health Monitoring
+### VM Health Monitoring and Mount Validation
 
 ```bash
-# Check overall status
+# Check overall status including mount validation
 clonebox status . --user
 
-# Output:
-# 📊 Checking VM status: clone-clonebox
-# ✅ VM State: running
-# ✅ VM has network access
-# ☁️ Cloud-init: Still running (packages installing)
-# 🏥 Health Check Status... ⏳ Health check not yet run
+# Output shows:
+# 📊 VM State: running
+# 🔍 Network and IP address
+# ☁️ Cloud-init: Complete
+# 💾 Mount Points status table:
+#    ┌─────────────────────────┬──────────────┬────────┐
+#    │ Guest Path              │ Status       │ Files  │
+#    ├─────────────────────────┼──────────────┼────────┤
+#    │ /home/ubuntu/Downloads  │ ✅ Mounted   │ 199    │
+#    │ /home/ubuntu/Documents  │ ❌ Not mounted│ ?     │
+#    │ ~/.config/JetBrains     │ ✅ Mounted   │ 45     │
+#    └─────────────────────────┴──────────────┴────────┘
+#    12/14 mounts active
+# 🏥 Health Check Status: OK
 
-# Trigger health check
+# Trigger full health check
 clonebox status . --user --health
 
-# View detailed health report in VM:
-# cat /var/log/clonebox-health.log
+# If mounts are missing, remount or rebuild:
+# In VM: sudo mount -a
+# Or rebuild: clonebox clone . --user --run --replace
 ```
 
 ### Export/Import Workflow
@@ -551,7 +560,8 @@ clonebox clone . --network auto
 | `clonebox detect --yaml` | Output as YAML config |
 | `clonebox detect --yaml --dedupe` | YAML with duplicates removed |
 | `clonebox detect --json` | Output as JSON |
-| `clonebox status . --user` | Check VM health, cloud-init status, and IP address |
+| `clonebox status . --user` | Check VM health, cloud-init, IP, and mount status |
+| `clonebox status . --user --health` | Check VM status and run full health check |
 | `clonebox test . --user` | Test VM configuration and validate all settings |
 | `clonebox export . --user` | Export VM for migration to another workstation |
 | `clonebox export . --user --include-data` | Export VM with browser profiles and configs |

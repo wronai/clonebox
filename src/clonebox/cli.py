@@ -672,6 +672,109 @@ def cmd_status(args):
     except Exception:
         console.print("[yellow]⏳ Cloud-init status: Unknown (QEMU agent may not be ready)[/]")
     
+    # Check mount status
+    console.print("\n[bold]💾 Checking mount status...[/]")
+    try:
+        # Load config to get expected mounts
+        config_file = Path.cwd() / ".clonebox.yaml"
+        if config_file.exists():
+            config = load_clonebox_config(config_file)
+            all_paths = config.get("paths", {}).copy()
+            all_paths.update(config.get("app_data_paths", {}))
+            
+            if all_paths:
+                # Check which mounts are active
+                result = subprocess.run(
+                    ["virsh", "--connect", conn_uri, "qemu-agent-command", name,
+                     '{"execute":"guest-exec","arguments":{"path":"/bin/sh","arg":["-c","mount | grep 9p"],"capture-output":true}}'],
+                    capture_output=True, text=True, timeout=10
+                )
+                
+                mount_table = Table(title="Mount Points", border_style="cyan", show_header=True)
+                mount_table.add_column("Guest Path", style="bold")
+                mount_table.add_column("Status", justify="center")
+                mount_table.add_column("Files", justify="right")
+                
+                mounted_paths = []
+                if result.returncode == 0 and "return" in result.stdout:
+                    # Parse guest-exec response for mount output
+                    import json
+                    try:
+                        resp = json.loads(result.stdout)
+                        if "return" in resp and "pid" in resp["return"]:
+                            # Get the output from guest-exec-status
+                            pid = resp["return"]["pid"]
+                            status_result = subprocess.run(
+                                ["virsh", "--connect", conn_uri, "qemu-agent-command", name,
+                                 f'{{"execute":"guest-exec-status","arguments":{{"pid":{pid}}}}}'],
+                                capture_output=True, text=True, timeout=5
+                            )
+                            if status_result.returncode == 0:
+                                status_resp = json.loads(status_result.stdout)
+                                if "return" in status_resp and "out-data" in status_resp["return"]:
+                                    import base64
+                                    mount_output = base64.b64decode(status_resp["return"]["out-data"]).decode()
+                                    mounted_paths = [line.split()[2] for line in mount_output.split('\n') if line.strip()]
+                    except:
+                        pass
+                
+                # Check each expected mount
+                working_mounts = 0
+                total_mounts = 0
+                for host_path, guest_path in all_paths.items():
+                    total_mounts += 1
+                    is_mounted = any(guest_path in mp for mp in mounted_paths)
+                    
+                    # Try to get file count
+                    file_count = "?"
+                    if is_mounted:
+                        try:
+                            count_result = subprocess.run(
+                                ["virsh", "--connect", conn_uri, "qemu-agent-command", name,
+                                 f'{{"execute":"guest-exec","arguments":{{"path":"/bin/sh","arg":["-c","ls -A {guest_path} 2>/dev/null | wc -l"],"capture-output":true}}}}'],
+                                capture_output=True, text=True, timeout=5
+                            )
+                            if count_result.returncode == 0:
+                                resp = json.loads(count_result.stdout)
+                                if "return" in resp and "pid" in resp["return"]:
+                                    pid = resp["return"]["pid"]
+                                    import time
+                                    time.sleep(0.5)
+                                    status_result = subprocess.run(
+                                        ["virsh", "--connect", conn_uri, "qemu-agent-command", name,
+                                         f'{{"execute":"guest-exec-status","arguments":{{"pid":{pid}}}}}'],
+                                        capture_output=True, text=True, timeout=5
+                                    )
+                                    if status_result.returncode == 0:
+                                        status_resp = json.loads(status_result.stdout)
+                                        if "return" in status_resp and "out-data" in status_resp["return"]:
+                                            file_count = base64.b64decode(status_resp["return"]["out-data"]).decode().strip()
+                        except:
+                            pass
+                    
+                    if is_mounted:
+                        status = "[green]✅ Mounted[/]"
+                        working_mounts += 1
+                    else:
+                        status = "[red]❌ Not mounted[/]"
+                    
+                    mount_table.add_row(guest_path, status, str(file_count))
+                
+                console.print(mount_table)
+                console.print(f"[dim]{working_mounts}/{total_mounts} mounts active[/]")
+                
+                if working_mounts < total_mounts:
+                    console.print("[yellow]⚠️  Some mounts are missing. Try remounting in VM:[/]")
+                    console.print("[dim]  sudo mount -a[/]")
+                    console.print("[dim]Or rebuild VM with: clonebox clone . --user --run --replace[/]")
+            else:
+                console.print("[dim]No mount points configured[/]")
+        else:
+            console.print("[dim]No .clonebox.yaml found - cannot check mounts[/]")
+    except Exception as e:
+        console.print(f"[yellow]⚠️  Cannot check mounts: {e}[/]")
+        console.print("[dim]QEMU guest agent may not be ready yet[/]")
+    
     # Check health status if available
     console.print("\n[bold]🏥 Health Check Status...[/]")
     try:
