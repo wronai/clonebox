@@ -252,6 +252,29 @@ clonebox detect --yaml --dedupe
 clonebox detect --yaml --dedupe -o my-config.yaml
 ```
 
+### User Session & Networking
+
+CloneBox supports creating VMs in user session (no root required) with automatic network fallback:
+
+```bash
+# Create VM in user session (uses ~/.local/share/libvirt/images)
+clonebox clone . --user
+
+# Explicitly use user-mode networking (slirp) - works without libvirt network
+clonebox clone . --user --network user
+
+# Force libvirt default network (may fail in user session)
+clonebox clone . --network default
+
+# Auto mode (default): tries libvirt network, falls back to user-mode if unavailable
+clonebox clone . --network auto
+```
+
+**Network modes:**
+- `auto` (default): Uses libvirt default network if available, otherwise falls back to user-mode (slirp)
+- `default`: Forces use of libvirt default network
+- `user`: Uses user-mode networking (slirp) - no bridge setup required
+
 ## Commands Reference
 
 | Command | Description |
@@ -260,6 +283,9 @@ clonebox detect --yaml --dedupe -o my-config.yaml
 | `clonebox clone <path>` | Generate `.clonebox.yaml` from path + running processes |
 | `clonebox clone . --run` | Clone and immediately start VM |
 | `clonebox clone . --edit` | Clone, edit config, then create |
+| `clonebox clone . --user` | Clone in user session (no root) |
+| `clonebox clone . --network user` | Use user-mode networking (slirp) |
+| `clonebox clone . --network auto` | Auto-detect network mode (default) |
 | `clonebox start .` | Start VM from `.clonebox.yaml` in current dir |
 | `clonebox start <name>` | Start existing VM by name |
 | `clonebox stop <name>` | Stop a VM (graceful shutdown) |
@@ -285,7 +311,10 @@ clonebox detect --yaml --dedupe -o my-config.yaml
 If you encounter "Network not found" or "network 'default' is not active" errors:
 
 ```bash
-# Run the network fix script
+# Option 1: Use user-mode networking (no setup required)
+clonebox clone . --user --network user
+
+# Option 2: Run the network fix script
 ./fix-network.sh
 
 # Or manually fix:

@@ -1,3 +1,35 @@
+## [0.1.4] - 2026-01-30
+
+### Summary
+
+refactor(tests): CLI interface improvements
+
+### Core
+
+- update src/clonebox/__main__.py
+- update src/clonebox/cli.py
+- update src/clonebox/cloner.py
+- update src/clonebox/detector.py
+
+### Docs
+
+- docs: update README
+
+### Test
+
+- update tests/test_cli.py
+- update tests/test_cloner.py
+- update tests/test_detector.py
+- update tests/test_network.py
+
+### Other
+
+- build: update Makefile
+- update src/clonebox/__pycache__/cli.cpython-313.pyc
+- update src/clonebox/__pycache__/cloner.cpython-313.pyc
+- update src/clonebox/__pycache__/detector.cpython-313.pyc
+
+
 ## [0.1.3] - 2026-01-30
 
 ### Summary
