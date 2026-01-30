@@ -417,9 +417,10 @@ class SelectiveVMCloner:
             ET.SubElement(cdrom, "readonly")
 
         # 9p filesystem mounts (bind mounts from host)
+        # Use accessmode="mapped" to allow VM user to access host files regardless of UID
         for idx, (host_path, guest_tag) in enumerate(config.paths.items()):
             if Path(host_path).exists():
-                fs = ET.SubElement(devices, "filesystem", type="mount", accessmode="passthrough")
+                fs = ET.SubElement(devices, "filesystem", type="mount", accessmode="mapped")
                 ET.SubElement(fs, "driver", type="path", wrpolicy="immediate")
                 ET.SubElement(fs, "source", dir=host_path)
                 # Use simple tag names for 9p mounts

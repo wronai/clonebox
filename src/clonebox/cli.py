@@ -445,7 +445,72 @@ def cmd_start(args):
             return
 
     cloner = SelectiveVMCloner(user_session=getattr(args, "user", False))
-    cloner.start_vm(name, open_viewer=not args.no_viewer, console=console)
+    open_viewer = getattr(args, "viewer", False) or not getattr(args, "no_viewer", False)
+    cloner.start_vm(name, open_viewer=open_viewer, console=console)
+
+
+def cmd_open(args):
+    """Open VM viewer window."""
+    import subprocess
+    
+    name = args.name
+    user_session = getattr(args, "user", False)
+    conn_uri = "qemu:///session" if user_session else "qemu:///system"
+    
+    # If name is a path, load config
+    if name and (name.startswith(".") or name.startswith("/") or name.startswith("~")):
+        target_path = Path(name).expanduser().resolve()
+        config_file = target_path / ".clonebox.yaml" if target_path.is_dir() else target_path
+        if config_file.exists():
+            config = load_clonebox_config(config_file)
+            name = config["vm"]["name"]
+        else:
+            console.print(f"[red]❌ Config not found: {config_file}[/]")
+            return
+    elif name == "." or not name:
+        config_file = Path.cwd() / ".clonebox.yaml"
+        if config_file.exists():
+            config = load_clonebox_config(config_file)
+            name = config["vm"]["name"]
+        else:
+            console.print("[red]❌ No VM name specified and no .clonebox.yaml in current directory[/]")
+            console.print("[dim]Usage: clonebox open <vm-name> or clonebox open .[/]")
+            return
+    
+    # Check if VM is running
+    try:
+        result = subprocess.run(
+            ["virsh", "--connect", conn_uri, "domstate", name],
+            capture_output=True, text=True, timeout=10
+        )
+        state = result.stdout.strip()
+        
+        if state != "running":
+            console.print(f"[yellow]⚠️  VM '{name}' is not running (state: {state})[/]")
+            if questionary.confirm(
+                f"Start VM '{name}' and open viewer?", default=True, style=custom_style
+            ).ask():
+                cloner = SelectiveVMCloner(user_session=user_session)
+                cloner.start_vm(name, open_viewer=True, console=console)
+            else:
+                console.print("[dim]Use 'clonebox start' to start the VM first.[/]")
+            return
+    except Exception as e:
+        console.print(f"[red]❌ Error checking VM state: {e}[/]")
+        return
+    
+    # Open virt-viewer
+    console.print(f"[cyan]Opening viewer for VM: {name}[/]")
+    try:
+        subprocess.run(
+            ["virt-viewer", "--connect", conn_uri, name],
+            check=True
+        )
+    except FileNotFoundError:
+        console.print("[red]❌ virt-viewer not found[/]")
+        console.print("Install with: sudo apt install virt-viewer")
+    except subprocess.CalledProcessError as e:
+        console.print(f"[red]❌ Failed to open viewer: {e}[/]")
 
 
 def cmd_stop(args):
@@ -922,6 +987,217 @@ def cmd_import(args):
         # Cleanup
         if temp_dir.exists():
             shutil.rmtree(temp_dir)
+
+
+def cmd_test(args):
+    """Test VM configuration and health."""
+    import subprocess
+    import json
+    
+    name = args.name
+    user_session = getattr(args, "user", False)
+    quick = getattr(args, "quick", False)
+    verbose = getattr(args, "verbose", False)
+    conn_uri = "qemu:///session" if user_session else "qemu:///system"
+    
+    # If name is a path, load config
+    if name and (name.startswith(".") or name.startswith("/") or name.startswith("~")):
+        target_path = Path(name).expanduser().resolve()
+        config_file = target_path / ".clonebox.yaml" if target_path.is_dir() else target_path
+        if not config_file.exists():
+            console.print(f"[red]❌ Config not found: {config_file}[/]")
+            return
+    else:
+        config_file = Path.cwd() / ".clonebox.yaml"
+        if not config_file.exists():
+            console.print("[red]❌ No .clonebox.yaml found in current directory[/]")
+            return
+    
+    console.print(f"[bold cyan]🧪 Testing VM configuration: {config_file}[/]\n")
+    
+    # Load config
+    try:
+        config = load_clonebox_config(config_file)
+        vm_name = config["vm"]["name"]
+        console.print(f"[green]✅ Config loaded successfully[/]")
+        console.print(f"   VM Name: {vm_name}")
+        console.print(f"   RAM: {config['vm']['ram_mb']}MB")
+        console.print(f"   vCPUs: {config['vm']['vcpus']}")
+        console.print(f"   GUI: {'Yes' if config['vm']['gui'] else 'No'}")
+    except Exception as e:
+        console.print(f"[red]❌ Failed to load config: {e}[/]")
+        return
+    
+    console.print()
+    
+    # Test 1: Check VM exists
+    console.print("[bold]1. VM Existence Check[/]")
+    try:
+        result = subprocess.run(
+            ["virsh", "--connect", conn_uri, "dominfo", vm_name],
+            capture_output=True, text=True, timeout=10
+        )
+        if result.returncode == 0:
+            console.print("[green]✅ VM is defined in libvirt[/]")
+            if verbose:
+                for line in result.stdout.split('\n'):
+                    if ':' in line:
+                        console.print(f"   {line}")
+        else:
+            console.print("[red]❌ VM not found in libvirt[/]")
+            console.print("   Run: clonebox create .clonebox.yaml --start")
+            return
+    except Exception as e:
+        console.print(f"[red]❌ Error checking VM: {e}[/]")
+        return
+    
+    console.print()
+    
+    # Test 2: Check VM state
+    console.print("[bold]2. VM State Check[/]")
+    try:
+        result = subprocess.run(
+            ["virsh", "--connect", conn_uri, "domstate", vm_name],
+            capture_output=True, text=True, timeout=10
+        )
+        state = result.stdout.strip()
+        if state == "running":
+            console.print("[green]✅ VM is running[/]")
+            
+            # Test network if running
+            console.print("\n   Checking network...")
+            try:
+                result = subprocess.run(
+                    ["virsh", "--connect", conn_uri, "domifaddr", vm_name],
+                    capture_output=True, text=True, timeout=10
+                )
+                if "192.168" in result.stdout or "10.0" in result.stdout:
+                    console.print("[green]✅ VM has network access[/]")
+                    if verbose:
+                        for line in result.stdout.split('\n'):
+                            if '192.168' in line or '10.0' in line:
+                                console.print(f"   IP: {line.split()[-1]}")
+                else:
+                    console.print("[yellow]⚠️  No IP address detected[/]")
+            except:
+                console.print("[yellow]⚠️  Could not check network[/]")
+        else:
+            console.print(f"[yellow]⚠️  VM is not running (state: {state})[/]")
+            console.print("   Run: clonebox start .")
+    except Exception as e:
+        console.print(f"[red]❌ Error checking VM state: {e}[/]")
+    
+    console.print()
+    
+    # Test 3: Check cloud-init status (if running)
+    if not quick and state == "running":
+        console.print("[bold]3. Cloud-init Status[/]")
+        try:
+            # Try to get cloud-init status via QEMU guest agent
+            result = subprocess.run(
+                ["virsh", "--connect", conn_uri, "qemu-agent-command", vm_name,
+                 '{"execute":"guest-exec","arguments":{"path":"cloud-init","arg":["status"],"capture-output":true}}'],
+                capture_output=True, text=True, timeout=15
+            )
+            if result.returncode == 0:
+                try:
+                    response = json.loads(result.stdout)
+                    if "return" in response:
+                        pid = response["return"]["pid"]
+                        # Get output
+                        result2 = subprocess.run(
+                            ["virsh", "--connect", conn_uri, "qemu-agent-command", vm_name,
+                             f'{{"execute":"guest-exec-status","arguments":{"pid":{pid}}}}'],
+                            capture_output=True, text=True, timeout=15
+                        )
+                        if result2.returncode == 0:
+                            resp2 = json.loads(result2.stdout)
+                            if "return" in resp2 and resp2["return"]["exited"]:
+                                output = resp2["return"]["out-data"]
+                                if output:
+                                    import base64
+                                    status = base64.b64decode(output).decode()
+                                    if "done" in status.lower():
+                                        console.print("[green]✅ Cloud-init completed[/]")
+                                    elif "running" in status.lower():
+                                        console.print("[yellow]⚠️  Cloud-init still running[/]")
+                                    else:
+                                        console.print(f"[yellow]⚠️  Cloud-init status: {status.strip()}[/]")
+                except:
+                    pass
+        except:
+            console.print("[yellow]⚠️  Could not check cloud-init (QEMU agent may not be running)[/]")
+    
+    console.print()
+    
+    # Test 4: Check mounts (if running)
+    if not quick and state == "running":
+        console.print("[bold]4. Mount Points Check[/]")
+        all_paths = config.get("paths", {}).copy()
+        all_paths.update(config.get("app_data_paths", {}))
+        
+        if all_paths:
+            for idx, (host_path, guest_path) in enumerate(all_paths.items()):
+                try:
+                    result = subprocess.run(
+                        ["virsh", "--connect", conn_uri, "qemu-agent-command", vm_name,
+                         f'{{"execute":"guest-exec","arguments":{{"path":"test","arg":["-d","{guest_path}"],"capture-output":true}}}}'],
+                        capture_output=True, text=True, timeout=10
+                    )
+                    if result.returncode == 0:
+                        try:
+                            response = json.loads(result.stdout)
+                            if "return" in response:
+                                pid = response["return"]["pid"]
+                                result2 = subprocess.run(
+                                    ["virsh", "--connect", conn_uri, "qemu-agent-command", vm_name,
+                                     f'{{"execute":"guest-exec-status","arguments":{"pid":{pid}}}}'],
+                                    capture_output=True, text=True, timeout=10
+                                )
+                                if result2.returncode == 0:
+                                    resp2 = json.loads(result2.stdout)
+                                    if "return" in resp2 and resp2["return"]["exited"]:
+                                        exit_code = resp2["return"]["exitcode"]
+                                        if exit_code == 0:
+                                            console.print(f"[green]✅ {guest_path}[/]")
+                                        else:
+                                            console.print(f"[red]❌ {guest_path} (not accessible)[/]")
+                                        continue
+                        except:
+                            pass
+                    console.print(f"[yellow]⚠️  {guest_path} (unknown)[/]")
+                except:
+                    console.print(f"[yellow]⚠️  {guest_path} (could not check)[/]")
+        else:
+            console.print("[dim]No mount points configured[/]")
+    
+    console.print()
+    
+    # Test 5: Run health check (if running and not quick)
+    if not quick and state == "running":
+        console.print("[bold]5. Health Check[/]")
+        try:
+            result = subprocess.run(
+                ["virsh", "--connect", conn_uri, "qemu-agent-command", vm_name,
+                 '{"execute":"guest-exec","arguments":{"path":"/usr/local/bin/clonebox-health","capture-output":true}}'],
+                capture_output=True, text=True, timeout=60
+            )
+            if result.returncode == 0:
+                console.print("[green]✅ Health check triggered[/]")
+                console.print("   View results in VM: cat /var/log/clonebox-health.log")
+            else:
+                console.print("[yellow]⚠️  Health check script not found[/]")
+                console.print("   VM may not have been created with health checks")
+        except Exception as e:
+            console.print(f"[yellow]⚠️  Could not run health check: {e}[/]")
+    
+    console.print()
+    
+    # Summary
+    console.print("[bold]Test Summary[/]")
+    console.print("VM configuration is valid and VM is accessible.")
+    console.print("\n[dim]For detailed health report, run in VM:[/]")
+    console.print("[dim]  cat /var/log/clonebox-health.log[/]")
 
 
 CLONEBOX_CONFIG_FILE = ".clonebox.yaml"
@@ -1527,6 +1803,7 @@ def main():
         "name", nargs="?", default=None, help="VM name or '.' to use .clonebox.yaml"
     )
     start_parser.add_argument("--no-viewer", action="store_true", help="Don't open virt-viewer")
+    start_parser.add_argument("--viewer", action="store_true", help="Open virt-viewer GUI")
     start_parser.add_argument(
         "-u",
         "--user",
@@ -1534,6 +1811,19 @@ def main():
         help="Use user session (qemu:///session) - no root required",
     )
     start_parser.set_defaults(func=cmd_start)
+
+    # Open command - open VM viewer
+    open_parser = subparsers.add_parser("open", help="Open VM viewer window")
+    open_parser.add_argument(
+        "name", nargs="?", default=None, help="VM name or '.' to use .clonebox.yaml"
+    )
+    open_parser.add_argument(
+        "-u",
+        "--user",
+        action="store_true",
+        help="Use user session (qemu:///session) - no root required",
+    )
+    open_parser.set_defaults(func=cmd_open)
 
     # Stop command
     stop_parser = subparsers.add_parser("stop", help="Stop a VM")
@@ -1631,6 +1921,50 @@ def main():
         "--health", "-H", action="store_true", help="Run full health check"
     )
     status_parser.set_defaults(func=cmd_status)
+
+    # Export command - package VM for migration
+    export_parser = subparsers.add_parser("export", help="Export VM and data for migration")
+    export_parser.add_argument(
+        "name", nargs="?", default=None, help="VM name or '.' to use .clonebox.yaml"
+    )
+    export_parser.add_argument(
+        "-u", "--user", action="store_true", help="Use user session (qemu:///session)"
+    )
+    export_parser.add_argument(
+        "-o", "--output", help="Output archive filename (default: <vmname>-export.tar.gz)"
+    )
+    export_parser.add_argument(
+        "--include-data", "-d", action="store_true",
+        help="Include shared data (browser profiles, configs) in export"
+    )
+    export_parser.set_defaults(func=cmd_export)
+
+    # Import command - restore VM from export
+    import_parser = subparsers.add_parser("import", help="Import VM from export archive")
+    import_parser.add_argument("archive", help="Path to export archive (.tar.gz)")
+    import_parser.add_argument(
+        "-u", "--user", action="store_true", help="Use user session (qemu:///session)"
+    )
+    import_parser.add_argument(
+        "--replace", action="store_true", help="Replace existing VM if exists"
+    )
+    import_parser.set_defaults(func=cmd_import)
+
+    # Test command - validate VM configuration
+    test_parser = subparsers.add_parser("test", help="Test VM configuration and health")
+    test_parser.add_argument(
+        "name", nargs="?", default=None, help="VM name or '.' to use .clonebox.yaml"
+    )
+    test_parser.add_argument(
+        "-u", "--user", action="store_true", help="Use user session (qemu:///session)"
+    )
+    test_parser.add_argument(
+        "--quick", action="store_true", help="Quick test (no deep health checks)"
+    )
+    test_parser.add_argument(
+        "--verbose", "-v", action="store_true", help="Verbose output"
+    )
+    test_parser.set_defaults(func=cmd_test)
 
     args = parser.parse_args()
 

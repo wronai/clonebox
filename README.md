@@ -25,6 +25,10 @@ CloneBox lets you create isolated virtual machines with only the applications, d
 - 🖥️ **GUI support** - SPICE graphics with virt-viewer integration
 - ⚡ **Fast creation** - No full disk cloning, VMs are ready in seconds
 - 📥 **Auto-download** - Automatically downloads and caches Ubuntu cloud images (stored in ~/Downloads)
+- 📊 **Health monitoring** - Built-in health checks for packages, services, and mounts
+- 🔄 **VM migration** - Export/import VMs with data between workstations
+- 🧪 **Configuration testing** - Validate VM settings and functionality
+- 📁 **App data sync** - Include browser profiles, IDE settings, and app configs
 
 
 
@@ -214,16 +218,35 @@ clonebox create --name fullstack --config '{
 
 ## Inside the VM
 
-After the VM boots, mount shared directories:
+After the VM boots, shared directories are automatically mounted via fstab entries. You can check their status:
 
 ```bash
-# Mount shared paths (9p filesystem)
-sudo mkdir -p /mnt/projects
-sudo mount -t 9p -o trans=virtio,version=9p2000.L mount0 /mnt/projects
+# Check mount status
+mount | grep 9p
 
-# Or add to /etc/fstab for permanent mount
-echo "mount0 /mnt/projects 9p trans=virtio,version=9p2000.L 0 0" | sudo tee -a /etc/fstab
+# View health check report
+cat /var/log/clonebox-health.log
+
+# Re-run health check manually
+clonebox-health
+
+# Check cloud-init status
+sudo cloud-init status
+
+# Manual mount (if needed)
+sudo mkdir -p /mnt/projects
+sudo mount -t 9p -o trans=virtio,version=9p2000.L,nofail mount0 /mnt/projects
 ```
+
+### Health Check System
+
+CloneBox includes automated health checks that verify:
+- Package installation (apt/snap)
+- Service status
+- Mount points accessibility
+- GUI readiness
+
+Health check logs are saved to `/var/log/clonebox-health.log` with a summary in `/var/log/clonebox-health-status`.
 
 ## Architecture
 
@@ -391,6 +414,7 @@ clonebox clone . --network auto
 | `clonebox clone . --network user` | Use user-mode networking (slirp) |
 | `clonebox clone . --network auto` | Auto-detect network mode (default) |
 | `clonebox start .` | Start VM from `.clonebox.yaml` in current dir |
+| `clonebox start . --viewer` | Start VM and open GUI window |
 | `clonebox start <name>` | Start existing VM by name |
 | `clonebox stop <name>` | Stop a VM (graceful shutdown) |
 | `clonebox stop -f <name>` | Force stop a VM |
@@ -400,6 +424,14 @@ clonebox clone . --network auto
 | `clonebox detect --yaml` | Output as YAML config |
 | `clonebox detect --yaml --dedupe` | YAML with duplicates removed |
 | `clonebox detect --json` | Output as JSON |
+| `clonebox status . --user` | Check VM health, cloud-init status, and IP address |
+| `clonebox test . --user` | Test VM configuration and validate all settings |
+| `clonebox export . --user` | Export VM for migration to another workstation |
+| `clonebox export . --user --include-data` | Export VM with browser profiles and configs |
+| `clonebox import archive.tar.gz --user` | Import VM from export archive |
+| `clonebox open . --user` | Open GUI viewer for VM (same as virt-viewer) |
+| `virt-viewer --connect qemu:///session <vm>` | Open GUI for running VM |
+| `virsh --connect qemu:///session console <vm>` | Open text console (Ctrl+] to exit) |
 
 ## Requirements
 
@@ -469,6 +501,102 @@ sudo apt install virt-viewer
 
 # Then connect manually
 virt-viewer --connect qemu:///session <vm-name>
+```
+
+### Browser Profiles Not Syncing
+
+If browser profiles or app data aren't available:
+
+1. **Regenerate config with app data:**
+   ```bash
+   rm .clonebox.yaml
+   clonebox clone . --user --run --replace
+   ```
+
+2. **Check mount permissions in VM:**
+   ```bash
+   # Verify mounts are accessible
+   ls -la ~/.config/google-chrome
+   ls -la ~/.mozilla/firefox
+   ```
+
+### Mount Points Empty After Reboot
+
+If shared directories appear empty after VM restart:
+
+1. **Check fstab entries:**
+   ```bash
+   cat /etc/fstab | grep 9p
+   ```
+
+2. **Mount manually:**
+   ```bash
+   sudo mount -a
+   ```
+
+3. **Verify access mode:**
+   - VMs created with `accessmode="mapped"` allow any user to access mounts
+   - Older VMs used `accessmode="passthrough"` which preserves host UIDs
+
+## Advanced Usage
+
+### VM Migration Between Workstations
+
+Export your complete VM environment:
+
+```bash
+# Export VM with all data
+clonebox export . --user --include-data -o my-dev-env.tar.gz
+
+# Transfer to new workstation, then import
+clonebox import my-dev-env.tar.gz --user
+clonebox start . --user
+```
+
+### Testing VM Configuration
+
+Validate your VM setup:
+
+```bash
+# Quick test (basic checks)
+clonebox test . --user --quick
+
+# Full test (includes health checks)
+clonebox test . --user --verbose
+```
+
+### Monitoring VM Health
+
+Check VM status from workstation:
+
+```bash
+# Check VM state, IP, cloud-init, and health
+clonebox status . --user
+
+# Trigger health check in VM
+clonebox status . --user --health
+```
+
+### Reopening VM Window
+
+If you close the VM window, you can reopen it:
+
+```bash
+# Open GUI viewer (easiest)
+clonebox open . --user
+
+# Start VM and open GUI (if VM is stopped)
+clonebox start . --user --viewer
+
+# Open GUI for running VM
+virt-viewer --connect qemu:///session clone-clonebox
+
+# List VMs to get the correct name
+clonebox list
+
+# Text console (no GUI)
+virsh --connect qemu:///session console clone-clonebox
+# Press Ctrl + ] to exit console
 ```
 
 ## License
