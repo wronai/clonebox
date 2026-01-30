@@ -199,7 +199,9 @@ class TestContainerClonerUpAndPs:
         c.engine = "podman"
 
         items = c.ps(all=True)
-        assert captured["cmd"][:3] == ["podman", "ps", "-a"]
+        # Command is: podman ps --format json -a
+        assert captured["cmd"][:2] == ["podman", "ps"]
+        assert "-a" in captured["cmd"]
         assert items[0]["name"] == "c1"
 
 

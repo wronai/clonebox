@@ -64,6 +64,37 @@ class SystemSnapshot:
 class SystemDetector:
     """Detects running services, applications and important paths on the system."""
 
+    # Services that should NOT be cloned to VM (host-specific, hardware-dependent, or hypervisor services)
+    VM_EXCLUDED_SERVICES = {
+        # Hypervisor/virtualization - no nested virt needed
+        "libvirtd",
+        "virtlogd",
+        "libvirt-guests",
+        "qemu-guest-agent",  # Host-side, VM has its own
+        # Hardware-specific
+        "bluetooth",
+        "bluez",
+        "upower",
+        "thermald",
+        "tlp",
+        "power-profiles-daemon",
+        # Display manager (VM has its own)
+        "gdm",
+        "gdm3",
+        "sddm",
+        "lightdm",
+        # Snap-based duplicates (prefer APT versions)
+        "snap.cups.cups-browsed",
+        "snap.cups.cupsd",
+        # Network hardware
+        "ModemManager",
+        "wpa_supplicant",
+        # Host-specific desktop
+        "accounts-daemon",
+        "colord",
+        "switcheroo-control",
+    }
+
     # Common development/server services to look for
     INTERESTING_SERVICES = [
         "docker",
