@@ -405,7 +405,7 @@ def cmd_start(args):
         vm_name = config["vm"]["name"]
 
         # Check if VM already exists
-        cloner = SelectiveVMCloner()
+        cloner = SelectiveVMCloner(user_session=getattr(args, "user", False))
         try:
             existing_vms = [v["name"] for v in cloner.list_vms()]
             if vm_name in existing_vms:
@@ -417,7 +417,7 @@ def cmd_start(args):
 
         # Create new VM from config
         console.print(f"[cyan]Creating VM '{vm_name}' from config...[/]\n")
-        vm_uuid = create_vm_from_config(config, start=True)
+        vm_uuid = create_vm_from_config(config, start=True, user_session=getattr(args, "user", False))
         console.print(f"\n[bold green]🎉 VM '{vm_name}' is running![/]")
         console.print(f"[dim]UUID: {vm_uuid}[/]")
 
@@ -442,13 +442,13 @@ def cmd_start(args):
             console.print("[dim]Usage: clonebox start <vm-name> or clonebox start .[/]")
             return
 
-    cloner = SelectiveVMCloner()
+    cloner = SelectiveVMCloner(user_session=getattr(args, "user", False))
     cloner.start_vm(name, open_viewer=not args.no_viewer, console=console)
 
 
 def cmd_stop(args):
     """Stop a VM."""
-    cloner = SelectiveVMCloner()
+    cloner = SelectiveVMCloner(user_session=getattr(args, "user", False))
     cloner.stop_vm(args.name, force=args.force, console=console)
 
 
@@ -461,13 +461,13 @@ def cmd_delete(args):
             console.print("[yellow]Cancelled.[/]")
             return
 
-    cloner = SelectiveVMCloner()
+    cloner = SelectiveVMCloner(user_session=getattr(args, "user", False))
     cloner.delete_vm(args.name, delete_storage=not args.keep_storage, console=console)
 
 
 def cmd_list(args):
     """List all VMs."""
-    cloner = SelectiveVMCloner()
+    cloner = SelectiveVMCloner(user_session=getattr(args, "user", False))
     vms = cloner.list_vms()
 
     if not vms:
@@ -538,9 +538,10 @@ def generate_clonebox_yaml(
 
     # If target_path specified, prioritize it
     if target_path:
-        target_path = str(Path(target_path).resolve())
-        if target_path not in paths_by_type["project"]:
-            paths_by_type["project"].insert(0, target_path)
+        target_path = Path(target_path).resolve()
+        target_str = str(target_path)
+        if target_str not in paths_by_type["project"]:
+            paths_by_type["project"].insert(0, target_str)
 
     # Build paths mapping
     paths_mapping = {}
@@ -557,7 +558,7 @@ def generate_clonebox_yaml(
     # Determine VM name
     if not vm_name:
         if target_path:
-            vm_name = f"clone-{Path(target_path).name}"
+            vm_name = f"clone-{target_path.name}"
         else:
             vm_name = f"clone-{sys_info['hostname']}"
 
@@ -860,12 +861,24 @@ def main():
         "name", nargs="?", default=None, help="VM name or '.' to use .clonebox.yaml"
     )
     start_parser.add_argument("--no-viewer", action="store_true", help="Don't open virt-viewer")
+    start_parser.add_argument(
+        "-u",
+        "--user",
+        action="store_true",
+        help="Use user session (qemu:///session) - no root required",
+    )
     start_parser.set_defaults(func=cmd_start)
 
     # Stop command
     stop_parser = subparsers.add_parser("stop", help="Stop a VM")
     stop_parser.add_argument("name", help="VM name")
     stop_parser.add_argument("--force", "-f", action="store_true", help="Force stop")
+    stop_parser.add_argument(
+        "-u",
+        "--user",
+        action="store_true",
+        help="Use user session (qemu:///session) - no root required",
+    )
     stop_parser.set_defaults(func=cmd_stop)
 
     # Delete command
@@ -873,10 +886,22 @@ def main():
     delete_parser.add_argument("name", help="VM name")
     delete_parser.add_argument("--yes", "-y", action="store_true", help="Skip confirmation")
     delete_parser.add_argument("--keep-storage", action="store_true", help="Keep disk images")
+    delete_parser.add_argument(
+        "-u",
+        "--user",
+        action="store_true",
+        help="Use user session (qemu:///session) - no root required",
+    )
     delete_parser.set_defaults(func=cmd_delete)
 
     # List command
     list_parser = subparsers.add_parser("list", aliases=["ls"], help="List VMs")
+    list_parser.add_argument(
+        "-u",
+        "--user",
+        action="store_true",
+        help="Use user session (qemu:///session) - no root required",
+    )
     list_parser.set_defaults(func=cmd_list)
 
     # Detect command
