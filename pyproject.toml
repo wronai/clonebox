@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "clonebox"
-version = "0.1.19"
+version = "0.1.20"
 description = "Clone your workstation environment to an isolated VM with selective apps, paths and services"
 readme = "README.md"
 license = {text = "Apache-2.0"}

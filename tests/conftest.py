@@ -387,11 +387,13 @@ def pytest_configure(config):
     config.addinivalue_line("markers", "e2e: End-to-end tests requiring libvirt/KVM")
     config.addinivalue_line("markers", "integration: Integration tests")
     config.addinivalue_line("markers", "slow: Slow tests")
+    config.addinivalue_line("markers", "container: Tests requiring podman/docker")
 
 
 def pytest_collection_modifyitems(config, items):
     """Auto-skip e2e tests when libvirt/KVM not available."""
     import os
+    import shutil
     
     # Check if libvirt is available
     try:
@@ -407,9 +409,20 @@ def pytest_collection_modifyitems(config, items):
     is_ci = os.environ.get("CI") == "true" or os.environ.get("GITHUB_ACTIONS") == "true"
     
     skip_e2e = pytest.mark.skip(reason="libvirt/KVM not available or running in CI")
+    container_available = shutil.which("podman") is not None or shutil.which("docker") is not None
+    skip_container = pytest.mark.skip(reason="podman/docker not available or running in CI")
     
     for item in items:
-        # Auto-skip e2e tests if prerequisites not met
-        if "e2e" in item.keywords:
+        is_container = "container" in item.keywords
+        is_e2e = "e2e" in item.keywords
+
+        # Container tests: gate only on podman/docker availability (and CI)
+        if is_container:
+            if not container_available or is_ci:
+                item.add_marker(skip_container)
+            continue
+
+        # Non-container e2e tests: gate on libvirt/KVM availability (and CI)
+        if is_e2e:
             if not libvirt_available or not kvm_available or is_ci:
                 item.add_marker(skip_e2e)

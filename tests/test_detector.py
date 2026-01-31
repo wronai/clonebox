@@ -196,3 +196,27 @@ class TestDetectorHelpers:
         containers = detector.detect_docker_containers()
 
         assert containers == []
+
+
+class TestDetectorAppDataDirs:
+    def test_detect_app_data_dirs_prefers_snap_paths(self, tmp_path, monkeypatch):
+        detector = SystemDetector()
+
+        # Redirect detector.home to tmp path
+        detector.home = tmp_path
+
+        # Create snap firefox profile path
+        snap_firefox = tmp_path / "snap/firefox/common/.mozilla/firefox"
+        snap_firefox.mkdir(parents=True)
+        (snap_firefox / "profiles.ini").write_text("[Profile0]\n")
+
+        # Create also classic path - should be ignored in favor of snap
+        classic_firefox = tmp_path / ".mozilla/firefox"
+        classic_firefox.mkdir(parents=True)
+        (classic_firefox / "profiles.ini").write_text("[Profile0]\n")
+
+        # No apps running - still should detect because of forced patterns
+        result = detector.detect_app_data_dirs([])
+        paths = {item["path"] for item in result}
+
+        assert str(snap_firefox) in paths

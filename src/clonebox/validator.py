@@ -24,6 +24,7 @@ class VMValidator:
             "packages": {"passed": 0, "failed": 0, "total": 0, "details": []},
             "snap_packages": {"passed": 0, "failed": 0, "total": 0, "details": []},
             "services": {"passed": 0, "failed": 0, "total": 0, "details": []},
+            "apps": {"passed": 0, "failed": 0, "total": 0, "details": []},
             "overall": "unknown"
         }
     
@@ -254,68 +255,155 @@ class VMValidator:
         if not services:
             self.console.print("[dim]No services configured[/]")
             return self.results["services"]
-        
-        # Initialize skipped counter
+
         if "skipped" not in self.results["services"]:
             self.results["services"]["skipped"] = 0
-        
+
         svc_table = Table(title="Service Validation", border_style="cyan")
         svc_table.add_column("Service", style="bold")
         svc_table.add_column("Enabled", justify="center")
         svc_table.add_column("Running", justify="center")
         svc_table.add_column("Note", style="dim")
-        
+
         for service in services:
-            # Check if service should be skipped (host-specific)
             if service in self.VM_EXCLUDED_SERVICES:
                 svc_table.add_row(service, "[dim]—[/]", "[dim]—[/]", "host-only")
                 self.results["services"]["skipped"] += 1
-                self.results["services"]["details"].append({
-                    "service": service,
-                    "enabled": None,
-                    "running": None,
-                    "skipped": True,
-                    "reason": "host-specific service"
-                })
+                self.results["services"]["details"].append(
+                    {
+                        "service": service,
+                        "enabled": None,
+                        "running": None,
+                        "skipped": True,
+                        "reason": "host-specific service",
+                    }
+                )
                 continue
-            
+
             self.results["services"]["total"] += 1
-            
-            # Check if enabled
+
             enabled_cmd = f"systemctl is-enabled {service} 2>/dev/null"
             enabled_status = self._exec_in_vm(enabled_cmd)
             is_enabled = enabled_status == "enabled"
-            
-            # Check if running
+
             running_cmd = f"systemctl is-active {service} 2>/dev/null"
             running_status = self._exec_in_vm(running_cmd)
             is_running = running_status == "active"
-            
+
             enabled_icon = "[green]✅[/]" if is_enabled else "[yellow]⚠️[/]"
             running_icon = "[green]✅[/]" if is_running else "[red]❌[/]"
-            
+
             svc_table.add_row(service, enabled_icon, running_icon, "")
-            
+
             if is_enabled and is_running:
                 self.results["services"]["passed"] += 1
             else:
                 self.results["services"]["failed"] += 1
-            
-            self.results["services"]["details"].append({
-                "service": service,
-                "enabled": is_enabled,
-                "running": is_running,
-                "skipped": False
-            })
-        
+
+            self.results["services"]["details"].append(
+                {
+                    "service": service,
+                    "enabled": is_enabled,
+                    "running": is_running,
+                    "skipped": False,
+                }
+            )
+
         self.console.print(svc_table)
         skipped = self.results["services"].get("skipped", 0)
         msg = f"{self.results['services']['passed']}/{self.results['services']['total']} services active"
         if skipped > 0:
             msg += f" ({skipped} host-only skipped)"
         self.console.print(f"[dim]{msg}[/]")
-        
+
         return self.results["services"]
+
+    def validate_apps(self) -> Dict:
+        packages = self.config.get("packages", [])
+        snap_packages = self.config.get("snap_packages", [])
+        app_data_paths = self.config.get("app_data_paths", {})
+
+        expected = []
+
+        if "firefox" in packages:
+            expected.append("firefox")
+        if "pycharm-community" in snap_packages:
+            expected.append("pycharm-community")
+
+        for _, guest_path in app_data_paths.items():
+            if guest_path == "/home/ubuntu/.config/google-chrome":
+                expected.append("google-chrome")
+                break
+
+        expected = sorted(set(expected))
+        if not expected:
+            return self.results["apps"]
+
+        self.console.print("\n[bold]🧩 Validating Apps...[/]")
+        table = Table(title="App Validation", border_style="cyan")
+        table.add_column("App", style="bold")
+        table.add_column("Installed", justify="center")
+        table.add_column("Profile", justify="center")
+
+        def _check_dir_nonempty(path: str) -> bool:
+            out = self._exec_in_vm(
+                f"test -d {path} && [ $(ls -A {path} 2>/dev/null | wc -l) -gt 0 ] && echo yes || echo no",
+                timeout=10,
+            )
+            return out == "yes"
+
+        for app in expected:
+            self.results["apps"]["total"] += 1
+            installed = False
+            profile_ok = False
+
+            if app == "firefox":
+                installed = (
+                    self._exec_in_vm("command -v firefox >/dev/null 2>&1 && echo yes || echo no")
+                    == "yes"
+                )
+                if _check_dir_nonempty("/home/ubuntu/snap/firefox/common/.mozilla/firefox"):
+                    profile_ok = True
+                elif _check_dir_nonempty("/home/ubuntu/.mozilla/firefox"):
+                    profile_ok = True
+
+            elif app == "pycharm-community":
+                installed = (
+                    self._exec_in_vm(
+                        "snap list pycharm-community >/dev/null 2>&1 && echo yes || echo no"
+                    )
+                    == "yes"
+                )
+                profile_ok = _check_dir_nonempty(
+                    "/home/ubuntu/snap/pycharm-community/common/.config/JetBrains"
+                )
+
+            elif app == "google-chrome":
+                installed = (
+                    self._exec_in_vm(
+                        "(command -v google-chrome >/dev/null 2>&1 || command -v google-chrome-stable >/dev/null 2>&1) && echo yes || echo no"
+                    )
+                    == "yes"
+                )
+                profile_ok = _check_dir_nonempty("/home/ubuntu/.config/google-chrome")
+
+            table.add_row(
+                app,
+                "[green]✅[/]" if installed else "[red]❌[/]",
+                "[green]✅[/]" if profile_ok else "[red]❌[/]",
+            )
+
+            if installed and profile_ok:
+                self.results["apps"]["passed"] += 1
+            else:
+                self.results["apps"]["failed"] += 1
+
+            self.results["apps"]["details"].append(
+                {"app": app, "installed": installed, "profile": profile_ok}
+            )
+
+        self.console.print(table)
+        return self.results["apps"]
     
     def validate_all(self) -> Dict:
         """Run all validations and return comprehensive results."""
@@ -344,27 +432,31 @@ class VMValidator:
         self.validate_packages()
         self.validate_snap_packages()
         self.validate_services()
+        self.validate_apps()
         
         # Calculate overall status
         total_checks = (
             self.results["mounts"]["total"] +
             self.results["packages"]["total"] +
             self.results["snap_packages"]["total"] +
-            self.results["services"]["total"]
+            self.results["services"]["total"] +
+            self.results["apps"]["total"]
         )
         
         total_passed = (
             self.results["mounts"]["passed"] +
             self.results["packages"]["passed"] +
             self.results["snap_packages"]["passed"] +
-            self.results["services"]["passed"]
+            self.results["services"]["passed"] +
+            self.results["apps"]["passed"]
         )
         
         total_failed = (
             self.results["mounts"]["failed"] +
             self.results["packages"]["failed"] +
             self.results["snap_packages"]["failed"] +
-            self.results["services"]["failed"]
+            self.results["services"]["failed"] +
+            self.results["apps"]["failed"]
         )
         
         # Get skipped services count
@@ -392,6 +484,9 @@ class VMValidator:
                              str(self.results["services"]["failed"]), 
                              str(skipped_services),
                              str(self.results["services"]["total"]))
+        summary_table.add_row("Apps", str(self.results["apps"]["passed"]), 
+                             str(self.results["apps"]["failed"]), "—",
+                             str(self.results["apps"]["total"]))
         summary_table.add_row("[bold]TOTAL", f"[bold green]{total_passed}", 
                              f"[bold red]{total_failed}", 
                              f"[dim]{skipped_services}[/]",

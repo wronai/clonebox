@@ -696,6 +696,8 @@ fi
         runcmd_lines = []
 
         runcmd_lines.append("  - systemctl enable --now qemu-guest-agent || true")
+        runcmd_lines.append("  - systemctl enable --now snapd || true")
+        runcmd_lines.append("  - timeout 300 snap wait system seed.loaded || true")
         
         # Add service enablement
         for svc in config.services:
@@ -760,7 +762,7 @@ users:
     sudo: ALL=(ALL) NOPASSWD:ALL
     shell: /bin/bash
     lock_passwd: false
-    groups: sudo,adm,dialout,cdrom,floppy,audio,dip,video,plugdev,netdev
+    groups: sudo,adm,dialout,cdrom,floppy,audio,dip,video,plugdev,netdev,docker
     plain_text_passwd: {config.password}
 
 # Allow password authentication

@@ -275,12 +275,24 @@ class SystemDetector:
         # Browsers - profiles, extensions, bookmarks, passwords
         "chrome": [".config/google-chrome", ".config/chromium"],
         "chromium": [".config/chromium"],
-        "firefox": [".mozilla/firefox", ".cache/mozilla/firefox"],
+        "firefox": [
+            "snap/firefox/common/.mozilla/firefox",
+            "snap/firefox/common/.cache/mozilla/firefox",
+            ".mozilla/firefox",
+            ".cache/mozilla/firefox",
+        ],
         
         # IDEs and editors - settings, extensions, projects history
         "code": [".config/Code", ".vscode", ".vscode-server"],
         "vscode": [".config/Code", ".vscode", ".vscode-server"],
-        "pycharm": [".config/JetBrains", ".local/share/JetBrains", ".cache/JetBrains"],
+        "pycharm": [
+            "snap/pycharm-community/common/.config/JetBrains",
+            "snap/pycharm-community/common/.local/share/JetBrains",
+            "snap/pycharm-community/common/.cache/JetBrains",
+            ".config/JetBrains",
+            ".local/share/JetBrains",
+            ".cache/JetBrains",
+        ],
         "idea": [".config/JetBrains", ".local/share/JetBrains"],
         "webstorm": [".config/JetBrains", ".local/share/JetBrains"],
         "goland": [".config/JetBrains", ".local/share/JetBrains"],
@@ -354,27 +366,40 @@ class SystemDetector:
         app_data_paths = []
         seen_paths = set()
         
+        matched_patterns = set()
+
         for app in applications:
             app_name = app.name.lower()
-            
-            # Check each known app pattern
-            for pattern, dirs in self.APP_DATA_DIRS.items():
+
+            for pattern in self.APP_DATA_DIRS:
                 if pattern in app_name:
-                    for dir_name in dirs:
-                        full_path = self.home / dir_name
-                        if full_path.exists() and str(full_path) not in seen_paths:
-                            seen_paths.add(str(full_path))
-                            # Calculate size
-                            try:
-                                size = self._get_dir_size(full_path, max_depth=2)
-                            except:
-                                size = 0
-                            app_data_paths.append({
-                                "path": str(full_path),
-                                "app": app.name,
-                                "type": "app_data",
-                                "size_mb": round(size / 1024 / 1024, 1)
-                            })
+                    matched_patterns.add(pattern)
+
+        for pattern in ("firefox", "chrome", "chromium", "pycharm"):
+            matched_patterns.add(pattern)
+
+        for pattern in sorted(matched_patterns):
+            dirs = self.APP_DATA_DIRS.get(pattern, [])
+            if not dirs:
+                continue
+
+            snap_dirs = [d for d in dirs if d.startswith("snap/")]
+            preferred_dirs = snap_dirs if any((self.home / d).exists() for d in snap_dirs) else dirs
+
+            for dir_name in preferred_dirs:
+                full_path = self.home / dir_name
+                if full_path.exists() and str(full_path) not in seen_paths:
+                    seen_paths.add(str(full_path))
+                    try:
+                        size = self._get_dir_size(full_path, max_depth=2)
+                    except Exception:
+                        size = 0
+                    app_data_paths.append({
+                        "path": str(full_path),
+                        "app": pattern,
+                        "type": "app_data",
+                        "size_mb": round(size / 1024 / 1024, 1),
+                    })
         
         return app_data_paths
 

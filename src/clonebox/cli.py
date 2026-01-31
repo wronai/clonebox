@@ -919,6 +919,8 @@ def cmd_delete(args):
         ).ask():
             console.print("[yellow]Cancelled.[/]")
             return
+
+
 def cmd_list(args):
     """List all VMs."""
     cloner = SelectiveVMCloner(user_session=getattr(args, "user", False))
@@ -1025,6 +1027,19 @@ def cmd_container_down(args):
     cloner = ContainerCloner(engine=getattr(args, "engine", "auto"))
     cloner.stop(args.name)
     cloner.rm(args.name, force=True)
+
+
+def cmd_dashboard(args):
+    """Run the local CloneBox dashboard."""
+    try:
+        from clonebox.dashboard import run_dashboard
+    except Exception as e:
+        console.print("[red]❌ Dashboard dependencies are not installed.[/]")
+        console.print("[dim]Install with: pip install 'clonebox[dashboard]'[/]")
+        console.print(f"[dim]{e}[/]")
+        return
+
+    run_dashboard(port=getattr(args, "port", 8080))
 
 
 def cmd_diagnose(args):
@@ -1772,6 +1787,21 @@ def generate_clonebox_yaml(
             guest_path = f"/home/ubuntu/{rel_path}"
             app_data_mapping[host_path] = guest_path
 
+    post_commands = []
+
+    chrome_profile = home_dir / ".config" / "google-chrome"
+    if chrome_profile.exists():
+        host_path = str(chrome_profile)
+        if host_path not in paths_mapping and host_path not in app_data_mapping:
+            app_data_mapping[host_path] = "/home/ubuntu/.config/google-chrome"
+
+        post_commands.append(
+            "command -v google-chrome >/dev/null 2>&1 || ("
+            "curl -fsSL -o /tmp/google-chrome.deb https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb && "
+            "apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y /tmp/google-chrome.deb"
+            ")"
+        )
+
     # Determine VM name
     if not vm_name:
         if target_path:
@@ -1805,6 +1835,34 @@ def generate_clonebox_yaml(
     if deduplicate:
         all_snap_packages = deduplicate_list(all_snap_packages)
 
+    if chrome_profile.exists() and "google-chrome" not in [d.get("app", "") for d in app_data_dirs]:
+        if "chromium" not in all_snap_packages:
+            all_snap_packages.append("chromium")
+
+    if "pycharm-community" in all_snap_packages:
+        remapped = {}
+        for host_path, guest_path in app_data_mapping.items():
+            if guest_path == "/home/ubuntu/.config/JetBrains":
+                remapped[host_path] = "/home/ubuntu/snap/pycharm-community/common/.config/JetBrains"
+            elif guest_path == "/home/ubuntu/.local/share/JetBrains":
+                remapped[host_path] = "/home/ubuntu/snap/pycharm-community/common/.local/share/JetBrains"
+            elif guest_path == "/home/ubuntu/.cache/JetBrains":
+                remapped[host_path] = "/home/ubuntu/snap/pycharm-community/common/.cache/JetBrains"
+            else:
+                remapped[host_path] = guest_path
+        app_data_mapping = remapped
+
+    if "firefox" in all_apt_packages:
+        remapped = {}
+        for host_path, guest_path in app_data_mapping.items():
+            if guest_path == "/home/ubuntu/.mozilla/firefox":
+                remapped[host_path] = "/home/ubuntu/snap/firefox/common/.mozilla/firefox"
+            elif guest_path == "/home/ubuntu/.cache/mozilla/firefox":
+                remapped[host_path] = "/home/ubuntu/snap/firefox/common/.cache/mozilla/firefox"
+            else:
+                remapped[host_path] = guest_path
+        app_data_mapping = remapped
+
     # Build config
     config = {
         "version": "1",
@@ -1822,7 +1880,7 @@ def generate_clonebox_yaml(
         "services": services,
         "packages": all_apt_packages,
         "snap_packages": all_snap_packages,
-        "post_commands": [],  # User can add custom commands to run after setup
+        "post_commands": post_commands,
         "paths": paths_mapping,
         "app_data_paths": app_data_mapping,  # App-specific config/data directories
         "detected": {
@@ -2368,6 +2426,12 @@ def main():
     container_sub = container_parser.add_subparsers(dest="container_command", help="Container commands")
 
     container_up = container_sub.add_parser("up", help="Start container")
+    container_up.add_argument(
+        "--engine",
+        choices=["auto", "podman", "docker"],
+        default=argparse.SUPPRESS,
+        help="Container engine: auto (default), podman, docker",
+    )
     container_up.add_argument("path", nargs="?", default=".", help="Workspace path")
     container_up.add_argument("--name", help="Container name")
     container_up.add_argument("--image", default="ubuntu:22.04", help="Container image")
@@ -2402,22 +2466,51 @@ def main():
     container_up.set_defaults(func=cmd_container_up)
 
     container_ps = container_sub.add_parser("ps", aliases=["ls"], help="List containers")
+    container_ps.add_argument(
+        "--engine",
+        choices=["auto", "podman", "docker"],
+        default=argparse.SUPPRESS,
+        help="Container engine: auto (default), podman, docker",
+    )
     container_ps.add_argument("-a", "--all", action="store_true", help="Show all containers")
     container_ps.add_argument("--json", action="store_true", help="Output JSON")
     container_ps.set_defaults(func=cmd_container_ps)
 
     container_stop = container_sub.add_parser("stop", help="Stop container")
+    container_stop.add_argument(
+        "--engine",
+        choices=["auto", "podman", "docker"],
+        default=argparse.SUPPRESS,
+        help="Container engine: auto (default), podman, docker",
+    )
     container_stop.add_argument("name", help="Container name")
     container_stop.set_defaults(func=cmd_container_stop)
 
     container_rm = container_sub.add_parser("rm", help="Remove container")
+    container_rm.add_argument(
+        "--engine",
+        choices=["auto", "podman", "docker"],
+        default=argparse.SUPPRESS,
+        help="Container engine: auto (default), podman, docker",
+    )
     container_rm.add_argument("name", help="Container name")
     container_rm.add_argument("-f", "--force", action="store_true", help="Force remove")
     container_rm.set_defaults(func=cmd_container_rm)
 
     container_down = container_sub.add_parser("down", help="Stop and remove container")
+    container_down.add_argument(
+        "--engine",
+        choices=["auto", "podman", "docker"],
+        default=argparse.SUPPRESS,
+        help="Container engine: auto (default), podman, docker",
+    )
     container_down.add_argument("name", help="Container name")
     container_down.set_defaults(func=cmd_container_down)
+
+    # Dashboard command
+    dashboard_parser = subparsers.add_parser("dashboard", help="Run local dashboard")
+    dashboard_parser.add_argument("--port", type=int, default=8080, help="Port to bind (default: 8080)")
+    dashboard_parser.set_defaults(func=cmd_dashboard)
 
     # Detect command
     detect_parser = subparsers.add_parser("detect", help="Detect system state")

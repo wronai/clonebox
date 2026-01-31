@@ -62,13 +62,111 @@ class TestVMValidator:
         assert "packages" in validator.results
         assert "snap_packages" in validator.results
         assert "services" in validator.results
+        assert "apps" in validator.results
         assert "overall" in validator.results
         
-        for category in ["mounts", "packages", "snap_packages", "services"]:
+        for category in ["mounts", "packages", "snap_packages", "services", "apps"]:
             assert "passed" in validator.results[category]
             assert "failed" in validator.results[category]
             assert "total" in validator.results[category]
             assert "details" in validator.results[category]
+
+
+class TestVMValidatorApps:
+    @pytest.fixture
+    def sample_config(self):
+        return {
+            "vm": {"name": "test-vm"},
+            "paths": {
+                "/home/user/projects": "/mnt/projects",
+                "/home/user/data": "/mnt/data",
+            },
+            "app_data_paths": {
+                "/home/user/.config/test": "/home/ubuntu/.config/test",
+            },
+            "packages": ["curl", "git", "vim"],
+            "snap_packages": ["code"],
+            "services": ["docker", "ssh"],
+        }
+
+    @pytest.fixture
+    def mock_console(self):
+        console = MagicMock()
+        console.print = MagicMock()
+        return console
+
+    def test_validate_apps_all_ok(self, mock_console):
+        config = {
+            "vm": {"name": "test-vm"},
+            "paths": {},
+            "app_data_paths": {
+                "/home/user/.config/google-chrome": "/home/ubuntu/.config/google-chrome",
+            },
+            "packages": ["firefox"],
+            "snap_packages": ["pycharm-community"],
+            "services": [],
+        }
+
+        validator = VMValidator(config=config, vm_name="test-vm", conn_uri="qemu:///session", console=mock_console)
+
+        def fake_exec(cmd: str, timeout: int = 10):
+            # install checks
+            if "command -v firefox" in cmd:
+                return "yes"
+            if "snap list pycharm-community" in cmd:
+                return "yes"
+            if "command -v google-chrome" in cmd or "command -v google-chrome-stable" in cmd:
+                return "yes"
+
+            # profile dir checks
+            if "test -d /home/ubuntu/snap/firefox/common/.mozilla/firefox" in cmd:
+                return "yes"
+            if "test -d /home/ubuntu/snap/pycharm-community/common/.config/JetBrains" in cmd:
+                return "yes"
+            if "test -d /home/ubuntu/.config/google-chrome" in cmd:
+                return "yes"
+
+            return "no"
+
+        validator._exec_in_vm = fake_exec
+
+        results = validator.validate_apps()
+        assert results["total"] == 3
+        assert results["failed"] == 0
+        assert results["passed"] == 3
+
+    def test_validate_apps_missing_profile_fails(self, mock_console):
+        config = {
+            "vm": {"name": "test-vm"},
+            "paths": {},
+            "app_data_paths": {
+                "/home/user/.config/google-chrome": "/home/ubuntu/.config/google-chrome",
+            },
+            "packages": ["firefox"],
+            "snap_packages": [],
+            "services": [],
+        }
+
+        validator = VMValidator(config=config, vm_name="test-vm", conn_uri="qemu:///session", console=mock_console)
+
+        def fake_exec(cmd: str, timeout: int = 10):
+            if "command -v firefox" in cmd:
+                return "yes"
+            if "test -d /home/ubuntu/snap/firefox/common/.mozilla/firefox" in cmd:
+                return "no"
+            if "test -d /home/ubuntu/.mozilla/firefox" in cmd:
+                return "no"
+            if "command -v google-chrome" in cmd or "command -v google-chrome-stable" in cmd:
+                return "yes"
+            if "test -d /home/ubuntu/.config/google-chrome" in cmd:
+                return "yes"
+            return "no"
+
+        validator._exec_in_vm = fake_exec
+
+        results = validator.validate_apps()
+        assert results["total"] == 2
+        assert results["failed"] == 1
 
     @patch('subprocess.run')
     def test_exec_in_vm_success(self, mock_run, sample_config, mock_console):

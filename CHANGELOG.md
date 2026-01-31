@@ -1,3 +1,27 @@
+## [0.1.20] - 2026-01-31
+
+### Summary
+
+feat(tests): CLI interface improvements
+
+### Core
+
+- update src/clonebox/cli.py
+- update src/clonebox/cloner.py
+- update src/clonebox/dashboard.py
+- update src/clonebox/detector.py
+- update src/clonebox/profiles.py
+- update src/clonebox/validator.py
+
+### Test
+
+- update tests/conftest.py
+- update tests/e2e/test_container_workflow.py
+- update tests/test_detector.py
+- update tests/test_profiles.py
+- update tests/test_validator.py
+
+
 ## [0.1.19] - 2026-01-31
 
 ### Summary
