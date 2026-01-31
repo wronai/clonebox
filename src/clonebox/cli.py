@@ -8,7 +8,8 @@ import json
 import os
 import re
 import sys
-from typing import Optional
+import time
+from typing import Any, Dict, Optional, Tuple
 from datetime import datetime
 from pathlib import Path
 
@@ -16,6 +17,7 @@ import questionary
 import yaml
 from questionary import Style
 from rich.console import Console
+from rich.live import Live
 from rich.panel import Panel
 from rich.progress import Progress, SpinnerColumn, TextColumn
 from rich.table import Table
@@ -196,6 +198,9 @@ def run_vm_diagnostics(
 
     console.print(f"[bold cyan]🧪 Diagnostics: {vm_name}[/]\n")
 
+    guest_agent_ready = _qga_ping(vm_name, conn_uri)
+    result["qga"]["ready"] = guest_agent_ready
+
     try:
         domstate = subprocess.run(
             ["virsh", "--connect", conn_uri, "domstate", vm_name],
@@ -257,8 +262,6 @@ def run_vm_diagnostics(
         result["network"] = {"error": str(e)}
         console.print(f"[yellow]⚠️  Cannot get IP: {e}[/]")
 
-    guest_agent_ready = _qga_ping(vm_name, conn_uri)
-    result["qga"]["ready"] = guest_agent_ready
     if verbose:
         console.print("\n[bold]🤖 QEMU Guest Agent...[/]")
         console.print(f"{'[green]✅' if guest_agent_ready else '[red]❌'} QGA connected")
@@ -334,7 +337,7 @@ def run_vm_diagnostics(
     if not cloud_init_complete:
         console.print("[dim]Mounts may not be ready until cloud-init completes.[/]")
 
-    mounts_detail: list[dict] = []
+    mounts_detail: list = []
     result["mounts"]["details"] = mounts_detail
     if not guest_agent_ready:
         console.print("[yellow]⏳ QEMU guest agent not connected yet - cannot verify mounts.[/]")
@@ -424,6 +427,109 @@ def run_vm_diagnostics(
     if json_output:
         console.print_json(json.dumps(result))
     return result
+
+
+def cmd_watch(args):
+    name = args.name
+    user_session = getattr(args, "user", False)
+    conn_uri = "qemu:///session" if user_session else "qemu:///system"
+    refresh = getattr(args, "refresh", 1.0)
+    max_wait = getattr(args, "timeout", 600)
+
+    try:
+        vm_name, _ = _resolve_vm_name_and_config_file(name)
+    except FileNotFoundError as e:
+        console.print(f"[red]❌ {e}[/]")
+        return
+
+    console.print(f"[bold cyan]👀 Watching boot diagnostics: {vm_name}[/]")
+    console.print("[dim]Waiting for QEMU Guest Agent...[/]")
+
+    start = time.time()
+    while time.time() - start < max_wait:
+        if _qga_ping(vm_name, conn_uri):
+            break
+        time.sleep(min(refresh, 2.0))
+
+    if not _qga_ping(vm_name, conn_uri):
+        console.print("[yellow]⚠️  QEMU Guest Agent not connected - cannot watch diagnostic status yet[/]")
+        console.print(f"[dim]Try: clonebox status {name or vm_name} {'--user' if user_session else ''} --verbose[/]")
+        return
+
+    def _read_status() -> Tuple[Optional[Dict[str, Any]], str]:
+        status_raw = _qga_exec(vm_name, conn_uri, "cat /var/run/clonebox-status.json 2>/dev/null || true", timeout=10)
+        log_tail = _qga_exec(vm_name, conn_uri, "tail -n 40 /var/log/clonebox-boot.log 2>/dev/null || true", timeout=10) or ""
+
+        status_obj: Optional[Dict[str, Any]] = None
+        if status_raw:
+            try:
+                status_obj = json.loads(status_raw)
+            except Exception:
+                status_obj = None
+        return status_obj, log_tail
+
+    with Live(refresh_per_second=max(1, int(1 / max(refresh, 0.2))), console=console) as live:
+        while True:
+            status_obj, log_tail = _read_status()
+            phase = (status_obj or {}).get("phase") if status_obj else None
+            current_task = (status_obj or {}).get("current_task") if status_obj else None
+
+            header = f"phase={phase or 'unknown'}"
+            if current_task:
+                header += f" | {current_task}"
+
+            stats = ""
+            if status_obj:
+                stats = (
+                    f"passed={status_obj.get('passed', 0)} failed={status_obj.get('failed', 0)} repaired={status_obj.get('repaired', 0)} total={status_obj.get('total', 0)}"
+                )
+
+            body = "\n".join([s for s in [header, stats, "", log_tail.strip()] if s])
+            live.update(Panel(body or "(no output yet)", title="CloneBox boot diagnostic", border_style="cyan"))
+
+            if phase == "complete":
+                break
+
+            if time.time() - start >= max_wait:
+                break
+
+            time.sleep(refresh)
+
+
+def cmd_repair(args):
+    name = args.name
+    user_session = getattr(args, "user", False)
+    conn_uri = "qemu:///session" if user_session else "qemu:///system"
+    timeout = getattr(args, "timeout", 600)
+    follow = getattr(args, "watch", False)
+
+    try:
+        vm_name, _ = _resolve_vm_name_and_config_file(name)
+    except FileNotFoundError as e:
+        console.print(f"[red]❌ {e}[/]")
+        return
+
+    if not _qga_ping(vm_name, conn_uri):
+        console.print("[yellow]⚠️  QEMU Guest Agent not connected - cannot trigger repair[/]")
+        console.print("[dim]Inside VM you can run: sudo /usr/local/bin/clonebox-boot-diagnostic[/]")
+        return
+
+    console.print(f"[cyan]🔧 Running boot diagnostic/repair in VM: {vm_name}[/]")
+    out = _qga_exec(vm_name, conn_uri, "/usr/local/bin/clonebox-boot-diagnostic || true", timeout=timeout)
+    if out is None:
+        console.print("[yellow]⚠️  Repair triggered but output not available via QGA (check VM console/log)[/]")
+    elif out.strip():
+        console.print(Panel(out.strip()[-3000:], title="Command output", border_style="cyan"))
+
+    if follow:
+        cmd_watch(
+            argparse.Namespace(
+                name=name,
+                user=user_session,
+                refresh=getattr(args, "refresh", 1.0),
+                timeout=timeout,
+            )
+        )
 
 
 def interactive_mode():
@@ -1445,6 +1551,7 @@ def cmd_test(args):
     verbose = getattr(args, "verbose", False)
     validate_all = getattr(args, "validate", False)
     require_running_apps = getattr(args, "require_running_apps", False)
+    smoke_test = getattr(args, "smoke_test", False)
     conn_uri = "qemu:///session" if user_session else "qemu:///system"
     
     # If name is a path, load config
@@ -1643,6 +1750,7 @@ def cmd_test(args):
             conn_uri,
             console,
             require_running_apps=require_running_apps,
+            smoke_test=smoke_test,
         )
         results = validator.validate_all()
         
@@ -2636,6 +2744,63 @@ def main():
     )
     diagnose_parser.set_defaults(func=cmd_diagnose)
 
+    watch_parser = subparsers.add_parser(
+        "watch", help="Watch boot diagnostic output from VM (via QEMU Guest Agent)"
+    )
+    watch_parser.add_argument(
+        "name", nargs="?", default=None, help="VM name or '.' to use .clonebox.yaml"
+    )
+    watch_parser.add_argument(
+        "-u",
+        "--user",
+        action="store_true",
+        help="Use user session (qemu:///session)",
+    )
+    watch_parser.add_argument(
+        "--refresh",
+        type=float,
+        default=1.0,
+        help="Refresh interval in seconds (default: 1.0)",
+    )
+    watch_parser.add_argument(
+        "--timeout",
+        type=int,
+        default=600,
+        help="Max seconds to wait (default: 600)",
+    )
+    watch_parser.set_defaults(func=cmd_watch)
+
+    repair_parser = subparsers.add_parser(
+        "repair", help="Trigger boot diagnostic/repair inside VM (via QEMU Guest Agent)"
+    )
+    repair_parser.add_argument(
+        "name", nargs="?", default=None, help="VM name or '.' to use .clonebox.yaml"
+    )
+    repair_parser.add_argument(
+        "-u",
+        "--user",
+        action="store_true",
+        help="Use user session (qemu:///session)",
+    )
+    repair_parser.add_argument(
+        "--timeout",
+        type=int,
+        default=600,
+        help="Max seconds to wait for repair (default: 600)",
+    )
+    repair_parser.add_argument(
+        "--watch",
+        action="store_true",
+        help="After triggering repair, watch status/log output",
+    )
+    repair_parser.add_argument(
+        "--refresh",
+        type=float,
+        default=1.0,
+        help="Refresh interval for --watch (default: 1.0)",
+    )
+    repair_parser.set_defaults(func=cmd_repair)
+
     # Export command - package VM for migration
     export_parser = subparsers.add_parser("export", help="Export VM and data for migration")
     export_parser.add_argument(
@@ -2685,6 +2850,11 @@ def main():
         "--require-running-apps",
         action="store_true",
         help="Fail validation if expected apps are installed but not currently running",
+    )
+    test_parser.add_argument(
+        "--smoke-test",
+        action="store_true",
+        help="Run smoke tests (installed ≠ works): headless launch checks for key apps",
     )
     test_parser.set_defaults(func=cmd_test)
 

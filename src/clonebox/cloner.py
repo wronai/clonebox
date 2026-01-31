@@ -490,8 +490,21 @@ class SelectiveVMCloner:
     def _generate_boot_diagnostic_script(self, config: VMConfig) -> str:
         """Generate boot diagnostic script with self-healing capabilities."""
         import base64
-        
-        apt_packages = " ".join(f'"{p}"' for p in config.packages) if config.packages else ""
+
+        wants_google_chrome = any(
+            p == "/home/ubuntu/.config/google-chrome" for p in (config.paths or {}).values()
+        )
+
+        apt_pkg_list = list(config.packages or [])
+        for base_pkg in ["qemu-guest-agent", "cloud-guest-utils"]:
+            if base_pkg not in apt_pkg_list:
+                apt_pkg_list.insert(0, base_pkg)
+        if config.gui:
+            for gui_pkg in ["ubuntu-desktop-minimal", "firefox"]:
+                if gui_pkg not in apt_pkg_list:
+                    apt_pkg_list.append(gui_pkg)
+
+        apt_packages = " ".join(f'"{p}"' for p in apt_pkg_list) if apt_pkg_list else ""
         snap_packages = " ".join(f'"{p}"' for p in config.snap_packages) if config.snap_packages else ""
         services = " ".join(f'"{s}"' for s in config.services) if config.services else ""
         
@@ -503,7 +516,8 @@ class SelectiveVMCloner:
         script = f'''#!/bin/bash
 set -uo pipefail
 LOG="/var/log/clonebox-boot.log"
-STATUS="/var/run/clonebox-status"
+STATUS_KV="/var/run/clonebox-status"
+STATUS_JSON="/var/run/clonebox-status.json"
 MAX_RETRIES=3
 PASSED=0 FAILED=0 REPAIRED=0 TOTAL=0
 
@@ -514,6 +528,15 @@ ok() {{ log "${{GREEN}}✅ $1${{NC}}"; ((PASSED++)); ((TOTAL++)); }}
 fail() {{ log "${{RED}}❌ $1${{NC}}"; ((FAILED++)); ((TOTAL++)); }}
 repair() {{ log "${{YELLOW}}🔧 $1${{NC}}"; }}
 section() {{ log ""; log "${{BOLD}}[$1] $2${{NC}}"; }}
+
+write_status() {{
+    local phase="$1"
+    local current_task="${{2:-}}"
+    printf 'passed=%s failed=%s repaired=%s\n' "$PASSED" "$FAILED" "$REPAIRED" > "$STATUS_KV" 2>/dev/null || true
+    cat > "$STATUS_JSON" <<EOF
+{{"phase":"$phase","current_task":"$current_task","total":$TOTAL,"passed":$PASSED,"failed":$FAILED,"repaired":$REPAIRED,"timestamp":"$(date -Iseconds)"}}
+EOF
+}}
 
 header() {{
     log ""
@@ -571,13 +594,14 @@ test_launch() {{
 }}
 
 header "CloneBox VM Boot Diagnostic"
-echo "phase=starting" > "$STATUS"
+write_status "starting" "boot diagnostic starting"
 
 APT_PACKAGES=({apt_packages})
 SNAP_PACKAGES=({snap_packages})
 SERVICES=({services})
 
 section "1/5" "Checking APT packages..."
+write_status "checking_apt" "checking APT packages"
 for pkg in "${{APT_PACKAGES[@]}}"; do
     [ -z "$pkg" ] && continue
     if check_apt "$pkg"; then
@@ -594,6 +618,7 @@ for pkg in "${{APT_PACKAGES[@]}}"; do
 done
 
 section "2/5" "Checking Snap packages..."
+write_status "checking_snaps" "checking snap packages"
 timeout 120 snap wait system seed.loaded 2>/dev/null || true
 for pkg in "${{SNAP_PACKAGES[@]}}"; do
     [ -z "$pkg" ] && continue
@@ -611,6 +636,7 @@ for pkg in "${{SNAP_PACKAGES[@]}}"; do
 done
 
 section "3/5" "Connecting Snap interfaces..."
+write_status "connecting_interfaces" "connecting snap interfaces"
 for pkg in "${{SNAP_PACKAGES[@]}}"; do
     [ -z "$pkg" ] && continue
     check_snap "$pkg" && connect_interfaces "$pkg"
@@ -618,22 +644,79 @@ done
 systemctl restart snapd 2>/dev/null || true
 
 section "4/5" "Testing application launch..."
+write_status "testing_launch" "testing application launch"
+APPS_TO_TEST=()
 for pkg in "${{SNAP_PACKAGES[@]}}"; do
     [ -z "$pkg" ] && continue
-    check_snap "$pkg" || continue
-    ((TOTAL++))
-    if test_launch "$pkg"; then
-        ok "$pkg launches OK"
+    APPS_TO_TEST+=("$pkg")
+done
+if [ "{str(wants_google_chrome).lower()}" = "true" ]; then
+    APPS_TO_TEST+=("google-chrome")
+fi
+if printf '%s\n' "${{APT_PACKAGES[@]}}" | grep -qx "docker.io"; then
+    APPS_TO_TEST+=("docker")
+fi
+
+for app in "${{APPS_TO_TEST[@]}}"; do
+    [ -z "$app" ] && continue
+    case "$app" in
+        google-chrome)
+            if ! command -v google-chrome >/dev/null 2>&1 && ! command -v google-chrome-stable >/dev/null 2>&1; then
+                repair "Installing google-chrome..."
+                tmp_deb="/tmp/google-chrome-stable_current_amd64.deb"
+                if curl -fsSL -o "$tmp_deb" "https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb" \
+                    && DEBIAN_FRONTEND=noninteractive apt-get install -y "$tmp_deb" &>>"$LOG"; then
+                    rm -f "$tmp_deb"
+                    ((REPAIRED++))
+                else
+                    rm -f "$tmp_deb" 2>/dev/null || true
+                fi
+            fi
+            ;;
+        docker)
+            check_apt "docker.io" || continue
+            ;;
+        *)
+            if check_snap "$app"; then
+                :
+            else
+                continue
+            fi
+            ;;
+    esac
+
+    if test_launch "$app"; then
+        ok "$app launches OK"
     else
-        log "${{YELLOW}}⚠️  $pkg launch test skipped${{NC}}"
-        ((PASSED++))
+        fail "$app launch test FAILED"
     fi
 done
 
-section "5/5" "Checking services..."
+section "5/6" "Checking mount points..."
+write_status "checking_mounts" "checking mount points"
+while IFS= read -r line; do
+    tag=$(echo "$line" | awk '{{print $1}}')
+    mp=$(echo "$line" | awk '{{print $2}}')
+    if [[ "$tag" =~ ^mount[0-9]+$ ]] && [[ "$mp" == /* ]]; then
+        if mountpoint -q "$mp" 2>/dev/null; then
+            ok "$mp mounted"
+        else
+            repair "Mounting $mp..."
+            mkdir -p "$mp" 2>/dev/null || true
+            if mount "$mp" &>>"$LOG"; then
+                ok "$mp mounted"
+                ((REPAIRED++))
+            else
+                fail "$mp mount FAILED"
+            fi
+        fi
+    fi
+done < /etc/fstab
+
+section "6/6" "Checking services..."
+write_status "checking_services" "checking services"
 for svc in "${{SERVICES[@]}}"; do
     [ -z "$svc" ] && continue
-    ((TOTAL++))
     if systemctl is-active "$svc" &>/dev/null; then
         ok "$svc running"
     else
@@ -650,7 +733,7 @@ log "  ${{YELLOW}}Repaired:${{NC}} $REPAIRED"
 log "  ${{RED}}Failed:${{NC}}   $FAILED"
 log ""
 
-echo "passed=$PASSED failed=$FAILED repaired=$REPAIRED" > "$STATUS"
+write_status "complete" "complete"
 
 if [ $FAILED -eq 0 ]; then
     log "${{GREEN}}${{BOLD}}═══════════════════════════════════════════════════════════${{NC}}"
@@ -956,8 +1039,10 @@ ExecStart=/usr/local/bin/clonebox-boot-diagnostic
 StandardOutput=journal+console
 StandardError=journal+console
 TTYPath=/dev/tty1
+TTYReset=yes
+TTYVHangup=yes
 RemainAfterExit=yes
-TimeoutStartSec=300
+TimeoutStartSec=600
 
 [Install]
 WantedBy=multi-user.target'''
@@ -966,6 +1051,7 @@ WantedBy=multi-user.target'''
         runcmd_lines.append(f"  - echo '{systemd_b64}' | base64 -d > /etc/systemd/system/clonebox-diagnostic.service")
         runcmd_lines.append("  - systemctl daemon-reload")
         runcmd_lines.append("  - systemctl enable clonebox-diagnostic.service")
+        runcmd_lines.append("  - systemctl start clonebox-diagnostic.service || true")
         
         # Create MOTD banner
         motd_banner = '''#!/bin/bash

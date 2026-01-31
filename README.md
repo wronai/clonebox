@@ -226,6 +226,7 @@ clonebox
 clonebox clone . --user --run --replace --base-image ~/ubuntu-22.04-cloud.qcow2 --disk-size-gb 30
 
 clonebox test . --user --validate
+clonebox test . --user --validate --require-running-apps
 ```
 
 ### Profiles (Reusable presets)

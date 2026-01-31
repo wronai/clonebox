@@ -127,11 +127,15 @@ class TestVMValidatorApps:
                 return "yes"
 
             # running checks
-            if "pgrep -f 'firefox'" in cmd:
+            if "pgrep -u ubuntu -f '[f]irefox'" in cmd:
                 return "yes"
-            if "pgrep -f 'pycharm-community'" in cmd or "pgrep -f 'pycharm'" in cmd or "pgrep -f 'jetbrains'" in cmd:
+            if (
+                "pgrep -u ubuntu -f '[p]ycharm-community'" in cmd
+                or "pgrep -u ubuntu -f '[p]ycharm'" in cmd
+                or "pgrep -u ubuntu -f '[j]etbrains'" in cmd
+            ):
                 return "yes"
-            if "pgrep -f 'google-chrome'" in cmd or "pgrep -f 'google-chrome-stable'" in cmd:
+            if "pgrep -u ubuntu -f '[g]oogle-chrome'" in cmd or "pgrep -u ubuntu -f '[g]oogle-chrome-stable'" in cmd:
                 return "yes"
 
             return "no"
@@ -169,7 +173,11 @@ class TestVMValidatorApps:
                 return "yes"
             if "test -d /home/ubuntu/snap/pycharm-community/common/.config/JetBrains" in cmd:
                 return "yes"
-            if "pgrep -f 'pycharm-community'" in cmd or "pgrep -f 'pycharm'" in cmd or "pgrep -f 'jetbrains'" in cmd:
+            if (
+                "pgrep -u ubuntu -f '[p]ycharm-community'" in cmd
+                or "pgrep -u ubuntu -f '[p]ycharm'" in cmd
+                or "pgrep -u ubuntu -f '[j]etbrains'" in cmd
+            ):
                 return "no"
             if "snap connections pycharm-community" in cmd:
                 return "desktop -\n"
@@ -209,9 +217,9 @@ class TestVMValidatorApps:
                 return "yes"
 
             # running checks
-            if "pgrep -f 'firefox'" in cmd:
+            if "pgrep -u ubuntu -f '[f]irefox'" in cmd:
                 return "yes"
-            if "pgrep -f 'google-chrome'" in cmd or "pgrep -f 'google-chrome-stable'" in cmd:
+            if "pgrep -u ubuntu -f '[g]oogle-chrome'" in cmd or "pgrep -u ubuntu -f '[g]oogle-chrome-stable'" in cmd:
                 return "yes"
             return "no"
 

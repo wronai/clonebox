@@ -8,6 +8,7 @@ import time
 from typing import Dict, List, Tuple, Optional
 from pathlib import Path
 from rich.console import Console
+from rich.panel import Panel
 from rich.table import Table
 
 
@@ -21,18 +22,21 @@ class VMValidator:
         conn_uri: str,
         console: Console = None,
         require_running_apps: bool = False,
+        smoke_test: bool = False,
     ):
         self.config = config
         self.vm_name = vm_name
         self.conn_uri = conn_uri
         self.console = console or Console()
         self.require_running_apps = require_running_apps
+        self.smoke_test = smoke_test
         self.results = {
             "mounts": {"passed": 0, "failed": 0, "total": 0, "details": []},
             "packages": {"passed": 0, "failed": 0, "total": 0, "details": []},
             "snap_packages": {"passed": 0, "failed": 0, "total": 0, "details": []},
             "services": {"passed": 0, "failed": 0, "total": 0, "details": []},
             "apps": {"passed": 0, "failed": 0, "total": 0, "details": []},
+            "smoke": {"passed": 0, "failed": 0, "total": 0, "details": []},
             "overall": "unknown"
         }
     
@@ -342,6 +346,7 @@ class VMValidator:
         packages = self.config.get("packages", [])
         snap_packages = self.config.get("snap_packages", [])
         app_data_paths = self.config.get("app_data_paths", {})
+        vm_user = self.config.get("vm", {}).get("username", "ubuntu")
 
         snap_app_specs = {
             "pycharm-community": {
@@ -389,10 +394,16 @@ class VMValidator:
         table.add_column("PID", justify="right", style="dim")
         table.add_column("Note", style="dim")
 
+        def _pgrep_pattern(pattern: str) -> str:
+            if not pattern:
+                return pattern
+            return f"[{pattern[0]}]{pattern[1:]}"
+
         def _check_any_process_running(patterns: List[str]) -> Optional[bool]:
             for pattern in patterns:
+                p = _pgrep_pattern(pattern)
                 out = self._exec_in_vm(
-                    f"pgrep -f '{pattern}' >/dev/null 2>&1 && echo yes || echo no",
+                    f"pgrep -u {vm_user} -f '{p}' >/dev/null 2>&1 && echo yes || echo no",
                     timeout=10,
                 )
                 if out is None:
@@ -403,8 +414,9 @@ class VMValidator:
 
         def _find_first_pid(patterns: List[str]) -> Optional[str]:
             for pattern in patterns:
+                p = _pgrep_pattern(pattern)
                 out = self._exec_in_vm(
-                    f"pgrep -f '{pattern}' 2>/dev/null | head -n 1 || true",
+                    f"pgrep -u {vm_user} -f '{p}' 2>/dev/null | head -n 1 || true",
                     timeout=10,
                 )
                 if out is None:
@@ -413,6 +425,35 @@ class VMValidator:
                 if pid:
                     return pid
             return ""
+
+        def _collect_app_logs(app_name: str) -> str:
+            chunks: List[str] = []
+
+            def add(cmd: str, title: str, timeout: int = 20):
+                out = self._exec_in_vm(cmd, timeout=timeout)
+                if out is None:
+                    return
+                out = out.strip()
+                if not out:
+                    return
+                chunks.append(f"{title}\n$ {cmd}\n{out}")
+
+            if app_name in snap_app_specs:
+                add(f"snap connections {app_name} 2>/dev/null | head -n 40", "Snap connections")
+                add(f"snap logs {app_name} -n 80 2>/dev/null | tail -n 60", "Snap logs")
+
+                if app_name == "pycharm-community":
+                    add(
+                        "tail -n 80 /home/ubuntu/snap/pycharm-community/common/.config/JetBrains/*/log/idea.log 2>/dev/null || true",
+                        "idea.log",
+                    )
+
+            if app_name == "google-chrome":
+                add("journalctl -n 200 --no-pager 2>/dev/null | grep -i chrome | tail -n 60 || true", "Journal (chrome)")
+            if app_name == "firefox":
+                add("journalctl -n 200 --no-pager 2>/dev/null | grep -i firefox | tail -n 60 || true", "Journal (firefox)")
+
+            return "\n\n".join(chunks)
 
         def _snap_missing_interfaces(snap_name: str, required: List[str]) -> Optional[List[str]]:
             out = self._exec_in_vm(
@@ -544,8 +585,146 @@ class VMValidator:
                 }
             )
 
+            if installed and profile_ok and running in (False, None):
+                logs = _collect_app_logs(app)
+                if logs:
+                    self.console.print(Panel(logs, title=f"Logs: {app}", border_style="yellow"))
+
         self.console.print(table)
         return self.results["apps"]
+
+    def validate_smoke_tests(self) -> Dict:
+        packages = self.config.get("packages", [])
+        snap_packages = self.config.get("snap_packages", [])
+        app_data_paths = self.config.get("app_data_paths", {})
+        vm_user = self.config.get("vm", {}).get("username", "ubuntu")
+
+        expected = []
+
+        if "firefox" in packages:
+            expected.append("firefox")
+
+        for snap_pkg in snap_packages:
+            if snap_pkg in {"pycharm-community", "chromium", "firefox", "code"}:
+                expected.append(snap_pkg)
+
+        for _, guest_path in app_data_paths.items():
+            if guest_path == "/home/ubuntu/.config/google-chrome":
+                expected.append("google-chrome")
+                break
+
+        if "docker" in (self.config.get("services", []) or []) or "docker.io" in packages:
+            expected.append("docker")
+
+        expected = sorted(set(expected))
+        if not expected:
+            return self.results["smoke"]
+
+        def _installed(app: str) -> Optional[bool]:
+            if app in {"pycharm-community", "chromium", "firefox", "code"}:
+                out = self._exec_in_vm(f"snap list {app} >/dev/null 2>&1 && echo yes || echo no", timeout=10)
+                return None if out is None else out.strip() == "yes"
+
+            if app == "google-chrome":
+                out = self._exec_in_vm(
+                    "(command -v google-chrome >/dev/null 2>&1 || command -v google-chrome-stable >/dev/null 2>&1) && echo yes || echo no",
+                    timeout=10,
+                )
+                return None if out is None else out.strip() == "yes"
+
+            if app == "docker":
+                out = self._exec_in_vm("command -v docker >/dev/null 2>&1 && echo yes || echo no", timeout=10)
+                return None if out is None else out.strip() == "yes"
+
+            if app == "firefox":
+                out = self._exec_in_vm("command -v firefox >/dev/null 2>&1 && echo yes || echo no", timeout=10)
+                return None if out is None else out.strip() == "yes"
+
+            out = self._exec_in_vm(f"command -v {app} >/dev/null 2>&1 && echo yes || echo no", timeout=10)
+            return None if out is None else out.strip() == "yes"
+
+        def _run_test(app: str) -> Optional[bool]:
+            user_env = f"sudo -u {vm_user} env HOME=/home/{vm_user} XDG_RUNTIME_DIR=/run/user/1000"
+
+            if app == "pycharm-community":
+                out = self._exec_in_vm(
+                    "/snap/pycharm-community/current/jbr/bin/java -version >/dev/null 2>&1 && echo yes || echo no",
+                    timeout=20,
+                )
+                return None if out is None else out.strip() == "yes"
+
+            if app == "chromium":
+                out = self._exec_in_vm(
+                    f"{user_env} timeout 20 chromium --headless=new --no-sandbox --disable-gpu --dump-dom about:blank >/dev/null 2>&1 && echo yes || echo no",
+                    timeout=30,
+                )
+                return None if out is None else out.strip() == "yes"
+
+            if app == "firefox":
+                out = self._exec_in_vm(
+                    f"{user_env} timeout 20 firefox --headless --screenshot /tmp/clonebox-firefox.png about:blank >/dev/null 2>&1 && rm -f /tmp/clonebox-firefox.png && echo yes || echo no",
+                    timeout=30,
+                )
+                return None if out is None else out.strip() == "yes"
+
+            if app == "google-chrome":
+                out = self._exec_in_vm(
+                    f"{user_env} timeout 20 google-chrome --headless=new --no-sandbox --disable-gpu --dump-dom about:blank >/dev/null 2>&1 && echo yes || echo no",
+                    timeout=30,
+                )
+                return None if out is None else out.strip() == "yes"
+
+            if app == "docker":
+                out = self._exec_in_vm("timeout 20 docker info >/dev/null 2>&1 && echo yes || echo no", timeout=30)
+                return None if out is None else out.strip() == "yes"
+
+            out = self._exec_in_vm(f"timeout 20 {app} --version >/dev/null 2>&1 && echo yes || echo no", timeout=30)
+            return None if out is None else out.strip() == "yes"
+
+        self.console.print("\n[bold]🧪 Smoke Tests (installed ≠ works)...[/]")
+        table = Table(title="Smoke Tests", border_style="cyan")
+        table.add_column("App", style="bold")
+        table.add_column("Installed", justify="center")
+        table.add_column("Launch", justify="center")
+        table.add_column("Note", style="dim")
+
+        for app in expected:
+            self.results["smoke"]["total"] += 1
+            installed = _installed(app)
+            launched: Optional[bool] = None
+            note = ""
+
+            if installed is True:
+                launched = _run_test(app)
+                if launched is None:
+                    note = "test failed to execute"
+            elif installed is False:
+                note = "not installed"
+            else:
+                note = "install status unknown"
+
+            installed_icon = "[green]✅[/]" if installed is True else "[red]❌[/]" if installed is False else "[dim]?[/]"
+            launch_icon = "[green]✅[/]" if launched is True else "[red]❌[/]" if launched is False else ("[dim]—[/]" if installed is not True else "[dim]?[/]")
+
+            table.add_row(app, installed_icon, launch_icon, note)
+
+            passed = installed is True and launched is True
+            if passed:
+                self.results["smoke"]["passed"] += 1
+            else:
+                self.results["smoke"]["failed"] += 1
+
+            self.results["smoke"]["details"].append(
+                {
+                    "app": app,
+                    "installed": installed,
+                    "launched": launched,
+                    "note": note,
+                }
+            )
+
+        self.console.print(table)
+        return self.results["smoke"]
     
     def validate_all(self) -> Dict:
         """Run all validations and return comprehensive results."""
@@ -575,30 +754,41 @@ class VMValidator:
         self.validate_snap_packages()
         self.validate_services()
         self.validate_apps()
+        if self.smoke_test:
+            self.validate_smoke_tests()
+
+        recent_err = self._exec_in_vm("journalctl -p err -n 30 --no-pager 2>/dev/null || true", timeout=20)
+        if recent_err:
+            recent_err = recent_err.strip()
+            if recent_err:
+                self.console.print(Panel(recent_err, title="Recent system errors", border_style="red"))
         
         # Calculate overall status
         total_checks = (
-            self.results["mounts"]["total"] +
-            self.results["packages"]["total"] +
-            self.results["snap_packages"]["total"] +
-            self.results["services"]["total"] +
-            self.results["apps"]["total"]
+            self.results["mounts"]["total"]
+            + self.results["packages"]["total"]
+            + self.results["snap_packages"]["total"]
+            + self.results["services"]["total"]
+            + self.results["apps"]["total"]
+            + (self.results["smoke"]["total"] if self.smoke_test else 0)
         )
         
         total_passed = (
-            self.results["mounts"]["passed"] +
-            self.results["packages"]["passed"] +
-            self.results["snap_packages"]["passed"] +
-            self.results["services"]["passed"] +
-            self.results["apps"]["passed"]
+            self.results["mounts"]["passed"]
+            + self.results["packages"]["passed"]
+            + self.results["snap_packages"]["passed"]
+            + self.results["services"]["passed"]
+            + self.results["apps"]["passed"]
+            + (self.results["smoke"]["passed"] if self.smoke_test else 0)
         )
         
         total_failed = (
-            self.results["mounts"]["failed"] +
-            self.results["packages"]["failed"] +
-            self.results["snap_packages"]["failed"] +
-            self.results["services"]["failed"] +
-            self.results["apps"]["failed"]
+            self.results["mounts"]["failed"]
+            + self.results["packages"]["failed"]
+            + self.results["snap_packages"]["failed"]
+            + self.results["services"]["failed"]
+            + self.results["apps"]["failed"]
+            + (self.results["smoke"]["failed"] if self.smoke_test else 0)
         )
         
         # Get skipped services count
