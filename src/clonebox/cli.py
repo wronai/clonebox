@@ -1444,6 +1444,7 @@ def cmd_test(args):
     quick = getattr(args, "quick", False)
     verbose = getattr(args, "verbose", False)
     validate_all = getattr(args, "validate", False)
+    require_running_apps = getattr(args, "require_running_apps", False)
     conn_uri = "qemu:///session" if user_session else "qemu:///system"
     
     # If name is a path, load config
@@ -1636,7 +1637,13 @@ def cmd_test(args):
     
     # Run full validation if requested
     if validate_all and state == "running":
-        validator = VMValidator(config, vm_name, conn_uri, console)
+        validator = VMValidator(
+            config,
+            vm_name,
+            conn_uri,
+            console,
+            require_running_apps=require_running_apps,
+        )
         results = validator.validate_all()
         
         # Exit with error code if validations failed
@@ -2673,6 +2680,11 @@ def main():
     )
     test_parser.add_argument(
         "--validate", action="store_true", help="Run full validation (mounts, packages, services)"
+    )
+    test_parser.add_argument(
+        "--require-running-apps",
+        action="store_true",
+        help="Fail validation if expected apps are installed but not currently running",
     )
     test_parser.set_defaults(func=cmd_test)
 

@@ -14,11 +14,19 @@ from rich.table import Table
 class VMValidator:
     """Validates VM configuration against expected state from YAML."""
     
-    def __init__(self, config: dict, vm_name: str, conn_uri: str, console: Console = None):
+    def __init__(
+        self,
+        config: dict,
+        vm_name: str,
+        conn_uri: str,
+        console: Console = None,
+        require_running_apps: bool = False,
+    ):
         self.config = config
         self.vm_name = vm_name
         self.conn_uri = conn_uri
         self.console = console or Console()
+        self.require_running_apps = require_running_apps
         self.results = {
             "mounts": {"passed": 0, "failed": 0, "total": 0, "details": []},
             "packages": {"passed": 0, "failed": 0, "total": 0, "details": []},
@@ -263,11 +271,12 @@ class VMValidator:
         svc_table.add_column("Service", style="bold")
         svc_table.add_column("Enabled", justify="center")
         svc_table.add_column("Running", justify="center")
+        svc_table.add_column("PID", justify="right", style="dim")
         svc_table.add_column("Note", style="dim")
 
         for service in services:
             if service in self.VM_EXCLUDED_SERVICES:
-                svc_table.add_row(service, "[dim]—[/]", "[dim]—[/]", "host-only")
+                svc_table.add_row(service, "[dim]—[/]", "[dim]—[/]", "[dim]—[/]", "host-only")
                 self.results["services"]["skipped"] += 1
                 self.results["services"]["details"].append(
                     {
@@ -290,10 +299,20 @@ class VMValidator:
             running_status = self._exec_in_vm(running_cmd)
             is_running = running_status == "active"
 
+            pid_value = ""
+            if is_running:
+                pid_out = self._exec_in_vm(f"systemctl show -p MainPID --value {service} 2>/dev/null")
+                if pid_out is None:
+                    pid_value = "?"
+                else:
+                    pid_value = pid_out.strip() or "?"
+            else:
+                pid_value = "—"
+
             enabled_icon = "[green]✅[/]" if is_enabled else "[yellow]⚠️[/]"
             running_icon = "[green]✅[/]" if is_running else "[red]❌[/]"
 
-            svc_table.add_row(service, enabled_icon, running_icon, "")
+            svc_table.add_row(service, enabled_icon, running_icon, pid_value, "")
 
             if is_enabled and is_running:
                 self.results["services"]["passed"] += 1
@@ -305,6 +324,7 @@ class VMValidator:
                     "service": service,
                     "enabled": is_enabled,
                     "running": is_running,
+                    "pid": None if pid_value in ("", "—", "?") else pid_value,
                     "skipped": False,
                 }
             )
@@ -323,12 +343,33 @@ class VMValidator:
         snap_packages = self.config.get("snap_packages", [])
         app_data_paths = self.config.get("app_data_paths", {})
 
+        snap_app_specs = {
+            "pycharm-community": {
+                "process_patterns": ["pycharm-community", "pycharm", "jetbrains"],
+                "required_interfaces": ["desktop", "desktop-legacy", "x11", "wayland", "home", "network"],
+            },
+            "chromium": {
+                "process_patterns": ["chromium", "chromium-browser"],
+                "required_interfaces": ["desktop", "desktop-legacy", "x11", "wayland", "home", "network"],
+            },
+            "firefox": {
+                "process_patterns": ["firefox"],
+                "required_interfaces": ["desktop", "desktop-legacy", "x11", "wayland", "home", "network"],
+            },
+            "code": {
+                "process_patterns": ["code"],
+                "required_interfaces": ["desktop", "desktop-legacy", "x11", "wayland", "home", "network"],
+            },
+        }
+
         expected = []
 
         if "firefox" in packages:
             expected.append("firefox")
-        if "pycharm-community" in snap_packages:
-            expected.append("pycharm-community")
+
+        for snap_pkg in snap_packages:
+            if snap_pkg in snap_app_specs:
+                expected.append(snap_pkg)
 
         for _, guest_path in app_data_paths.items():
             if guest_path == "/home/ubuntu/.config/google-chrome":
@@ -344,6 +385,54 @@ class VMValidator:
         table.add_column("App", style="bold")
         table.add_column("Installed", justify="center")
         table.add_column("Profile", justify="center")
+        table.add_column("Running", justify="center")
+        table.add_column("PID", justify="right", style="dim")
+        table.add_column("Note", style="dim")
+
+        def _check_any_process_running(patterns: List[str]) -> Optional[bool]:
+            for pattern in patterns:
+                out = self._exec_in_vm(
+                    f"pgrep -f '{pattern}' >/dev/null 2>&1 && echo yes || echo no",
+                    timeout=10,
+                )
+                if out is None:
+                    return None
+                if out == "yes":
+                    return True
+            return False
+
+        def _find_first_pid(patterns: List[str]) -> Optional[str]:
+            for pattern in patterns:
+                out = self._exec_in_vm(
+                    f"pgrep -f '{pattern}' 2>/dev/null | head -n 1 || true",
+                    timeout=10,
+                )
+                if out is None:
+                    return None
+                pid = out.strip()
+                if pid:
+                    return pid
+            return ""
+
+        def _snap_missing_interfaces(snap_name: str, required: List[str]) -> Optional[List[str]]:
+            out = self._exec_in_vm(
+                f"snap connections {snap_name} 2>/dev/null | awk 'NR>1{{print $1, $3}}'",
+                timeout=15,
+            )
+            if out is None:
+                return None
+
+            connected = set()
+            for line in out.splitlines():
+                parts = line.split()
+                if len(parts) < 2:
+                    continue
+                iface, slot = parts[0], parts[1]
+                if slot != "-":
+                    connected.add(iface)
+
+            missing = [i for i in required if i not in connected]
+            return missing
 
         def _check_dir_nonempty(path: str) -> bool:
             out = self._exec_in_vm(
@@ -356,6 +445,9 @@ class VMValidator:
             self.results["apps"]["total"] += 1
             installed = False
             profile_ok = False
+            running: Optional[bool] = None
+            pid: Optional[str] = None
+            note = ""
 
             if app == "firefox":
                 installed = (
@@ -367,16 +459,37 @@ class VMValidator:
                 elif _check_dir_nonempty("/home/ubuntu/.mozilla/firefox"):
                     profile_ok = True
 
-            elif app == "pycharm-community":
+                if installed:
+                    running = _check_any_process_running(["firefox"]) 
+                    pid = _find_first_pid(["firefox"]) if running else ""
+
+            elif app in snap_app_specs:
                 installed = (
-                    self._exec_in_vm(
-                        "snap list pycharm-community >/dev/null 2>&1 && echo yes || echo no"
-                    )
+                    self._exec_in_vm(f"snap list {app} >/dev/null 2>&1 && echo yes || echo no")
                     == "yes"
                 )
-                profile_ok = _check_dir_nonempty(
-                    "/home/ubuntu/snap/pycharm-community/common/.config/JetBrains"
-                )
+                if app == "pycharm-community":
+                    profile_ok = _check_dir_nonempty(
+                        "/home/ubuntu/snap/pycharm-community/common/.config/JetBrains"
+                    )
+                else:
+                    profile_ok = True
+
+                if installed:
+                    patterns = snap_app_specs[app]["process_patterns"]
+                    running = _check_any_process_running(patterns)
+                    pid = _find_first_pid(patterns) if running else ""
+                    if running is False:
+                        missing_ifaces = _snap_missing_interfaces(
+                            app,
+                            snap_app_specs[app]["required_interfaces"],
+                        )
+                        if missing_ifaces:
+                            note = f"missing interfaces: {', '.join(missing_ifaces)}"
+                        elif missing_ifaces == []:
+                            note = "not running"
+                        else:
+                            note = "interfaces unknown"
 
             elif app == "google-chrome":
                 installed = (
@@ -387,19 +500,48 @@ class VMValidator:
                 )
                 profile_ok = _check_dir_nonempty("/home/ubuntu/.config/google-chrome")
 
+                if installed:
+                    running = _check_any_process_running(["google-chrome", "google-chrome-stable"])
+                    pid = _find_first_pid(["google-chrome", "google-chrome-stable"]) if running else ""
+
+            if self.require_running_apps and installed and profile_ok and running is None:
+                note = note or "running unknown"
+
+            running_icon = (
+                "[dim]—[/]"
+                if not installed
+                else "[green]✅[/]" if running is True else "[yellow]⚠️[/]" if running is False else "[dim]?[/]"
+            )
+
+            pid_value = "—" if not installed else ("?" if pid is None else (pid or "—"))
+
             table.add_row(
                 app,
                 "[green]✅[/]" if installed else "[red]❌[/]",
                 "[green]✅[/]" if profile_ok else "[red]❌[/]",
+                running_icon,
+                pid_value,
+                note,
             )
 
-            if installed and profile_ok:
+            should_pass = installed and profile_ok
+            if self.require_running_apps and installed and profile_ok:
+                should_pass = running is True
+
+            if should_pass:
                 self.results["apps"]["passed"] += 1
             else:
                 self.results["apps"]["failed"] += 1
 
             self.results["apps"]["details"].append(
-                {"app": app, "installed": installed, "profile": profile_ok}
+                {
+                    "app": app,
+                    "installed": installed,
+                    "profile": profile_ok,
+                    "running": running,
+                    "pid": pid,
+                    "note": note,
+                }
             )
 
         self.console.print(table)

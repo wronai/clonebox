@@ -126,6 +126,14 @@ class TestVMValidatorApps:
             if "test -d /home/ubuntu/.config/google-chrome" in cmd:
                 return "yes"
 
+            # running checks
+            if "pgrep -f 'firefox'" in cmd:
+                return "yes"
+            if "pgrep -f 'pycharm-community'" in cmd or "pgrep -f 'pycharm'" in cmd or "pgrep -f 'jetbrains'" in cmd:
+                return "yes"
+            if "pgrep -f 'google-chrome'" in cmd or "pgrep -f 'google-chrome-stable'" in cmd:
+                return "yes"
+
             return "no"
 
         validator._exec_in_vm = fake_exec
@@ -134,6 +142,45 @@ class TestVMValidatorApps:
         assert results["total"] == 3
         assert results["failed"] == 0
         assert results["passed"] == 3
+
+        for item in results["details"]:
+            assert "running" in item
+
+    def test_validate_apps_require_running_fails_when_not_running(self, mock_console):
+        config = {
+            "vm": {"name": "test-vm"},
+            "paths": {},
+            "app_data_paths": {},
+            "packages": [],
+            "snap_packages": ["pycharm-community"],
+            "services": [],
+        }
+
+        validator = VMValidator(
+            config=config,
+            vm_name="test-vm",
+            conn_uri="qemu:///session",
+            console=mock_console,
+            require_running_apps=True,
+        )
+
+        def fake_exec(cmd: str, timeout: int = 10):
+            if "snap list pycharm-community" in cmd:
+                return "yes"
+            if "test -d /home/ubuntu/snap/pycharm-community/common/.config/JetBrains" in cmd:
+                return "yes"
+            if "pgrep -f 'pycharm-community'" in cmd or "pgrep -f 'pycharm'" in cmd or "pgrep -f 'jetbrains'" in cmd:
+                return "no"
+            if "snap connections pycharm-community" in cmd:
+                return "desktop -\n"
+            return "no"
+
+        validator._exec_in_vm = fake_exec
+
+        results = validator.validate_apps()
+        assert results["total"] == 1
+        assert results["passed"] == 0
+        assert results["failed"] == 1
 
     def test_validate_apps_missing_profile_fails(self, mock_console):
         config = {
@@ -160,6 +207,12 @@ class TestVMValidatorApps:
                 return "yes"
             if "test -d /home/ubuntu/.config/google-chrome" in cmd:
                 return "yes"
+
+            # running checks
+            if "pgrep -f 'firefox'" in cmd:
+                return "yes"
+            if "pgrep -f 'google-chrome'" in cmd or "pgrep -f 'google-chrome-stable'" in cmd:
+                return "yes"
             return "no"
 
         validator._exec_in_vm = fake_exec
@@ -167,6 +220,9 @@ class TestVMValidatorApps:
         results = validator.validate_apps()
         assert results["total"] == 2
         assert results["failed"] == 1
+
+        for item in results["details"]:
+            assert "running" in item
 
 
 class TestVMValidatorServices:
@@ -209,6 +265,8 @@ class TestVMValidatorServices:
                 return "enabled"
             if "systemctl is-active docker" in cmd:
                 return "active"
+            if "systemctl show -p MainPID --value docker" in cmd:
+                return "123"
             return ""
 
         validator._exec_in_vm = fake_exec

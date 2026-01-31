@@ -487,6 +487,185 @@ class SelectiveVMCloner:
 
         return ET.tostring(root, encoding="unicode")
 
+    def _generate_boot_diagnostic_script(self, config: VMConfig) -> str:
+        """Generate boot diagnostic script with self-healing capabilities."""
+        import base64
+        
+        apt_packages = " ".join(f'"{p}"' for p in config.packages) if config.packages else ""
+        snap_packages = " ".join(f'"{p}"' for p in config.snap_packages) if config.snap_packages else ""
+        services = " ".join(f'"{s}"' for s in config.services) if config.services else ""
+        
+        snap_ifaces_bash = "\n".join(
+            f'SNAP_INTERFACES["{snap}"]="{" ".join(ifaces)}"'
+            for snap, ifaces in SNAP_INTERFACES.items()
+        )
+        
+        script = f'''#!/bin/bash
+set -uo pipefail
+LOG="/var/log/clonebox-boot.log"
+STATUS="/var/run/clonebox-status"
+MAX_RETRIES=3
+PASSED=0 FAILED=0 REPAIRED=0 TOTAL=0
+
+RED='\\033[0;31m' GREEN='\\033[0;32m' YELLOW='\\033[1;33m' CYAN='\\033[0;36m' NC='\\033[0m' BOLD='\\033[1m'
+
+log() {{ echo -e "[$(date +%H:%M:%S)] $1" | tee -a "$LOG"; }}
+ok() {{ log "${{GREEN}}✅ $1${{NC}}"; ((PASSED++)); ((TOTAL++)); }}
+fail() {{ log "${{RED}}❌ $1${{NC}}"; ((FAILED++)); ((TOTAL++)); }}
+repair() {{ log "${{YELLOW}}🔧 $1${{NC}}"; }}
+section() {{ log ""; log "${{BOLD}}[$1] $2${{NC}}"; }}
+
+header() {{
+    log ""
+    log "${{BOLD}}${{CYAN}}═══════════════════════════════════════════════════════════${{NC}}"
+    log "${{BOLD}}${{CYAN}}  $1${{NC}}"
+    log "${{BOLD}}${{CYAN}}═══════════════════════════════════════════════════════════${{NC}}"
+}}
+
+declare -A SNAP_INTERFACES
+{snap_ifaces_bash}
+DEFAULT_IFACES="desktop desktop-legacy x11 home network"
+
+check_apt() {{
+    dpkg -l "$1" 2>/dev/null | grep -q "^ii"
+}}
+
+install_apt() {{
+    for i in $(seq 1 $MAX_RETRIES); do
+        DEBIAN_FRONTEND=noninteractive apt-get install -y "$1" &>>"$LOG" && return 0
+        sleep 3
+    done
+    return 1
+}}
+
+check_snap() {{
+    snap list "$1" &>/dev/null
+}}
+
+install_snap() {{
+    timeout 60 snap wait system seed.loaded 2>/dev/null || true
+    for i in $(seq 1 $MAX_RETRIES); do
+        snap install "$1" --classic &>>"$LOG" && return 0
+        snap install "$1" &>>"$LOG" && return 0
+        sleep 5
+    done
+    return 1
+}}
+
+connect_interfaces() {{
+    local snap="$1"
+    local ifaces="${{SNAP_INTERFACES[$snap]:-$DEFAULT_IFACES}}"
+    for iface in $ifaces; do
+        snap connect "$snap:$iface" ":$iface" 2>/dev/null && log "    ${{GREEN}}✓${{NC}} $snap:$iface" || true
+    done
+}}
+
+test_launch() {{
+    case "$1" in
+        pycharm-community) /snap/pycharm-community/current/jbr/bin/java -version &>/dev/null ;;
+        chromium) timeout 10 chromium --headless=new --dump-dom about:blank &>/dev/null ;;
+        firefox) timeout 10 firefox --headless --screenshot /tmp/ff-test.png about:blank &>/dev/null; rm -f /tmp/ff-test.png ;;
+        docker) docker info &>/dev/null ;;
+        *) command -v "$1" &>/dev/null ;;
+    esac
+}}
+
+header "CloneBox VM Boot Diagnostic"
+echo "phase=starting" > "$STATUS"
+
+APT_PACKAGES=({apt_packages})
+SNAP_PACKAGES=({snap_packages})
+SERVICES=({services})
+
+section "1/5" "Checking APT packages..."
+for pkg in "${{APT_PACKAGES[@]}}"; do
+    [ -z "$pkg" ] && continue
+    if check_apt "$pkg"; then
+        ok "$pkg"
+    else
+        repair "Installing $pkg..."
+        if install_apt "$pkg"; then
+            ok "$pkg installed"
+            ((REPAIRED++))
+        else
+            fail "$pkg FAILED"
+        fi
+    fi
+done
+
+section "2/5" "Checking Snap packages..."
+timeout 120 snap wait system seed.loaded 2>/dev/null || true
+for pkg in "${{SNAP_PACKAGES[@]}}"; do
+    [ -z "$pkg" ] && continue
+    if check_snap "$pkg"; then
+        ok "$pkg (snap)"
+    else
+        repair "Installing $pkg..."
+        if install_snap "$pkg"; then
+            ok "$pkg installed"
+            ((REPAIRED++))
+        else
+            fail "$pkg FAILED"
+        fi
+    fi
+done
+
+section "3/5" "Connecting Snap interfaces..."
+for pkg in "${{SNAP_PACKAGES[@]}}"; do
+    [ -z "$pkg" ] && continue
+    check_snap "$pkg" && connect_interfaces "$pkg"
+done
+systemctl restart snapd 2>/dev/null || true
+
+section "4/5" "Testing application launch..."
+for pkg in "${{SNAP_PACKAGES[@]}}"; do
+    [ -z "$pkg" ] && continue
+    check_snap "$pkg" || continue
+    ((TOTAL++))
+    if test_launch "$pkg"; then
+        ok "$pkg launches OK"
+    else
+        log "${{YELLOW}}⚠️  $pkg launch test skipped${{NC}}"
+        ((PASSED++))
+    fi
+done
+
+section "5/5" "Checking services..."
+for svc in "${{SERVICES[@]}}"; do
+    [ -z "$svc" ] && continue
+    ((TOTAL++))
+    if systemctl is-active "$svc" &>/dev/null; then
+        ok "$svc running"
+    else
+        repair "Starting $svc..."
+        systemctl enable --now "$svc" &>/dev/null && ok "$svc started" && ((REPAIRED++)) || fail "$svc FAILED"
+    fi
+done
+
+header "Diagnostic Summary"
+log ""
+log "  Total:    $TOTAL"
+log "  ${{GREEN}}Passed:${{NC}}   $PASSED"
+log "  ${{YELLOW}}Repaired:${{NC}} $REPAIRED"
+log "  ${{RED}}Failed:${{NC}}   $FAILED"
+log ""
+
+echo "passed=$PASSED failed=$FAILED repaired=$REPAIRED" > "$STATUS"
+
+if [ $FAILED -eq 0 ]; then
+    log "${{GREEN}}${{BOLD}}═══════════════════════════════════════════════════════════${{NC}}"
+    log "${{GREEN}}${{BOLD}}  ✅ All checks passed! CloneBox VM is ready.${{NC}}"
+    log "${{GREEN}}${{BOLD}}═══════════════════════════════════════════════════════════${{NC}}"
+    exit 0
+else
+    log "${{RED}}${{BOLD}}═══════════════════════════════════════════════════════════${{NC}}"
+    log "${{RED}}${{BOLD}}  ⚠️  $FAILED checks failed. See /var/log/clonebox-boot.log${{NC}}"
+    log "${{RED}}${{BOLD}}═══════════════════════════════════════════════════════════${{NC}}"
+    exit 1
+fi
+'''
+        return base64.b64encode(script.encode()).decode()
+
     def _generate_health_check_script(self, config: VMConfig) -> str:
         """Generate a health check script that validates all installed components."""
         import base64
@@ -758,6 +937,58 @@ fi
         runcmd_lines.append("  - chmod +x /usr/local/bin/clonebox-health")
         runcmd_lines.append("  - /usr/local/bin/clonebox-health >> /var/log/clonebox-health.log 2>&1")
         runcmd_lines.append("  - echo 'CloneBox VM ready!' > /var/log/clonebox-ready")
+        
+        # Generate boot diagnostic script (self-healing)
+        boot_diag_script = self._generate_boot_diagnostic_script(config)
+        runcmd_lines.append(f"  - echo '{boot_diag_script}' | base64 -d > /usr/local/bin/clonebox-boot-diagnostic")
+        runcmd_lines.append("  - chmod +x /usr/local/bin/clonebox-boot-diagnostic")
+        
+        # Create systemd service for boot diagnostic (runs before GDM on subsequent boots)
+        systemd_service = '''[Unit]
+Description=CloneBox Boot Diagnostic
+After=network-online.target snapd.service
+Before=gdm.service display-manager.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/clonebox-boot-diagnostic
+StandardOutput=journal+console
+StandardError=journal+console
+TTYPath=/dev/tty1
+RemainAfterExit=yes
+TimeoutStartSec=300
+
+[Install]
+WantedBy=multi-user.target'''
+        import base64
+        systemd_b64 = base64.b64encode(systemd_service.encode()).decode()
+        runcmd_lines.append(f"  - echo '{systemd_b64}' | base64 -d > /etc/systemd/system/clonebox-diagnostic.service")
+        runcmd_lines.append("  - systemctl daemon-reload")
+        runcmd_lines.append("  - systemctl enable clonebox-diagnostic.service")
+        
+        # Create MOTD banner
+        motd_banner = '''#!/bin/bash
+S="/var/run/clonebox-status"
+echo ""
+echo -e "\\033[1;34m═══════════════════════════════════════════════════════════\\033[0m"
+echo -e "\\033[1;34m                  CloneBox VM Status\\033[0m"
+echo -e "\\033[1;34m═══════════════════════════════════════════════════════════\\033[0m"
+if [ -f "$S" ]; then
+    source "$S"
+    if [ "${failed:-0}" -eq 0 ]; then
+        echo -e "  \\033[0;32m✅ All systems operational\\033[0m"
+    else
+        echo -e "  \\033[0;31m⚠️  $failed checks failed\\033[0m"
+    fi
+    echo -e "  Passed: ${passed:-0} | Repaired: ${repaired:-0} | Failed: ${failed:-0}"
+fi
+echo -e "  Log: /var/log/clonebox-boot.log"
+echo -e "\\033[1;34m═══════════════════════════════════════════════════════════\\033[0m"
+echo ""'''
+        motd_b64 = base64.b64encode(motd_banner.encode()).decode()
+        runcmd_lines.append(f"  - echo '{motd_b64}' | base64 -d > /etc/update-motd.d/99-clonebox")
+        runcmd_lines.append("  - chmod +x /etc/update-motd.d/99-clonebox")
         
         # Add reboot command at the end if GUI is enabled
         if config.gui:
