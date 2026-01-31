@@ -168,6 +168,56 @@ class TestVMValidatorApps:
         assert results["total"] == 2
         assert results["failed"] == 1
 
+
+class TestVMValidatorServices:
+    @pytest.fixture
+    def sample_config(self):
+        return {
+            "vm": {"name": "test-vm"},
+            "paths": {
+                "/home/user/projects": "/mnt/projects",
+                "/home/user/data": "/mnt/data",
+            },
+            "app_data_paths": {
+                "/home/user/.config/test": "/home/ubuntu/.config/test",
+            },
+            "packages": ["curl", "git", "vim"],
+            "snap_packages": ["code"],
+            "services": ["docker", "ssh"],
+        }
+
+    @pytest.fixture
+    def mock_console(self):
+        console = MagicMock()
+        console.print = MagicMock()
+        return console
+
+    def test_validate_services_skips_host_only(self, mock_console):
+        config = {
+            "vm": {"name": "test-vm"},
+            "paths": {},
+            "app_data_paths": {},
+            "packages": [],
+            "snap_packages": [],
+            "services": ["libvirtd", "docker"],
+        }
+
+        validator = VMValidator(config=config, vm_name="test-vm", conn_uri="qemu:///session", console=mock_console)
+
+        def fake_exec(cmd: str, timeout: int = 10):
+            if "systemctl is-enabled docker" in cmd:
+                return "enabled"
+            if "systemctl is-active docker" in cmd:
+                return "active"
+            return ""
+
+        validator._exec_in_vm = fake_exec
+
+        results = validator.validate_services()
+        assert results["total"] == 1
+        assert results["passed"] == 1
+        assert results.get("skipped") == 1
+
     @patch('subprocess.run')
     def test_exec_in_vm_success(self, mock_run, sample_config, mock_console):
         """Test successful command execution in VM."""

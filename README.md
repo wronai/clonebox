@@ -47,6 +47,8 @@ Kluczowe komendy:
 - `clonebox` – interaktywny wizard (detect + create + start)
 - `clonebox detect` – skanuje usługi/apps/ścieżki
 - `clonebox clone . --user --run` – szybki klon bieżącego katalogu z użytkownikiem i autostartem
+- `clonebox container up|ps|stop|rm` – lekki runtime kontenerowy (podman/docker)
+- `clonebox dashboard` – lokalny dashboard (VM + containers)
 
 ### Dlaczego wirtualne klony workstation mają sens?
 
@@ -118,6 +120,11 @@ pip install -e .
 
 # Or directly
 pip install clonebox
+```
+
+Dashboard ma opcjonalne zależności:
+```bash
+pip install "clonebox[dashboard]"
 ```
 lub
 ```bash
@@ -202,6 +209,30 @@ clonebox
 clonebox clone . --user --run --replace --base-image ~/ubuntu-22.04-cloud.qcow2
 ```
 
+### Profiles (Reusable presets)
+
+Profiles pozwalają trzymać gotowe presety dla VM/container (np. `ml-dev`, `web-dev`) i nakładać je na bazową konfigurację.
+
+```bash
+# Przykład: uruchom kontener z profilem
+clonebox container up . --profile ml-dev --engine podman
+
+# Przykład: generuj VM config z profilem
+clonebox clone . --profile ml-dev --user --run
+```
+
+Domyślne lokalizacje profili:
+- `~/.clonebox.d/<name>.yaml`
+- `./.clonebox.d/<name>.yaml`
+- wbudowane: `src/clonebox/templates/profiles/<name>.yaml`
+
+### Dashboard
+
+```bash
+clonebox dashboard --port 8080
+# http://127.0.0.1:8080
+```
+
 The wizard will:
 1. Detect running services (Docker, PostgreSQL, nginx, etc.)
 2. Detect running applications and their working directories
@@ -277,9 +308,44 @@ clonebox clone . --user --run
 
 # Access in VM:
 ls ~/.config/google-chrome  # Chrome profile
-ls ~/.mozilla/firefox       # Firefox profile
-ls ~/.config/JetBrains      # PyCharm settings
+
+# Firefox profile (Ubuntu często używa snap):
+ls ~/snap/firefox/common/.mozilla/firefox
+ls ~/.mozilla/firefox
+
+# PyCharm profile (snap):
+ls ~/snap/pycharm-community/common/.config/JetBrains
+ls ~/.config/JetBrains
 ```
+
+### Container workflow (podman/docker)
+
+```bash
+# Start a dev container (auto-detect engine if not specified)
+clonebox container up . --engine podman --detach
+
+# List running containers
+clonebox container ps
+
+# Stop/remove
+clonebox container stop <name>
+clonebox container rm <name>
+```
+
+### Full validation (VM)
+
+`clonebox test` weryfikuje, że VM faktycznie ma zamontowane ścieżki i spełnia wymagania z `.clonebox.yaml`.
+
+```bash
+clonebox test . --user --validate
+```
+
+Walidowane kategorie:
+- **Mounts** (9p)
+- **Packages** (apt)
+- **Snap packages**
+- **Services** (enabled + running)
+- **Apps** (instalacja + dostępność profilu: Firefox/PyCharm/Chrome)
 
 ### Testing and Validating VM Configuration
 
