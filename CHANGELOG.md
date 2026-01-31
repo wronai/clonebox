@@ -1,3 +1,14 @@
+## [0.1.27] - 2026-01-31
+
+### Summary
+
+refactor(tests): code quality metrics with 4 supporting modules
+
+### Test
+
+- update tests/test_comprehensive_coverage.py
+
+
 ## [0.1.26] - 2026-01-31
 
 ### Summary
