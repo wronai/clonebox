@@ -606,12 +606,76 @@ connect_interfaces() {{
 }}
 
 test_launch() {{
-    case "$1" in
-        pycharm-community) /snap/pycharm-community/current/jbr/bin/java -version &>/dev/null ;;
-        chromium) timeout 10 chromium --headless=new --dump-dom about:blank &>/dev/null ;;
-        firefox) timeout 10 firefox --headless --screenshot /tmp/ff-test.png about:blank &>/dev/null; rm -f /tmp/ff-test.png ;;
-        docker) docker info &>/dev/null ;;
-        *) command -v "$1" &>/dev/null ;;
+    local app="$1"
+    local temp_output="/tmp/$app-test.log"
+    local error_detail="/tmp/$app-error.log"
+    
+    case "$app" in
+        pycharm-community) 
+            if timeout 10 /snap/pycharm-community/current/jbr/bin/java -version &>"$temp_output"; then
+                return 0
+            else
+                echo "PyCharm Java test failed:" >> "$error_detail"
+                cat "$temp_output" >> "$error_detail" 2>&1 || true
+                return 1
+            fi
+            ;;
+        chromium) 
+            # First check if chromium can run at all
+            if ! command -v chromium >/dev/null 2>&1; then
+                echo "ERROR: chromium not found in PATH" >> "$error_detail"
+                echo "PATH=$PATH" >> "$error_detail"
+                return 1
+            fi
+            
+            # Try with different approaches
+            if timeout 10 chromium --headless=new --dump-dom about:blank &>"$temp_output" 2>&1; then
+                return 0
+            else
+                echo "Chromium headless test failed:" >> "$error_detail"
+                cat "$temp_output" >> "$error_detail"
+                
+                # Try basic version check
+                echo "Trying chromium --version:" >> "$error_detail"
+                timeout 5 chromium --version >> "$error_detail" 2>&1 || true
+                
+                # Check display
+                echo "Display check:" >> "$error_detail"
+                echo "DISPLAY=${{DISPLAY:-unset}}" >> "$error_detail"
+                echo "XDG_RUNTIME_DIR=${{XDG_RUNTIME_DIR:-unset}}" >> "$error_detail"
+                ls -la /tmp/.X11-unix/ >> "$error_detail" 2>&1 || true
+                
+                return 1
+            fi
+            ;;
+        firefox) 
+            if timeout 10 firefox --headless --screenshot /tmp/ff-test.png about:blank &>/dev/null; then
+                rm -f /tmp/ff-test.png
+                return 0
+            else
+                echo "Firefox headless test failed" >> "$error_detail"
+                timeout 5 firefox --version >> "$error_detail" 2>&1 || true
+                return 1
+            fi
+            ;;
+        docker) 
+            if docker info &>/dev/null; then
+                return 0
+            else
+                echo "Docker info failed:" >> "$error_detail"
+                docker info >> "$error_detail" 2>&1 || true
+                return 1
+            fi
+            ;;
+        *) 
+            if command -v "$1" &>/dev/null; then
+                return 0
+            else
+                echo "Command not found: $1" >> "$error_detail"
+                echo "PATH=$PATH" >> "$error_detail"
+                return 1
+            fi
+            ;;
     esac
 }}
 
@@ -751,6 +815,11 @@ for app in "${{APPS_TO_TEST[@]}}"; do
         ok "$app launches OK"
     else
         fail "$app launch test FAILED"
+        # Show error details in main log
+        if [ -f "/tmp/$app-error.log" ]; then
+            echo "  Error details:" | tee -a "$LOG"
+            head -10 "/tmp/$app-error.log" | sed 's/^/    /' | tee -a "$LOG" || true
+        fi
     fi
 done
 
@@ -1481,6 +1550,15 @@ esac
         # Enable lingering for the user (allows user services to run without login)
         runcmd_lines.append(f"  - loginctl enable-linger {config.username}")
         
+        # Add environment variables for monitoring
+        runcmd_lines.extend([
+            "  - echo 'CLONEBOX_ENABLE_MONITORING=true' >> /etc/environment",
+            "  - echo 'CLONEBOX_MONITOR_INTERVAL=30' >> /etc/environment",
+            "  - echo 'CLONEBOX_AUTO_REPAIR=true' >> /etc/environment",
+            "  - echo 'CLONEBOX_WATCH_APPS=true' >> /etc/environment",
+            "  - echo 'CLONEBOX_WATCH_SERVICES=true' >> /etc/environment",
+        ])
+        
         # Generate autostart configurations based on installed apps (if enabled)
         autostart_apps = []
         
@@ -1627,7 +1705,69 @@ WantedBy=multi-user.target
             runcmd_lines.append(f"  - systemctl enable {svc_name}.service")
             runcmd_lines.append(f"  - systemctl start {svc_name}.service || true")
         
-        # Create Python monitor service for continuous diagnostics
+        # Install CloneBox Monitor for continuous monitoring and self-healing
+        scripts_dir = Path(__file__).resolve().parent.parent.parent / "scripts"
+        try:
+            with open(scripts_dir / "clonebox-monitor.sh") as f:
+                monitor_script = f.read()
+            with open(scripts_dir / "clonebox-monitor.service") as f:
+                monitor_service = f.read()
+            with open(scripts_dir / "clonebox-monitor.default") as f:
+                monitor_config = f.read()
+        except (FileNotFoundError, OSError):
+            # Fallback to embedded scripts if files not found
+            monitor_script = '''#!/bin/bash
+# CloneBox Monitor - Fallback embedded version
+set -euo pipefail
+LOG_FILE="/var/log/clonebox-monitor.log"
+log() { echo "[$(date '+%Y-%m-%d %H:%M:%S')] $1" | tee -a "$LOG_FILE"; }
+log_info() { log "[INFO] $1"; }
+log_warn() { log "[WARN] $1"; }
+log_error() { log "[ERROR] $1"; }
+log_success() { log "[SUCCESS] $1"; }
+while true; do
+    log_info "CloneBox Monitor running..."
+    sleep 60
+done
+'''
+            monitor_service = '''[Unit]
+Description=CloneBox Monitor
+After=graphical-session.target
+[Service]
+Type=simple
+User=ubuntu
+ExecStart=/usr/local/bin/clonebox-monitor
+Restart=always
+[Install]
+WantedBy=default.target
+'''
+            monitor_config = '''# CloneBox Monitor Configuration
+CLONEBOX_MONITOR_INTERVAL=30
+CLONEBOX_AUTO_REPAIR=true
+'''
+        
+        # Install monitor script
+        monitor_b64 = base64.b64encode(monitor_script.encode()).decode()
+        runcmd_lines.append(f"  - echo '{monitor_b64}' | base64 -d > /usr/local/bin/clonebox-monitor")
+        runcmd_lines.append("  - chmod +x /usr/local/bin/clonebox-monitor")
+        
+        # Install monitor configuration
+        config_b64 = base64.b64encode(monitor_config.encode()).decode()
+        runcmd_lines.append(f"  - echo '{config_b64}' | base64 -d > /etc/default/clonebox-monitor")
+        
+        # Install systemd user service
+        service_b64 = base64.b64encode(monitor_service.encode()).decode()
+        runcmd_lines.append(f"  - echo '{service_b64}' | base64 -d > /etc/systemd/user/clonebox-monitor.service")
+        
+        # Enable lingering and start monitor
+        runcmd_lines.extend([
+            "  - loginctl enable-linger ubuntu",
+            "  - sudo -u ubuntu systemctl --user daemon-reload",
+            "  - sudo -u ubuntu systemctl --user enable clonebox-monitor.service",
+            "  - sudo -u ubuntu systemctl --user start clonebox-monitor.service || true",
+        ])
+        
+        # Create Python monitor service for continuous diagnostics (legacy)
         monitor_script = f'''#!/usr/bin/env python3
 """CloneBox Monitor - Continuous diagnostics and app restart service."""
 import subprocess
@@ -1729,28 +1869,22 @@ def main():
 if __name__ == "__main__":
     main()
 '''
-        monitor_b64 = base64.b64encode(monitor_script.encode()).decode()
-        runcmd_lines.append(f"  - echo '{monitor_b64}' | base64 -d > /usr/local/bin/clonebox-monitor")
-        runcmd_lines.append("  - chmod +x /usr/local/bin/clonebox-monitor")
+        # Note: The bash monitor is already installed above, no need to install Python monitor
         
-        # Create systemd service for the Python monitor
-        monitor_service = '''[Unit]
-Description=CloneBox Monitor Service
-After=network.target graphical.target
-
-[Service]
-Type=simple
-ExecStart=/usr/bin/python3 /usr/local/bin/clonebox-monitor
-Restart=always
-RestartSec=30
-
-[Install]
-WantedBy=multi-user.target'''
-        monitor_svc_b64 = base64.b64encode(monitor_service.encode()).decode()
-        runcmd_lines.append(f"  - echo '{monitor_svc_b64}' | base64 -d > /etc/systemd/system/clonebox-monitor.service")
-        runcmd_lines.append("  - systemctl daemon-reload")
-        runcmd_lines.append("  - systemctl enable clonebox-monitor.service")
-        runcmd_lines.append("  - systemctl start clonebox-monitor.service || true")
+        # Create logs disk for host access
+        runcmd_lines.extend([
+            "  - mkdir -p /mnt/logs",
+            "  - truncate -s 1G /var/lib/libvirt/images/clonebox-logs.qcow2",
+            "  - mkfs.ext4 -F /var/lib/libvirt/images/clonebox-logs.qcow2",
+            "  - echo '/var/lib/libvirt/images/clonebox-logs.qcow2 /mnt/logs ext4 loop,defaults 0 0' >> /etc/fstab",
+            "  - mount -a",
+            "  - mkdir -p /mnt/logs/var/log",
+            "  - mkdir -p /mnt/logs/tmp",
+            "  - cp -r /var/log/clonebox*.log /mnt/logs/var/log/ 2>/dev/null || true",
+            "  - cp -r /tmp/*-error.log /mnt/logs/tmp/ 2>/dev/null || true",
+            "  - echo 'Logs disk mounted at /mnt/logs - accessible from host as /var/lib/libvirt/images/clonebox-logs.qcow2'",
+            "  - echo 'To view logs on host: sudo mount -o loop /var/lib/libvirt/images/clonebox-logs.qcow2 /mnt/clonebox-logs'",
+        ])
         
         # Add reboot command at the end if GUI is enabled
         if config.gui:

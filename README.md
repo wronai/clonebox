@@ -33,6 +33,9 @@ CloneBox lets you create isolated virtual machines with only the applications, d
 - ⚡ **Fast creation** - No full disk cloning, VMs are ready in seconds
 - 📥 **Auto-download** - Automatically downloads and caches Ubuntu cloud images (stored in ~/Downloads)
 - 📊 **Health monitoring** - Built-in health checks for packages, services, and mounts
+- 🔄 **Self-healing** - Automatic monitoring and repair of apps and services
+- 📈 **Live monitoring** - Real-time dashboard for running applications and services
+- 🔧 **Repair tools** - One-click fix for common VM issues (audio, permissions, mounts)
 - 🔄 **VM migration** - Export/import VMs with data between workstations
 - 🧪 **Configuration testing** - Validate VM settings and functionality
 - 📁 **App data sync** - Include browser profiles, IDE settings, and app configs
@@ -48,10 +51,12 @@ CloneBox excels in scenarios where developers need:
 ## What's Next
 
 Project roadmap includes:
-- Container runtime integration (Podman/Docker lightweight mode)
-- Local dashboard for VM and container management
-- Profile system for reusable configuration presets
-- Proxmox export capabilities for production migration
+- **v0.2.0**: `clonebox exec` command, VM snapshots, web dashboard MVP
+- **v0.3.0**: Container runtime integration (Podman/Docker), multi-VM orchestration
+- **v0.4.0**: Cloud provider support (AWS, GCP, Azure), Windows WSL2 support
+- **v1.0.0**: Production-ready with full monitoring, backup/restore, enterprise features
+
+See [TODO.md](TODO.md) for detailed roadmap and [CONTRIBUTING.md](CONTRIBUTING.md) for contribution guidelines.
 
 
 
@@ -63,6 +68,8 @@ Kluczowe komendy:
 - `clonebox` – interaktywny wizard (detect + create + start)
 - `clonebox detect` – skanuje usługi/apps/ścieżki
 - `clonebox clone . --user --run` – szybki klon bieżącego katalogu z użytkownikiem i autostartem
+- `clonebox watch . --user` – monitoruj na żywo aplikacje i usługi w VM
+- `clonebox repair . --user` – napraw problemy z uprawnieniami, audio, usługami
 - `clonebox container up|ps|stop|rm` – lekki runtime kontenerowy (podman/docker)
 - `clonebox dashboard` – lokalny dashboard (VM + containers)
 
@@ -448,6 +455,111 @@ clonebox status . --user --health
 # Or rebuild: clonebox clone . --user --run --replace
 ```
 
+## 📊 Monitoring and Self-Healing
+
+CloneBox includes continuous monitoring and automatic self-healing capabilities for both GUI applications and system services.
+
+### Monitor Running Applications and Services
+
+```bash
+# Watch real-time status of apps and services
+clonebox watch . --user
+
+# Output shows live dashboard:
+# ╔══════════════════════════════════════════════════════════╗
+# ║                   CloneBox Live Monitor                  ║
+# ╠══════════════════════════════════════════════════════════╣
+# ║ 🖥️  GUI Apps:                                              ║
+# ║   ✅ pycharm-community    PID: 1234   Memory: 512MB       ║
+# ║   ✅ firefox             PID: 5678   Memory: 256MB       ║
+# ║   ❌ chromium            Not running                    ║
+# ║                                                          ║
+# ║ 🔧 System Services:                                       ║
+# ║   ✅ docker              Active: 2h 15m                ║
+# ║   ✅ nginx               Active: 1h 30m                ║
+# ║   ✅ uvicorn             Active: 45m (port 8000)       ║
+# ║                                                          ║
+# ║ 📊 Last check: 2024-01-31 13:25:30                       ║
+# ║ 🔄 Next check in: 25 seconds                             ║
+# ╚══════════════════════════════════════════════════════════╝
+
+# Check detailed status with logs
+clonebox status . --user --verbose
+
+# View monitor logs from host
+./scripts/clonebox-logs.sh  # Interactive log viewer
+# Or via SSH:
+ssh ubuntu@<IP_VM> "tail -f /var/log/clonebox-monitor.log"
+```
+
+### Repair and Troubleshooting
+
+```bash
+# Run automatic repair from host
+clonebox repair . --user
+
+# This triggers the repair script inside VM which:
+# - Fixes directory permissions (pulse, ibus, dconf)
+# - Restarts audio services (PulseAudio/PipeWire)
+# - Reconnects snap interfaces
+# - Remounts missing filesystems
+# - Resets GNOME keyring if needed
+
+# Interactive repair menu (via SSH)
+ssh ubuntu@<IP_VM> "clonebox-repair"
+
+# Manual repair options from host:
+clonebox repair . --user --auto      # Full automatic repair
+clonebox repair . --user --perms     # Fix permissions only
+clonebox repair . --user --audio     # Fix audio only
+clonebox repair . --user --snaps     # Reconnect snaps only
+clonebox repair . --user --mounts    # Remount filesystems only
+
+# Check repair status (via SSH)
+ssh ubuntu@<IP_VM> "cat /var/run/clonebox-status"
+
+# View repair logs
+./scripts/clonebox-logs.sh  # Interactive viewer
+# Or via SSH:
+ssh ubuntu@<IP_VM> "tail -n 50 /var/log/clonebox-boot.log"
+```
+
+### Monitor Configuration
+
+The monitoring system is configured through environment variables in `.env`:
+
+```bash
+# Enable/disable monitoring
+CLONEBOX_ENABLE_MONITORING=true
+CLONEBOX_MONITOR_INTERVAL=30      # Check every 30 seconds
+CLONEBOX_AUTO_REPAIR=true         # Auto-restart failed services
+CLONEBOX_WATCH_APPS=true          # Monitor GUI apps
+CLONEBOX_WATCH_SERVICES=true      # Monitor system services
+```
+
+### Inside the VM - Manual Controls
+
+```bash
+# Check monitor service status
+systemctl --user status clonebox-monitor
+
+# View monitor logs
+journalctl --user -u clonebox-monitor -f
+tail -f /var/log/clonebox-monitor.log
+
+# Stop/start monitoring
+systemctl --user stop clonebox-monitor
+systemctl --user start clonebox-monitor
+
+# Check last status
+cat /var/run/clonebox-monitor-status
+
+# Run repair manually
+clonebox-repair --all             # Run all fixes
+clonebox-repair --status          # Show current status
+clonebox-repair --logs            # Show recent logs
+```
+
 ### Export/Import Workflow
 
 ```bash
@@ -488,6 +600,11 @@ virt-viewer --connect qemu:///session clone-clonebox
 # Check VM details:
 clonebox list              # List all VMs
 virsh --connect qemu:///session dominfo clone-clonebox
+
+# Restart VM if needed:
+clonebox stop . --user && clonebox start . --user  # Soft reboot
+virsh --connect qemu:///session reboot clone-clonebox  # Direct reboot
+virsh --connect qemu:///session reset clone-clonebox  # Hard reset if frozen
 ```
 
 ## Legacy Examples (Manual Config)

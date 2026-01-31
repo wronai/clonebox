@@ -53,11 +53,15 @@ class TestVMConfig:
 class TestSelectiveVMClonerInit:
     """Test SelectiveVMCloner initialization."""
 
-    def test_system_images_dir(self):
+    @patch("clonebox.cloner.libvirt")
+    def test_system_images_dir(self, mock_libvirt):
+        mock_libvirt.open.return_value = MagicMock()
         cloner = SelectiveVMCloner()
         assert cloner.SYSTEM_IMAGES_DIR == Path("/var/lib/libvirt/images")
 
-    def test_user_images_dir(self):
+    @patch("clonebox.cloner.libvirt")
+    def test_user_images_dir(self, mock_libvirt):
+        mock_libvirt.open.return_value = MagicMock()
         cloner = SelectiveVMCloner()
         expected = Path.home() / ".local/share/libvirt/images"
         assert cloner.USER_IMAGES_DIR == expected

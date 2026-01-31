@@ -1,0 +1,27 @@
+[Unit]
+Description=CloneBox Monitor - Continuous monitoring and self-healing
+After=graphical-session.target network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=ubuntu
+Group=ubuntu
+Environment=DISPLAY=:1
+EnvironmentFile=-/etc/default/clonebox-monitor
+ExecStart=/usr/local/bin/clonebox-monitor
+Restart=always
+RestartSec=10
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=clonebox-monitor
+
+# Security settings
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/log /var/run
+PrivateTmp=true
+
+[Install]
+WantedBy=default.target

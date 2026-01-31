@@ -1,0 +1,17 @@
+# CloneBox Monitor Configuration
+# Copy to /etc/default/clonebox-monitor
+
+# Monitoring interval in seconds
+CLONEBOX_MONITOR_INTERVAL=30
+
+# Enable automatic repair
+CLONEBOX_AUTO_REPAIR=true
+
+# Monitor GUI apps
+CLONEBOX_WATCH_APPS=true
+
+# Monitor system services
+CLONEBOX_WATCH_SERVICES=true
+
+# Log level (DEBUG, INFO, WARN, ERROR)
+CLONEBOX_LOG_LEVEL=INFO

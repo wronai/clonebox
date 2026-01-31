@@ -1,3 +1,34 @@
+## [0.1.24] - 2026-01-31
+
+### Summary
+
+feat(docs): configuration management system
+
+### Core
+
+- update src/clonebox/cloner.py
+
+### Docs
+
+- docs: update CONTRIBUTING.md
+- docs: update README
+- docs: update TODO.md
+- docs: update QUICK_REFERENCE.md
+- docs: update README
+
+### Test
+
+- update tests/test_cloner.py
+
+### Other
+
+- config: update clonebox.yaml
+- scripts: update clonebox-logs.sh
+- update scripts/clonebox-monitor.default
+- update scripts/clonebox-monitor.service
+- scripts: update clonebox-monitor.sh
+
+
 ## [0.1.23] - 2026-01-31
 
 ### Summary
