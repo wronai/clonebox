@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "clonebox"
-version = "1.1.4"
+version = "1.1.5"
 description = "Clone your workstation environment to an isolated VM with selective apps, paths and services"
 readme = "README.md"
 license = {text = "Apache-2.0"}
@@ -38,6 +38,7 @@ dependencies = [
     "pyyaml>=6.0",
     "pydantic>=2.0.0",
     "python-dotenv>=1.0.0",
+    "cryptography>=42.0.0",
 ]
 
 [project.optional-dependencies]

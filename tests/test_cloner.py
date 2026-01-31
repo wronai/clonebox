@@ -2,21 +2,37 @@
 """Tests for the SelectiveVMCloner module."""
 
 from pathlib import Path
-from unittest.mock import MagicMock, patch
-
+from unittest.mock import MagicMock, patch, Mock
+import os
 import pytest
 
 from clonebox.cloner import SelectiveVMCloner, VMConfig
+from clonebox.di import DependencyContainer, set_container
+from clonebox.interfaces.hypervisor import HypervisorBackend
+from clonebox.interfaces.disk import DiskManager
+from clonebox.secrets import SecretsManager
+
+@pytest.fixture(autouse=True)
+def mock_container():
+    """Setup a mock container for all tests to avoid libvirt requirement."""
+    container = DependencyContainer()
+    container.register(HypervisorBackend, instance=MagicMock(spec=HypervisorBackend))
+    container.register(DiskManager, instance=MagicMock(spec=DiskManager))
+    container.register(SecretsManager, instance=MagicMock(spec=SecretsManager))
+    set_container(container)
+    yield container
+    set_container(None)
 
 
 class TestVMConfig:
     """Test VMConfig dataclass."""
 
     def test_default_values(self):
-        config = VMConfig()
-        assert config.name == "clonebox-vm"
-        assert config.ram_mb == 8192
-        assert config.vcpus == 4
+        with patch.dict(os.environ, {}, clear=True):
+            config = VMConfig()
+            assert config.name == "clonebox-vm"
+            assert config.ram_mb == 8192
+            assert config.vcpus == 4
         assert config.disk_size_gb == 20
         assert config.gui is True
         assert config.base_image is None
@@ -221,7 +237,8 @@ class TestVMXMLGeneration:
         xml = cloner._generate_vm_xml(config, Path("/tmp/root.qcow2"), None)
 
         assert "test-vm" in xml
-        assert "2048" in xml  # RAM
+        # The new cloner implementation uses KiB for memory
+        assert "2097152" in xml  # 2048 MiB * 1024 = 2097152 KiB
         assert "<vcpu" in xml
         assert "kvm" in xml
 

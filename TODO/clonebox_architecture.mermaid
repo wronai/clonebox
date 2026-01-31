@@ -1,0 +1,78 @@
+%%{init: {'theme': 'base', 'themeVariables': { 'primaryColor': '#4a90d9', 'primaryTextColor': '#fff', 'primaryBorderColor': '#3a7bc8', 'lineColor': '#666', 'secondaryColor': '#f4f4f4', 'tertiaryColor': '#fff'}}}%%
+
+flowchart TB
+    subgraph Phase1["Phase 1: Foundation (Weeks 1-4)"]
+        direction TB
+        S1[Secrets Isolation]
+        S2[Rollback System]
+        S16[Structured Logging]
+        
+        S1 --> |provides secrets| S2
+        S2 --> |logs operations| S16
+    end
+    
+    subgraph Phase2["Phase 2: Features (Weeks 5-10)"]
+        direction TB
+        S4[Snapshot Management]
+        S6[Advanced Health Checks]
+        S7[Resource Limits]
+        
+        S4 --> |monitors| S6
+        S7 --> |enforces| S6
+    end
+    
+    subgraph Phase3["Phase 3: Architecture (Weeks 11-16)"]
+        direction TB
+        S9[Dependency Injection]
+        S10[Strong Typing]
+        S18[Audit Logging]
+        
+        S9 --> |enables| S10
+        S10 --> |types| S18
+    end
+    
+    subgraph Phase4["Phase 4: Advanced (Weeks 17-24)"]
+        direction TB
+        S11[Multi-VM Orchestration]
+        S12[Plugin System]
+        S13[Remote Management]
+        
+        S11 --> |extensible via| S12
+        S13 --> |uses| S11
+    end
+    
+    %% Cross-phase dependencies
+    Phase1 --> Phase2
+    Phase2 --> Phase3
+    Phase3 --> Phase4
+    
+    S16 -.-> |used by all| S18
+    S9 -.-> |enables testing| S4
+    S9 -.-> |enables testing| S6
+    S1 -.-> |secures| S11
+    S6 -.-> |health for| S11
+    
+    subgraph Core["Core Components"]
+        direction LR
+        CLI[cli.py]
+        Cloner[cloner.py]
+        Models[models.py]
+        Validator[validator.py]
+    end
+    
+    Phase1 --> Core
+    Phase2 --> Core
+    Phase3 --> Core
+    Phase4 --> Core
+    
+    classDef phase1 fill:#e74c3c,stroke:#c0392b,color:#fff
+    classDef phase2 fill:#f39c12,stroke:#d68910,color:#fff
+    classDef phase3 fill:#3498db,stroke:#2980b9,color:#fff
+    classDef phase4 fill:#27ae60,stroke:#1e8449,color:#fff
+    classDef core fill:#9b59b6,stroke:#8e44ad,color:#fff
+    
+    class S1,S2,S16 phase1
+    class S4,S6,S7 phase2
+    class S9,S10,S18 phase3
+    class S11,S12,S13 phase4
+    class CLI,Cloner,Models,Validator core

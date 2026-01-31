@@ -1,3 +1,49 @@
+## [1.1.5] - 2026-01-31
+
+### Summary
+
+feat(tests): CLI interface improvements
+
+### Core
+
+- update src/clonebox/backends/libvirt_backend.py
+- update src/clonebox/backends/qemu_disk.py
+- update src/clonebox/backends/subprocess_runner.py
+- update src/clonebox/cli.py
+- update src/clonebox/cloner.py
+- update src/clonebox/di.py
+- update src/clonebox/health/__init__.py
+- update src/clonebox/health/manager.py
+- update src/clonebox/health/models.py
+- update src/clonebox/health/probes.py
+- ... and 14 more
+
+### Docs
+
+- docs: update README
+- docs: update CLONEBOX_IMPLEMENTATION_SUMMARY.md
+- docs: update CLONEBOX_IMPROVEMENTS_ROADMAP.md
+- docs: update README
+
+### Test
+
+- update tests/e2e/test_p2p_workflow.py
+- update tests/test_cloner.py
+- update tests/test_cloner_simple.py
+- update tests/test_coverage_boost_final.py
+- update tests/test_network.py
+
+### Build
+
+- update pyproject.toml
+
+### Other
+
+- update TODO/clonebox_architecture.mermaid
+- update project.functions.toon
+- update project.toon
+
+
 ## [1.1.4] - 2026-01-31
 
 ### Summary

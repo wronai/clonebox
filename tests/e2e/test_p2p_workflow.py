@@ -80,9 +80,7 @@ class TestSecureExporter:
             )
 
     @patch.object(VMExporter, "export_vm")
-    def test_export_encrypted_creates_encrypted_file(
-        self, mock_export, tmp_path, monkeypatch
-    ):
+    def test_export_encrypted_creates_encrypted_file(self, mock_export, tmp_path, monkeypatch):
         """Test encrypted export creates .enc file."""
         key_path = tmp_path / ".clonebox.key"
         monkeypatch.setattr(SecureExporter, "KEY_PATH", key_path)
@@ -128,9 +126,7 @@ class TestSecureImporter:
             importer.import_decrypted(encrypted_path=encrypted_file)
 
     @patch.object(VMImporter, "import_vm")
-    def test_import_decrypted_calls_importer(
-        self, mock_import, tmp_path, monkeypatch
-    ):
+    def test_import_decrypted_calls_importer(self, mock_import, tmp_path, monkeypatch):
         """Test decrypted import calls VMImporter."""
         key_path = tmp_path / ".clonebox.key"
         monkeypatch.setattr(SecureExporter, "KEY_PATH", key_path)
@@ -175,9 +171,7 @@ class TestP2PManager:
     @patch("subprocess.run")
     def test_list_remote_vms_parses_output(self, mock_run):
         """Test list_remote_vms parses virsh output."""
-        mock_run.return_value = MagicMock(
-            returncode=0, stdout="vm1\nvm2\nvm3\n", stderr=""
-        )
+        mock_run.return_value = MagicMock(returncode=0, stdout="vm1\nvm2\nvm3\n", stderr="")
 
         p2p = P2PManager()
         vms = p2p.list_remote_vms("user@host")
@@ -251,9 +245,7 @@ class TestP2PManager:
     @patch("subprocess.run")
     def test_export_remote_failure_raises(self, mock_run, tmp_path):
         """Test export_remote raises on failure."""
-        mock_run.return_value = MagicMock(
-            returncode=1, stdout="", stderr="Connection refused"
-        )
+        mock_run.return_value = MagicMock(returncode=1, stdout="", stderr="Connection refused")
 
         p2p = P2PManager()
         output = tmp_path / "export.tar.gz"

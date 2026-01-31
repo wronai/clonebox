@@ -14,8 +14,10 @@ class P2PManager:
 
     def __init__(self, ssh_options: Optional[list] = None):
         self.ssh_options = ssh_options or [
-            "-o", "StrictHostKeyChecking=no",
-            "-o", "UserKnownHostsFile=/dev/null",
+            "-o",
+            "StrictHostKeyChecking=no",
+            "-o",
+            "UserKnownHostsFile=/dev/null",
         ]
 
     def _run_ssh(self, host: str, command: str) -> subprocess.CompletedProcess:

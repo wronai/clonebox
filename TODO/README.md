@@ -8,14 +8,14 @@ Technical documentation and implementation plans for CloneBox project enhancemen
 |---|---------|--------|----------|
 | 01 | [Secrets Isolation in Cloud-Init](./01-secrets-isolation.md) | 📝 Planned | Critical |
 | 02 | [Rollback on VM Creation Errors](./02-rollback-mechanism.md) | 📝 Planned | Critical |
-| 03 | [Snapshot Management](./03-snapshot-management.md) | 📝 Planned | High |
-| 04 | [Advanced Health Checks](./04-health-checks.md) | 📝 Planned | High |
+| 03 | [Snapshot Management](./03-snapshot-management.md) | ✅ **Implemented v1.1.2** | High |
+| 04 | [Advanced Health Checks](./04-health-checks.md) | ✅ **Implemented v1.1.2** | High |
 | 05 | [Resource Limits & Quotas](./05-resource-limits.md) | 📝 Planned | Medium |
 | 06 | [Dependency Injection Refactor](./06-dependency-injection.md) | 📝 Planned | Medium |
 | 07 | [Strong Typing Implementation](./07-strong-typing.md) | 📝 Planned | Medium |
 | 08 | [Multi-VM Orchestration](./08-multi-vm-orchestration.md) | 📝 Planned | High |
 | 09 | [Plugin System](./09-plugin-system.md) | 📝 Planned | Medium |
-| 10 | [Remote VM Management](./10-remote-management.md) | 📝 Planned | High |
+| 10 | [Remote VM Management](./10-remote-management.md) | ✅ **P2P Transfer v1.1.2** | High |
 | 11 | [Structured Logging](./11-structured-logging.md) | 📝 Planned | Medium |
 | 12 | [Audit Logging](./12-audit-logging.md) | 📝 Planned | High |
 

@@ -1,6 +1,6 @@
-# clonebox | 27f 11382L | python:27
+# clonebox | 39f 14626L | python:39
 # Keys: M=modules, D=details, i=imports, c=classes, f=functions, m=methods
-M[27]:
+M[39]:
   tests/conftest.py,345
   tests/test_profiles.py,39
   tests/test_cloner.py,201
@@ -15,19 +15,31 @@ M[27]:
   tests/test_coverage_additional.py,28
   tests/test_detector.py,183
   tests/test_cli.py,373
+  tests/e2e/test_p2p_workflow.py,294
   tests/e2e/test_full_workflow.py,243
   tests/e2e/__init__.py,1
   tests/e2e/test_container_workflow.py,61
   src/clonebox/dashboard.py,136
   src/clonebox/validator.py,813
-  src/clonebox/cli.py,2515
+  src/clonebox/p2p.py,138
+  src/clonebox/cli.py,2941
+  src/clonebox/importer.py,167
   src/clonebox/detector.py,589
+  src/clonebox/exporter.py,145
   src/clonebox/__init__.py,10
   src/clonebox/__main__.py,4
   src/clonebox/container.py,154
   src/clonebox/cloner.py,1816
+  src/clonebox/monitor.py,220
   src/clonebox/models.py,181
   src/clonebox/profiles.py,47
+  src/clonebox/health/manager.py,264
+  src/clonebox/health/__init__.py,15
+  src/clonebox/health/models.py,152
+  src/clonebox/health/probes.py,288
+  src/clonebox/snapshots/manager.py,284
+  src/clonebox/snapshots/__init__.py,10
+  src/clonebox/snapshots/models.py,149
 D:
   tests/conftest.py:
     i: os,tempfile,pytest,yaml,pathlib.Path,unittest.mock.{MagicMock,patch}
@@ -128,6 +140,14 @@ D:
     TestLoadCloneboxConfig: test_load_config_from_file(1),test_load_config_from_directory(1),test_load_config_not_found(1)  # Test loading .clonebox.yaml configs.
     TestCLIConstants: test_config_file_name(0)  # Test CLI constants.
     TestCLIIntegration: test_cli_help_commands(2),test_detect_json_output(3),test_detect_yaml_output(2),test_clone_creates_config_file(6),test_create_vm_from_config_propagates_disk_size(2)  # Integration tests for CLI commands.
+  tests/e2e/test_p2p_workflow.py:
+    i: os,shutil,subprocess,tempfile,pytest,clonebox.exporter.{SecureExporter,VMExporter},pathlib.Path,unittest.mock.{MagicMock,patch}
+    e: TestKeyGeneration,TestSecureExporter,TestSecureImporter,TestP2PManager,TestCLICommands,TestVMExporter,TestVMImporter
+    TestKeyGeneration: test_keygen_command(2),test_keygen_overwrites_existing(2),test_load_key_returns_none_if_missing(2)  # Test encryption key generation.
+    TestSecureExporter: test_export_without_key_raises_error(2),test_export_encrypted_creates_encrypted_file(3)  # Test secure VM export functionality.
+    TestSecureImporter: test_import_without_key_raises_error(2),test_import_decrypted_calls_importer(3)  # Test secure VM import functionality.
+    TestP2PManager: test_init_default_ssh_options(0),test_init_custom_ssh_options(0),test_list_remote_vms_parses_output(1),test_list_remote_vms_empty_on_failure(1),test_check_clonebox_installed(1)  # Test P2P transfer manager.
+    TestCLICommands: test_keygen_help(0),test_export_encrypted_help(0),test_import_encrypted_help(0),test_export_remote_help(0),test_import_remote_help(0)  # Test CLI command integration.
   tests/e2e/test_full_workflow.py:
     i: os,shutil,subprocess,tempfile,time,pytest,yaml,pathlib.Path
     e: TestFullWorkflow,TestVMLifecycle,TestConfigValidation,TestExportImport
@@ -154,6 +174,10 @@ D:
     i: subprocess,json,base64,time,pathlib.Path,rich.console.Console,typing.{Dict,List,Optional,Tuple}
     e: VMValidator
     VMValidator: __init__(6),_exec_in_vm(2),validate_mounts(0),validate_packages(0),validate_snap_packages(0)  # Validates VM configuration against ex...
+  src/clonebox/p2p.py:
+    i: subprocess,tempfile,pathlib.Path,typing.Optional
+    e: P2PManager
+    P2PManager: __init__(1),_run_ssh(2),_run_scp(3),export_remote(6),import_remote(5)  # Manage P2P VM transfers between works...
   src/clonebox/cli.py:
     i: argparse,json,os,re,sys,time,typing.{Any,Dict,Optional,Tuple}
     e: print_banner,run_vm_diagnostics,cmd_watch,cmd_repair,interactive_mode,cmd_create,cmd_start,cmd_open
@@ -165,6 +189,11 @@ D:
     cmd_watch(args)->None
     cmd_repair(args)->None
     interactive_mode()->None
+  src/clonebox/importer.py:
+    i: shutil,subprocess,tarfile,tempfile,libvirt,cryptography.fernet.Fernet,pathlib.Path,typing.Optional,xml.etree.ElementTree
+    e: VMImporter,SecureImporter
+    VMImporter: __init__(1),conn(0),import_vm(5),_reconfigure_paths(3),_import_user_data(1)  # Import VM with disk path reconfigurat...
+    SecureImporter: __init__(1),load_key(0),import_decrypted(4),close(0)  # AES-256 decrypting VM importer.
   src/clonebox/detector.py:
     i: os,pwd,subprocess,psutil,dataclasses.{dataclass,field},pathlib.Path
     e: DetectedService,DetectedApplication,DetectedPath,SystemSnapshot,SystemDetector
@@ -173,6 +202,11 @@ D:
     DetectedPath:   # A detected important path.
     SystemSnapshot: running_services(0),running_apps(0)  # Complete snapshot of detected system...
     SystemDetector: __init__(0),detect_app_data_dirs(1),detect_all(0),detect_services(0),detect_applications(0)  # Detects running services, application...
+  src/clonebox/exporter.py:
+    i: os,tarfile,tempfile,libvirt,cryptography.fernet.Fernet,pathlib.Path,typing.{List,Optional},xml.etree.ElementTree
+    e: VMExporter,SecureExporter
+    VMExporter: __init__(1),conn(0),export_vm(4),_export_app_data(1),_export_user_data(1)  # Export VM with disks, app data, and u...
+    SecureExporter: __init__(1),generate_key(0),load_key(0),export_encrypted(4),close(0)  # AES-256 encrypted VM export.
   src/clonebox/container.py:
     i: json,shutil,subprocess,tempfile,clonebox.models.ContainerConfig,pathlib.Path,typing.{Any,Dict,List,Optional}
     e: ContainerCloner
@@ -182,6 +216,13 @@ D:
     e: SNAP_INTERFACES,DEFAULT_SNAP_INTERFACES,VMConfig,SelectiveVMCloner
     VMConfig: to_dict(0)  # Configuration for the VM to create.
     SelectiveVMCloner: __init__(2),SYSTEM_IMAGES_DIR(0),USER_IMAGES_DIR(0),DEFAULT_BASE_IMAGE_URL(0),DEFAULT_BASE_IMAGE_FILENAME(0)  # Creates VMs with only selected applic...
+  src/clonebox/monitor.py:
+    i: json,subprocess,time,libvirt,dataclasses.dataclass,pathlib.Path,typing.{Any,Dict,List,Optional}
+    e: VMStats,ContainerStats,ResourceMonitor,format_bytes
+    VMStats:   # VM resource statistics.
+    ContainerStats:   # Container resource statistics.
+    ResourceMonitor: __init__(1),conn(0),get_vm_stats(1),get_all_vm_stats(0),get_container_stats(1)  # Monitor VM and container resources in...
+    format_bytes(num_bytes:int)->str
   src/clonebox/models.py:
     i: pathlib.Path,pydantic.{BaseModel,Field,field_validator},typing.{Any,Dict,List,Literal,Optional},uuid.uuid4
     e: VMSettings,CloneBoxConfig,ContainerConfig
@@ -194,3 +235,35 @@ D:
     load_profile(profile_name:str;search_paths:list[Path])->Optional[Dict[str, Any]]
     _deep_merge(base:Dict[str;Any];override:Dict[str;Any])->Dict[str, Any]
     merge_with_profile(base_config:Dict[str;Any];profile_name:Optional[str]=None)->Dict[str, Any]
+  src/clonebox/health/manager.py:
+    i: json,time,datetime,models.{HealthCheckResult,HealthStatus},pathlib.Path,typing.{Any,Dict,List,Optional}
+    e: HealthCheckManager
+    HealthCheckManager: __init__(1),check(2),check_single(1),check_from_config(2),get_state(1)  # Manage health checks for VMs.
+  src/clonebox/health/models.py:
+    i: datetime,dataclasses.{dataclass,field},datetime.timedelta,enum.Enum,typing.{Any,Dict,List,Optional}
+    e: HealthStatus,ProbeType,ProbeConfig,HealthCheckResult,VMHealthState
+    HealthStatus:   # Health check status.
+    ProbeType:   # Type of health probe.
+    ProbeConfig: to_dict(0),from_dict(1)  # Configuration for a health probe.
+    HealthCheckResult: to_dict(0),is_healthy(0)  # Result of a health check.
+    VMHealthState: to_dict(0),failure_rate(0)  # Aggregated health state for a VM.
+  src/clonebox/health/probes.py:
+    i: socket,subprocess,time,datetime,abc.{ABC,abstractmethod},models.{HealthCheckResult,HealthStatus,ProbeConfig},typing.Optional
+    e: HealthProbe,HTTPProbe,TCPProbe,CommandProbe,ScriptProbe,get_probe
+    HealthProbe: check(1),_create_result(3)  # Abstract base class for health probes.
+    HTTPProbe: check(1)  # HTTP/HTTPS health probe.
+    TCPProbe: check(1)  # TCP port connectivity probe.
+    CommandProbe: check(1)  # Command execution probe.
+    ScriptProbe: check(1)  # Script execution probe.
+    get_probe(probe_type:str)->HealthProbe
+  src/clonebox/snapshots/manager.py:
+    i: json,subprocess,datetime,datetime.timedelta,models.Snapshot,pathlib.Path,typing.{Any,Dict,List,Optional}
+    e: SnapshotManager
+    SnapshotManager: __init__(1),conn(0),create(7),restore(3),delete(3)  # Manage VM snapshots via libvirt.
+  src/clonebox/snapshots/models.py:
+    i: datetime,dataclasses.{dataclass,field},datetime.timedelta,enum.Enum,pathlib.Path,typing.{Any,Dict,List,Optional}
+    e: SnapshotType,SnapshotState,Snapshot,SnapshotPolicy
+    SnapshotType:   # Type of snapshot.
+    SnapshotState:   # State of snapshot operation.
+    Snapshot: to_dict(0),from_dict(1),is_expired(0),age(0)  # Represents a VM snapshot.
+    SnapshotPolicy: to_dict(0),from_dict(1),generate_snapshot_name(1)  # Policy for automatic snapshots.

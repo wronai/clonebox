@@ -32,6 +32,8 @@ from clonebox.exporter import SecureExporter, VMExporter
 from clonebox.importer import SecureImporter, VMImporter
 from clonebox.monitor import ResourceMonitor, format_bytes
 from clonebox.p2p import P2PManager
+from clonebox.snapshots import SnapshotManager, SnapshotType
+from clonebox.health import HealthCheckManager, ProbeConfig, ProbeType
 
 # Custom questionary style
 custom_style = Style(
@@ -2670,7 +2672,11 @@ def cmd_monitor(args) -> None:
                 for vm in vm_stats:
                     state_color = "green" if vm.state == "running" else "yellow"
                     cpu_color = "red" if vm.cpu_percent > 80 else "green"
-                    mem_pct = (vm.memory_used_mb / vm.memory_total_mb * 100) if vm.memory_total_mb > 0 else 0
+                    mem_pct = (
+                        (vm.memory_used_mb / vm.memory_total_mb * 100)
+                        if vm.memory_total_mb > 0
+                        else 0
+                    )
                     mem_color = "red" if mem_pct > 80 else "green"
 
                     table.add_row(
@@ -2700,7 +2706,9 @@ def cmd_monitor(args) -> None:
 
                 for c in container_stats:
                     cpu_color = "red" if c.cpu_percent > 80 else "green"
-                    mem_pct = (c.memory_used_mb / c.memory_limit_mb * 100) if c.memory_limit_mb > 0 else 0
+                    mem_pct = (
+                        (c.memory_used_mb / c.memory_limit_mb * 100) if c.memory_limit_mb > 0 else 0
+                    )
                     mem_color = "red" if mem_pct > 80 else "green"
 
                     table.add_row(
@@ -2749,6 +2757,154 @@ def cmd_exec(args) -> None:
         console.print("[dim](no output)[/]")
     else:
         console.print(result)
+
+
+def cmd_snapshot_create(args) -> None:
+    """Create VM snapshot."""
+    vm_name, config_file = _resolve_vm_name_and_config_file(args.vm_name)
+    conn_uri = "qemu:///session" if getattr(args, "user", False) else "qemu:///system"
+
+    snap_name = args.name or f"snap-{datetime.now().strftime('%Y%m%d-%H%M%S')}"
+    description = getattr(args, "description", None)
+
+    console.print(f"[cyan]📸 Creating snapshot: {snap_name}[/]")
+
+    try:
+        manager = SnapshotManager(conn_uri)
+        snapshot = manager.create(
+            vm_name=vm_name,
+            name=snap_name,
+            description=description,
+            snapshot_type=SnapshotType.DISK_ONLY,
+        )
+        console.print(f"[green]✅ Snapshot created: {snapshot.name}[/]")
+    except Exception as e:
+        console.print(f"[red]❌ Failed to create snapshot: {e}[/]")
+    finally:
+        manager.close()
+
+
+def cmd_snapshot_list(args) -> None:
+    """List VM snapshots."""
+    vm_name, config_file = _resolve_vm_name_and_config_file(args.vm_name)
+    conn_uri = "qemu:///session" if getattr(args, "user", False) else "qemu:///system"
+
+    try:
+        manager = SnapshotManager(conn_uri)
+        snapshots = manager.list(vm_name)
+
+        if not snapshots:
+            console.print("[dim]No snapshots found.[/]")
+            return
+
+        table = Table(title=f"📸 Snapshots for {vm_name}", border_style="cyan")
+        table.add_column("Name", style="bold")
+        table.add_column("Created")
+        table.add_column("Type")
+        table.add_column("Description")
+
+        for snap in snapshots:
+            table.add_row(
+                snap.name,
+                snap.created_at.strftime("%Y-%m-%d %H:%M"),
+                snap.snapshot_type.value,
+                snap.description or "-",
+            )
+
+        console.print(table)
+    except Exception as e:
+        console.print(f"[red]❌ Error: {e}[/]")
+    finally:
+        manager.close()
+
+
+def cmd_snapshot_restore(args) -> None:
+    """Restore VM to snapshot."""
+    vm_name, config_file = _resolve_vm_name_and_config_file(args.vm_name)
+    conn_uri = "qemu:///session" if getattr(args, "user", False) else "qemu:///system"
+
+    console.print(f"[cyan]🔄 Restoring snapshot: {args.name}[/]")
+
+    try:
+        manager = SnapshotManager(conn_uri)
+        manager.restore(vm_name, args.name, force=getattr(args, "force", False))
+        console.print(f"[green]✅ Restored to snapshot: {args.name}[/]")
+    except Exception as e:
+        console.print(f"[red]❌ Failed to restore: {e}[/]")
+    finally:
+        manager.close()
+
+
+def cmd_snapshot_delete(args) -> None:
+    """Delete VM snapshot."""
+    vm_name, config_file = _resolve_vm_name_and_config_file(args.vm_name)
+    conn_uri = "qemu:///session" if getattr(args, "user", False) else "qemu:///system"
+
+    console.print(f"[cyan]🗑️ Deleting snapshot: {args.name}[/]")
+
+    try:
+        manager = SnapshotManager(conn_uri)
+        manager.delete(vm_name, args.name)
+        console.print(f"[green]✅ Snapshot deleted: {args.name}[/]")
+    except Exception as e:
+        console.print(f"[red]❌ Failed to delete: {e}[/]")
+    finally:
+        manager.close()
+
+
+def cmd_health(args) -> None:
+    """Run health checks for VM."""
+    vm_name, config_file = _resolve_vm_name_and_config_file(args.name)
+
+    console.print(f"[cyan]🏥 Running health checks for: {vm_name}[/]")
+
+    manager = HealthCheckManager()
+
+    # Load probes from config or use defaults
+    probes = []
+    if config_file and config_file.exists():
+        import yaml
+
+        config = yaml.safe_load(config_file.read_text())
+        health_checks = config.get("health_checks", [])
+        for hc in health_checks:
+            probes.append(ProbeConfig.from_dict(hc))
+
+        # Also create probes for services
+        services = config.get("services", [])
+        if services:
+            probes.extend(manager.create_default_probes(services))
+
+    if not probes:
+        console.print(
+            "[yellow]No health checks configured. Add 'health_checks' to .clonebox.yaml[/]"
+        )
+        return
+
+    state = manager.check(vm_name, probes)
+
+    # Display results
+    status_color = "green" if state.overall_status.value == "healthy" else "red"
+    console.print(
+        f"\n[bold]Overall Status:[/] [{status_color}]{state.overall_status.value.upper()}[/]"
+    )
+
+    table = Table(title="Health Check Results", border_style="cyan")
+    table.add_column("Probe", style="bold")
+    table.add_column("Status")
+    table.add_column("Duration")
+    table.add_column("Message")
+
+    for result in state.check_results:
+        status_color = "green" if result.is_healthy else "red"
+        table.add_row(
+            result.probe_name,
+            f"[{status_color}]{result.status.value}[/]",
+            f"{result.duration_ms:.0f}ms",
+            result.message or result.error or "-",
+        )
+
+    console.print(table)
 
 
 def cmd_keygen(args) -> None:
@@ -3319,9 +3475,7 @@ def main():
     monitor_parser.add_argument(
         "--refresh", "-r", type=float, default=2.0, help="Refresh interval in seconds (default: 2)"
     )
-    monitor_parser.add_argument(
-        "--once", action="store_true", help="Show stats once and exit"
-    )
+    monitor_parser.add_argument("--once", action="store_true", help="Show stats once and exit")
     monitor_parser.set_defaults(func=cmd_monitor)
 
     # Exec command - execute command in VM
@@ -3329,9 +3483,7 @@ def main():
     exec_parser.add_argument(
         "name", nargs="?", default=None, help="VM name or '.' to use .clonebox.yaml"
     )
-    exec_parser.add_argument(
-        "command", help="Command to execute in VM"
-    )
+    exec_parser.add_argument("command", help="Command to execute in VM")
     exec_parser.add_argument(
         "-u", "--user", action="store_true", help="Use user session (qemu:///session)"
     )
@@ -3340,10 +3492,51 @@ def main():
     )
     exec_parser.set_defaults(func=cmd_exec)
 
+    # === Snapshot Commands ===
+    snapshot_parser = subparsers.add_parser("snapshot", help="Manage VM snapshots")
+    snapshot_sub = snapshot_parser.add_subparsers(dest="snapshot_command", help="Snapshot commands")
+
+    snap_create = snapshot_sub.add_parser("create", help="Create snapshot")
+    snap_create.add_argument("vm_name", help="VM name or '.' to use .clonebox.yaml")
+    snap_create.add_argument("--name", "-n", help="Snapshot name (auto-generated if not provided)")
+    snap_create.add_argument("--description", "-d", help="Snapshot description")
+    snap_create.add_argument("-u", "--user", action="store_true", help="Use user session")
+    snap_create.set_defaults(func=cmd_snapshot_create)
+
+    snap_list = snapshot_sub.add_parser("list", aliases=["ls"], help="List snapshots")
+    snap_list.add_argument("vm_name", help="VM name or '.' to use .clonebox.yaml")
+    snap_list.add_argument("-u", "--user", action="store_true", help="Use user session")
+    snap_list.set_defaults(func=cmd_snapshot_list)
+
+    snap_restore = snapshot_sub.add_parser("restore", help="Restore to snapshot")
+    snap_restore.add_argument("vm_name", help="VM name or '.' to use .clonebox.yaml")
+    snap_restore.add_argument("--name", "-n", required=True, help="Snapshot name to restore")
+    snap_restore.add_argument("-u", "--user", action="store_true", help="Use user session")
+    snap_restore.add_argument(
+        "-f", "--force", action="store_true", help="Force restore even if running"
+    )
+    snap_restore.set_defaults(func=cmd_snapshot_restore)
+
+    snap_delete = snapshot_sub.add_parser("delete", aliases=["rm"], help="Delete snapshot")
+    snap_delete.add_argument("vm_name", help="VM name or '.' to use .clonebox.yaml")
+    snap_delete.add_argument("--name", "-n", required=True, help="Snapshot name to delete")
+    snap_delete.add_argument("-u", "--user", action="store_true", help="Use user session")
+    snap_delete.set_defaults(func=cmd_snapshot_delete)
+
+    # === Health Check Commands ===
+    health_parser = subparsers.add_parser("health", help="Run health checks for VM")
+    health_parser.add_argument(
+        "name", nargs="?", default=None, help="VM name or '.' to use .clonebox.yaml"
+    )
+    health_parser.add_argument("-u", "--user", action="store_true", help="Use user session")
+    health_parser.set_defaults(func=cmd_health)
+
     # === P2P Secure Transfer Commands ===
 
     # Keygen command - generate encryption key
-    keygen_parser = subparsers.add_parser("keygen", help="Generate encryption key for secure transfers")
+    keygen_parser = subparsers.add_parser(
+        "keygen", help="Generate encryption key for secure transfers"
+    )
     keygen_parser.set_defaults(func=cmd_keygen)
 
     # Export-encrypted command
@@ -3356,9 +3549,7 @@ def main():
     export_enc_parser.add_argument(
         "-u", "--user", action="store_true", help="Use user session (qemu:///session)"
     )
-    export_enc_parser.add_argument(
-        "-o", "--output", help="Output file (default: <vmname>.enc)"
-    )
+    export_enc_parser.add_argument("-o", "--output", help="Output file (default: <vmname>.enc)")
     export_enc_parser.add_argument(
         "--user-data", action="store_true", help="Include user data (SSH keys, configs)"
     )
@@ -3376,9 +3567,7 @@ def main():
         "-u", "--user", action="store_true", help="Use user session (qemu:///session)"
     )
     import_enc_parser.add_argument("--name", "-n", help="New name for imported VM")
-    import_enc_parser.add_argument(
-        "--user-data", action="store_true", help="Import user data"
-    )
+    import_enc_parser.add_argument("--user-data", action="store_true", help="Import user data")
     import_enc_parser.add_argument(
         "--include-data", "-d", action="store_true", help="Import app data"
     )
@@ -3390,15 +3579,11 @@ def main():
     )
     export_remote_parser.add_argument("host", help="Remote host (user@hostname)")
     export_remote_parser.add_argument("vm_name", help="VM name on remote host")
-    export_remote_parser.add_argument(
-        "-o", "--output", required=True, help="Local output file"
-    )
+    export_remote_parser.add_argument("-o", "--output", required=True, help="Local output file")
     export_remote_parser.add_argument(
         "--encrypted", "-e", action="store_true", help="Use encrypted export"
     )
-    export_remote_parser.add_argument(
-        "--user-data", action="store_true", help="Include user data"
-    )
+    export_remote_parser.add_argument("--user-data", action="store_true", help="Include user data")
     export_remote_parser.add_argument(
         "--include-data", "-d", action="store_true", help="Include app data"
     )
@@ -3414,22 +3599,16 @@ def main():
     import_remote_parser.add_argument(
         "--encrypted", "-e", action="store_true", help="Use encrypted import"
     )
-    import_remote_parser.add_argument(
-        "--user-data", action="store_true", help="Import user data"
-    )
+    import_remote_parser.add_argument("--user-data", action="store_true", help="Import user data")
     import_remote_parser.set_defaults(func=cmd_import_remote)
 
     # Sync-key command
-    sync_key_parser = subparsers.add_parser(
-        "sync-key", help="Sync encryption key to remote host"
-    )
+    sync_key_parser = subparsers.add_parser("sync-key", help="Sync encryption key to remote host")
     sync_key_parser.add_argument("host", help="Remote host (user@hostname)")
     sync_key_parser.set_defaults(func=cmd_sync_key)
 
     # List-remote command
-    list_remote_parser = subparsers.add_parser(
-        "list-remote", help="List VMs on remote host"
-    )
+    list_remote_parser = subparsers.add_parser("list-remote", help="List VMs on remote host")
     list_remote_parser.add_argument("host", help="Remote host (user@hostname)")
     list_remote_parser.set_defaults(func=cmd_list_remote)
 

@@ -63,6 +63,8 @@ CloneBox excels in scenarios where developers need:
 | 🎛️ Profiles System (`ml-dev`, `web-stack`) | ✅ Stable |
 | 🔍 Auto-detection (services, apps, paths) | ✅ Stable |
 | 🔒 P2P Secure Transfer (AES-256) | ✅ **NEW** |
+| 📸 Snapshot Management | ✅ **NEW** |
+| 🏥 Health Check System | ✅ **NEW** |
 | 🧪 95%+ Test Coverage | ✅ |
 
 ### P2P Secure VM Sharing
@@ -90,9 +92,55 @@ clonebox sync-key user@hostB  # Sync encryption key
 clonebox list-remote user@hostB  # List remote VMs
 ```
 
+### Snapshot Management
+
+Save and restore VM states:
+
+```bash
+# Create snapshot before risky operation
+clonebox snapshot create my-vm --name "before-upgrade" --user
+
+# List all snapshots
+clonebox snapshot list my-vm --user
+
+# Restore to previous state
+clonebox snapshot restore my-vm --name "before-upgrade" --user
+
+# Delete old snapshot
+clonebox snapshot delete my-vm --name "before-upgrade" --user
+```
+
+### Health Checks
+
+Configure health probes in `.clonebox.yaml`:
+
+```yaml
+health_checks:
+  - name: nginx
+    type: http
+    url: http://localhost:80/health
+    expected_status: 200
+    
+  - name: postgres
+    type: tcp
+    host: localhost
+    port: 5432
+    
+  - name: redis
+    type: command
+    exec: "redis-cli ping"
+    expected_output: "PONG"
+```
+
+Run health checks:
+
+```bash
+clonebox health my-vm --user
+```
+
 ### Roadmap
 
-- **v1.2.0**: `clonebox exec` command, VM snapshots, snapshot restore
+- **v1.2.0**: Resource limits, progress bars, secrets isolation
 - **v1.3.0**: Multi-VM orchestration, cluster mode
 - **v2.0.0**: Cloud provider support (AWS, GCP, Azure), Windows WSL2 support
 

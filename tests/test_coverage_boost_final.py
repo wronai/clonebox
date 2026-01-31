@@ -8,6 +8,21 @@ import sys
 from pathlib import Path
 from clonebox.validator import VMValidator
 from clonebox.cloner import SelectiveVMCloner, VMConfig
+from clonebox.di import DependencyContainer, set_container
+from clonebox.interfaces.hypervisor import HypervisorBackend
+from clonebox.interfaces.disk import DiskManager
+from clonebox.secrets import SecretsManager
+
+@pytest.fixture(autouse=True)
+def mock_container():
+    """Setup a mock container for all tests to avoid libvirt requirement."""
+    container = DependencyContainer()
+    container.register(HypervisorBackend, instance=MagicMock(spec=HypervisorBackend))
+    container.register(DiskManager, instance=MagicMock(spec=DiskManager))
+    container.register(SecretsManager, instance=MagicMock(spec=SecretsManager))
+    set_container(container)
+    yield container
+    set_container(None)
 
 # --- Validator Mocking ---
 
@@ -59,7 +74,11 @@ class ValidatorResponder:
         # Add responders for more branches in validator.py
         if "snap logs" in cmd:
             return "some snap logs content"
-        if "firefox --headless" in cmd or "chromium --headless" in cmd or "google-chrome --headless" in cmd:
+        if (
+            "firefox --headless" in cmd
+            or "chromium --headless" in cmd
+            or "google-chrome --headless" in cmd
+        ):
             return "SUCCESS"
         return ""
 
@@ -188,16 +207,26 @@ def test_cloner_create_vm_branches():
 # --- Dashboard Mocking ---
 
 
-@pytest.mark.asyncio
-async def test_dashboard_endpoints(monkeypatch):
-    from clonebox.dashboard import (
-        api_vms,
-        api_containers,
-        api_vms_json,
-        api_containers_json,
-        dashboard as dashboard_view,
-    )
-    from fastapi.responses import JSONResponse
+def test_dashboard_endpoints(monkeypatch):
+    try:
+        from clonebox.dashboard import (
+            api_vms,
+            api_containers,
+            api_vms_json,
+            api_containers_json,
+            dashboard as dashboard_view,
+        )
+        from fastapi.responses import JSONResponse
+        import asyncio
+    except ImportError:
+        pytest.skip("FastAPI not available")
+
+    # Check if any required dashboard symbols are missing even if import didn't fail
+    import sys
+
+    if "clonebox.dashboard" not in sys.modules:
+        pytest.skip("clonebox.dashboard not loaded")
+
     import json
 
     # Mock _run_clonebox
@@ -214,25 +243,28 @@ async def test_dashboard_endpoints(monkeypatch):
 
     monkeypatch.setattr("clonebox.dashboard._run_clonebox", mock_run)
 
-    # Call async endpoints
-    res_vms = await api_vms()
+    # Call async endpoints using asyncio.run
+    res_vms = asyncio.run(api_vms())
     assert "vm1" in res_vms
 
-    res_containers = await api_containers()
+    res_containers = asyncio.run(api_containers())
     assert "c1" in res_containers
 
-    res_vms_json = await api_vms_json()
+    res_vms_json = asyncio.run(api_vms_json())
     assert isinstance(res_vms_json, JSONResponse)
 
-    res_containers_json = await api_containers_json()
+    res_containers_json = asyncio.run(api_containers_json())
     assert isinstance(res_containers_json, JSONResponse)
 
-    res_dash = await dashboard_view()
+    res_dash = asyncio.run(dashboard_view())
     assert "CloneBox Dashboard" in res_dash
 
 
 def test_dashboard_error_paths(monkeypatch):
-    from clonebox.dashboard import api_vms, _run_clonebox
+    try:
+        from clonebox.dashboard import api_vms, _run_clonebox
+    except ImportError:
+        pytest.skip("Dashboard dependencies not available")
     import json
 
     def mock_run_fail(args):
@@ -251,7 +283,10 @@ def test_dashboard_error_paths(monkeypatch):
 
 
 def test_dashboard_run(monkeypatch):
-    from clonebox.dashboard import run_dashboard
+    try:
+        from clonebox.dashboard import run_dashboard
+    except ImportError:
+        pytest.skip("Dashboard dependencies not available")
     import sys
 
     mock_uvicorn = MagicMock()
@@ -277,11 +312,16 @@ def test_cloner_cloudinit_generation():
 
         with tempfile.TemporaryDirectory() as tmpdir:
             vm_dir = Path(tmpdir)
-            # Mock Path.exists for the host path in config.paths and subprocess for genisoimage
+            # Mock Path.exists for the host path in config.paths and subprocess for genisoimage/ssh-keygen
             with patch("pathlib.Path.exists", return_value=True), patch(
                 "subprocess.run"
-            ) as mock_run:
+            ) as mock_run, patch("pathlib.Path.read_text") as mock_read, patch(
+                "pathlib.Path.write_text"
+            ), patch(
+                "pathlib.Path.chmod"
+            ):
                 mock_run.return_value = Mock(returncode=0)
+                mock_read.side_effect = ["private key", "public key"]
                 iso_path = cloner._create_cloudinit_iso(vm_dir, config)
                 assert iso_path is not None
                 assert (vm_dir / "cloud-init" / "user-data").exists()

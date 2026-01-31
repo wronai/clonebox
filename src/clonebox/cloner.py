@@ -3,28 +3,40 @@
 SelectiveVMCloner - Creates isolated VMs with only selected apps/paths/services.
 """
 
+import base64
 import json
+import logging
 import os
+import secrets
+import shutil
+import string
 import subprocess
 import tempfile
+import time
 import urllib.request
 import uuid
 import xml.etree.ElementTree as ET
 from dataclasses import dataclass, field
+from datetime import datetime
 from pathlib import Path
-from typing import Optional
-
-try:
-    from dotenv import load_dotenv
-
-    load_dotenv()
-except ImportError:
-    pass  # dotenv is optional
+from typing import Any, Dict, List, Optional, Tuple
 
 try:
     import libvirt
 except ImportError:
     libvirt = None
+import yaml
+
+from clonebox.di import get_container
+from clonebox.interfaces.disk import DiskManager
+from clonebox.interfaces.hypervisor import HypervisorBackend
+from clonebox.interfaces.network import NetworkManager
+from clonebox.logging import get_logger, log_operation
+from clonebox.resources import ResourceLimits
+from clonebox.rollback import vm_creation_transaction
+from clonebox.secrets import SecretsManager, SSHKeyPair
+
+log = get_logger(__name__)
 
 SNAP_INTERFACES = {
     "pycharm-community": [
@@ -96,6 +108,10 @@ class VMConfig:
         default_factory=lambda: os.getenv("VM_AUTOSTART_APPS", "true").lower() == "true"
     )  # Auto-start GUI apps after login (desktop autostart)
     web_services: list = field(default_factory=list)  # Web services to start (uvicorn, etc.)
+    resources: dict = field(default_factory=dict)  # Resource limits (cpu, memory, disk, network)
+    auth_method: str = "ssh_key"  # ssh_key | one_time_password | password
+    ssh_public_key: Optional[str] = None
+    shutdown_after_setup: bool = False
 
     def to_dict(self) -> dict:
         return {
@@ -111,12 +127,29 @@ class SelectiveVMCloner:
     Uses bind mounts instead of full disk cloning.
     """
 
-    def __init__(self, conn_uri: str = None, user_session: bool = False):
+    def __init__(
+        self,
+        conn_uri: str = None,
+        user_session: bool = False,
+        hypervisor: HypervisorBackend = None,
+        disk_manager: DiskManager = None,
+        network_manager: NetworkManager = None,
+        secrets_manager: SecretsManager = None,
+    ):
         self.user_session = user_session
+        container = get_container()
+
+        # Resolve dependencies
+        self.hypervisor = hypervisor or container.resolve(HypervisorBackend)
+        self.disk = disk_manager or container.resolve(DiskManager)
+        # self.network = network_manager or container.resolve(NetworkManager)
+        self.secrets = secrets_manager or container.resolve(SecretsManager)
+
         if conn_uri:
             self.conn_uri = conn_uri
         else:
             self.conn_uri = "qemu:///session" if user_session else "qemu:///system"
+
         self.conn = None
         self._connect()
 
@@ -176,52 +209,52 @@ class SelectiveVMCloner:
         return Path.home() / "Downloads"
 
     def _ensure_default_base_image(self, console=None) -> Path:
-        def log(msg):
-            if console:
-                console.print(msg)
-            else:
-                print(msg)
+        """Ensure a default Ubuntu 22.04 base image is available."""
+        with log_operation(log, "vm.ensure_base_image"):
+            downloads_dir = self._get_downloads_dir()
+            downloads_dir.mkdir(parents=True, exist_ok=True)
+            cached_path = downloads_dir / self.DEFAULT_BASE_IMAGE_FILENAME
 
-        downloads_dir = self._get_downloads_dir()
-        downloads_dir.mkdir(parents=True, exist_ok=True)
-        cached_path = downloads_dir / self.DEFAULT_BASE_IMAGE_FILENAME
+            if cached_path.exists() and cached_path.stat().st_size > 0:
+                return cached_path
 
-        if cached_path.exists() and cached_path.stat().st_size > 0:
-            return cached_path
-
-        log(
-            "[cyan]⬇️  Downloading base image (first run only). This will be cached in ~/Downloads...[/]"
-        )
-
-        try:
-            with tempfile.NamedTemporaryFile(
-                prefix=f"{self.DEFAULT_BASE_IMAGE_FILENAME}.",
-                dir=str(downloads_dir),
-                delete=False,
-            ) as tmp:
-                tmp_path = Path(tmp.name)
+            log.info(
+                "Downloading base image (first run only). This will be cached in ~/Downloads...",
+                url=self.DEFAULT_BASE_IMAGE_URL,
+            )
 
             try:
-                urllib.request.urlretrieve(self.DEFAULT_BASE_IMAGE_URL, tmp_path)
-                tmp_path.replace(cached_path)
-            finally:
-                if tmp_path.exists() and tmp_path != cached_path:
-                    try:
-                        tmp_path.unlink()
-                    except Exception:
-                        pass
-        except Exception as e:
-            raise RuntimeError(
-                "Failed to download a default base image.\n\n"
-                "🔧 Solutions:\n"
-                "  1. Provide a base image explicitly:\n"
-                "     clonebox clone . --base-image /path/to/image.qcow2\n"
-                "  2. Download it manually and reuse it:\n"
-                f"     wget -O {cached_path} {self.DEFAULT_BASE_IMAGE_URL}\n\n"
-                f"Original error: {e}"
-            ) from e
+                import urllib.request
 
-        return cached_path
+                with tempfile.NamedTemporaryFile(
+                    prefix=f"{self.DEFAULT_BASE_IMAGE_FILENAME}.",
+                    dir=str(downloads_dir),
+                    delete=False,
+                ) as tmp:
+                    tmp_path = Path(tmp.name)
+
+                try:
+                    urllib.request.urlretrieve(self.DEFAULT_BASE_IMAGE_URL, tmp_path)
+                    tmp_path.replace(cached_path)
+                finally:
+                    if tmp_path.exists() and tmp_path != cached_path:
+                        try:
+                            tmp_path.unlink()
+                        except Exception:
+                            pass
+            except Exception as e:
+                log.error(f"Failed to download base image: {e}")
+                raise RuntimeError(
+                    "Failed to download a default base image.\n\n"
+                    "🔧 Solutions:\n"
+                    "  1. Provide a base image explicitly:\n"
+                    "     clonebox clone . --base-image /path/to/image.qcow2\n"
+                    "  2. Download it manually and reuse it:\n"
+                    f"     wget -O {cached_path} {self.DEFAULT_BASE_IMAGE_URL}\n\n"
+                    f"Original error: {e}"
+                ) from e
+
+            return cached_path
 
     def _default_network_active(self) -> bool:
         """Check if libvirt default network is active."""
@@ -318,126 +351,115 @@ class SelectiveVMCloner:
         Returns:
             UUID of created VM
         """
-
-        def log(msg):
-            if console:
-                console.print(msg)
-            else:
-                print(msg)
-
-        # If VM already exists, optionally replace it
-        existing_vm = None
-        try:
-            candidate_vm = self.conn.lookupByName(config.name)
-            if candidate_vm is not None:
-                # libvirt returns a domain object whose .name() should match the requested name.
-                # In tests, an unconfigured MagicMock may be returned here; avoid treating that as
-                # a real existing domain unless we can confirm the name matches.
+        with log_operation(
+            log, "vm.create", vm_name=config.name, ram_mb=config.ram_mb
+        ):
+            with vm_creation_transaction(self, config, console) as ctx:
+                # If VM already exists, optionally replace it
+                existing_vm = None
                 try:
-                    if hasattr(candidate_vm, "name") and callable(candidate_vm.name):
-                        if candidate_vm.name() == config.name:
+                    candidate_vm = self.conn.lookupByName(config.name)
+                    if candidate_vm is not None:
+                        try:
+                            if hasattr(candidate_vm, "name") and callable(candidate_vm.name):
+                                if candidate_vm.name() == config.name:
+                                    existing_vm = candidate_vm
+                            else:
+                                existing_vm = candidate_vm
+                        except Exception:
                             existing_vm = candidate_vm
-                    else:
-                        existing_vm = candidate_vm
                 except Exception:
-                    existing_vm = candidate_vm
-        except Exception:
-            existing_vm = None
+                    existing_vm = None
 
-        if existing_vm is not None:
-            if not replace:
-                raise RuntimeError(
-                    f"VM '{config.name}' already exists.\n\n"
-                    f"🔧 Solutions:\n"
-                    f"  1. Reuse existing VM: clonebox start {config.name}\n"
-                    f"  2. Replace it: clonebox clone . --name {config.name} --replace\n"
-                    f"  3. Delete it: clonebox delete {config.name}\n"
-                )
+                if existing_vm is not None:
+                    if not replace:
+                        raise RuntimeError(
+                            f"VM '{config.name}' already exists.\n\n"
+                            f"🔧 Solutions:\n"
+                            f"  1. Reuse existing VM: clonebox start {config.name}\n"
+                            f"  2. Replace it: clonebox clone . --name {config.name} --replace\n"
+                            f"  3. Delete it: clonebox delete {config.name}\n"
+                        )
 
-            log(f"[yellow]⚠️  VM '{config.name}' already exists - replacing...[/]")
-            self.delete_vm(config.name, delete_storage=True, console=console, ignore_not_found=True)
+                    log.info(f"VM '{config.name}' already exists - replacing...")
+                    self.delete_vm(config.name, delete_storage=True, console=console, ignore_not_found=True)
 
-        # Determine images directory
-        images_dir = self.get_images_dir()
-        vm_dir = images_dir / config.name
+                # Determine images directory
+                images_dir = self.get_images_dir()
+                try:
+                    vm_dir = ctx.add_directory(images_dir / config.name)
+                    vm_dir.mkdir(parents=True, exist_ok=True)
+                except PermissionError as e:
+                    raise PermissionError(
+                        f"Cannot create VM directory: {images_dir / config.name}\n\n"
+                        f"🔧 Solutions:\n"
+                        f"  1. Use --user flag to run in user session (recommended):\n"
+                        f"     clonebox clone . --user\n\n"
+                        f"  2. Run with sudo (not recommended):\n"
+                        f"     sudo clonebox clone .\n\n"
+                        f"  3. Fix directory permissions:\n"
+                        f"     sudo mkdir -p {images_dir}\n"
+                        f"     sudo chown -R $USER:libvirt {images_dir}\n\n"
+                        f"Original error: {e}"
+                    ) from e
 
-        try:
-            vm_dir.mkdir(parents=True, exist_ok=True)
-        except PermissionError as e:
-            raise PermissionError(
-                f"Cannot create VM directory: {vm_dir}\n\n"
-                f"🔧 Solutions:\n"
-                f"  1. Use --user flag to run in user session (recommended):\n"
-                f"     clonebox clone . --user\n\n"
-                f"  2. Run with sudo (not recommended):\n"
-                f"     sudo clonebox clone .\n\n"
-                f"  3. Fix directory permissions:\n"
-                f"     sudo mkdir -p {images_dir}\n"
-                f"     sudo chown -R $USER:libvirt {images_dir}\n\n"
-                f"Original error: {e}"
-            ) from e
+                # Create root disk
+                root_disk = ctx.add_file(vm_dir / "root.qcow2")
 
-        # Create root disk
-        root_disk = vm_dir / "root.qcow2"
+                if not config.base_image:
+                    config.base_image = str(self._ensure_default_base_image(console=console))
 
-        if not config.base_image:
-            config.base_image = str(self._ensure_default_base_image(console=console))
+                if config.base_image and Path(config.base_image).exists():
+                    # Use backing file for faster creation
+                    log.debug(f"Creating disk with backing file: {config.base_image}")
+                    cmd = [
+                        "qemu-img",
+                        "create",
+                        "-f",
+                        "qcow2",
+                        "-b",
+                        config.base_image,
+                        "-F",
+                        "qcow2",
+                        str(root_disk),
+                        f"{config.disk_size_gb}G",
+                    ]
+                else:
+                    # Create empty disk
+                    log.debug(f"Creating empty {config.disk_size_gb}GB disk...")
+                    cmd = ["qemu-img", "create", "-f", "qcow2", str(root_disk), f"{config.disk_size_gb}G"]
 
-        if config.base_image and Path(config.base_image).exists():
-            # Use backing file for faster creation
-            log(f"[cyan]📀 Creating disk with backing file: {config.base_image}[/]")
-            cmd = [
-                "qemu-img",
-                "create",
-                "-f",
-                "qcow2",
-                "-b",
-                config.base_image,
-                "-F",
-                "qcow2",
-                str(root_disk),
-                f"{config.disk_size_gb}G",
-            ]
-        else:
-            # Create empty disk
-            log(f"[cyan]📀 Creating empty {config.disk_size_gb}GB disk...[/]")
-            cmd = ["qemu-img", "create", "-f", "qcow2", str(root_disk), f"{config.disk_size_gb}G"]
+                subprocess.run(cmd, check=True, capture_output=True)
 
-        subprocess.run(cmd, check=True, capture_output=True)
+                # Create cloud-init ISO if packages/services specified
+                cloudinit_iso = None
+                if config.packages or config.services:
+                    cloudinit_iso = ctx.add_file(self._create_cloudinit_iso(vm_dir, config))
+                    log.info(f"Created cloud-init ISO with {len(config.packages)} packages")
 
-        # Create cloud-init ISO if packages/services specified
-        cloudinit_iso = None
-        if config.packages or config.services:
-            cloudinit_iso = self._create_cloudinit_iso(vm_dir, config)
-            log(f"[cyan]☁️  Created cloud-init ISO with {len(config.packages)} packages[/]")
+                # Generate VM XML
+                vm_xml = self._generate_vm_xml(config, root_disk, cloudinit_iso)
+                ctx.add_libvirt_domain(self.conn, config.name)
 
-        # Resolve network mode
-        network_mode = self.resolve_network_mode(config)
-        if network_mode == "user":
-            log(
-                "[yellow]⚠️  Using user-mode networking (slirp) because default libvirt network is unavailable[/]"
-            )
-        else:
-            log(f"[dim]Network mode: {network_mode}[/]")
+                # Define VM
+                log.info(f"Defining VM '{config.name}'...")
+                try:
+                    vm = self.conn.defineXML(vm_xml)
+                except Exception as e:
+                    raise RuntimeError(
+                        f"Failed to define VM '{config.name}'.\n"
+                        f"Error: {e}\n\n"
+                        f"If the VM already exists, try: clonebox clone . --name {config.name} --replace\n"
+                    ) from e
 
-        # Generate VM XML
-        vm_xml = self._generate_vm_xml(config, root_disk, cloudinit_iso)
+                # Start if autostart requested
+                if getattr(config, "autostart", False):
+                    self.start_vm(config.name, open_viewer=True)
 
-        # Define and create VM
-        log(f"[cyan]🔧 Defining VM '{config.name}'...[/]")
-        try:
-            vm = self.conn.defineXML(vm_xml)
-        except Exception as e:
-            raise RuntimeError(
-                f"Failed to define VM '{config.name}'.\n"
-                f"Error: {e}\n\n"
-                f"If the VM already exists, try: clonebox clone . --name {config.name} --replace\n"
-            ) from e
+                # All good - commit transaction
+                ctx.commit()
 
-        log(f"[green]✅ VM '{config.name}' created successfully![/]")
-        log(f"[dim]   UUID: {vm.UUIDString()}[/]")
-
-        return vm.UUIDString()
+                return vm.UUIDString()
 
     def _generate_vm_xml(
         self, config: VMConfig = None, root_disk: Path = None, cloudinit_iso: Optional[Path] = None
@@ -446,22 +468,34 @@ class SelectiveVMCloner:
 
         # Backward compatibility: if called without args, try to derive defaults
         if config is None:
-            # Create a default config for backward compatibility
             config = VMConfig()
         if root_disk is None:
-            # Use a default path for backward compatibility
             root_disk = Path("/var/lib/libvirt/images/default-disk.qcow2")
-        if cloudinit_iso is None:
-            cloudinit_iso = None
+
+        # Get resource limits from config or defaults
+        resource_data = getattr(config, "resources", {})
+        if not resource_data:
+            # Fallback to top-level fields
+            resource_data = {
+                "cpu": {"vcpus": config.vcpus},
+                "memory": {"limit": f"{config.ram_mb}M"},
+            }
+        
+        limits = ResourceLimits.from_dict(resource_data)
 
         root = ET.Element("domain", type="kvm")
 
         # Basic metadata
         ET.SubElement(root, "name").text = config.name
         ET.SubElement(root, "uuid").text = str(uuid.uuid4())
-        ET.SubElement(root, "memory", unit="MiB").text = str(config.ram_mb)
-        ET.SubElement(root, "currentMemory", unit="MiB").text = str(config.ram_mb)
-        ET.SubElement(root, "vcpu", placement="static").text = str(config.vcpus)
+        
+        # Memory configuration using limits
+        limit_kib = limits.memory.limit_bytes // 1024
+        ET.SubElement(root, "memory", unit="KiB").text = str(limit_kib)
+        ET.SubElement(root, "currentMemory", unit="KiB").text = str(limit_kib)
+        
+        # CPU configuration
+        ET.SubElement(root, "vcpu", placement="static").text = str(limits.cpu.vcpus)
 
         # OS configuration
         os_elem = ET.SubElement(root, "os")
@@ -472,6 +506,35 @@ class SelectiveVMCloner:
         features = ET.SubElement(root, "features")
         ET.SubElement(features, "acpi")
         ET.SubElement(features, "apic")
+
+        # Resource tuning (CPU and Memory)
+        cputune_xml = limits.cpu.to_libvirt_xml()
+        if cputune_xml:
+            # We append pre-generated XML string later or use ET to parse it
+            # For simplicity with existing ET code, we'll use SubElement for basic ones 
+            # and manual string insertion for complex tuning if needed, 
+            # but let's try to stick to ET where possible.
+            pass
+
+        # CPU tuning element
+        if limits.cpu.shares or limits.cpu.quota or limits.cpu.pin:
+            cputune = ET.SubElement(root, "cputune")
+            ET.SubElement(cputune, "shares").text = str(limits.cpu.shares)
+            if limits.cpu.quota:
+                ET.SubElement(cputune, "period").text = str(limits.cpu.period)
+                ET.SubElement(cputune, "quota").text = str(limits.cpu.quota)
+            if limits.cpu.pin:
+                for idx, cpu in enumerate(limits.cpu.pin):
+                    ET.SubElement(cputune, "vcpupin", vcpu=str(idx), cpuset=str(cpu))
+
+        # Memory tuning element
+        if limits.memory.soft_limit or limits.memory.swap:
+            memtune = ET.SubElement(root, "memtune")
+            ET.SubElement(memtune, "hard_limit", unit="KiB").text = str(limit_kib)
+            if limits.memory.soft_limit_bytes:
+                ET.SubElement(memtune, "soft_limit", unit="KiB").text = str(limits.memory.soft_limit_bytes // 1024)
+            if limits.memory.swap_bytes:
+                ET.SubElement(memtune, "swap_hard_limit", unit="KiB").text = str(limits.memory.swap_bytes // 1024)
 
         # CPU
         ET.SubElement(root, "cpu", mode="host-passthrough", check="none")
@@ -487,6 +550,18 @@ class SelectiveVMCloner:
         ET.SubElement(disk, "driver", name="qemu", type="qcow2", cache="writeback")
         ET.SubElement(disk, "source", file=str(root_disk))
         ET.SubElement(disk, "target", dev="vda", bus="virtio")
+        
+        # Disk I/O tuning
+        if limits.disk.read_bps or limits.disk.write_bps or limits.disk.read_iops or limits.disk.write_iops:
+            iotune = ET.SubElement(disk, "iotune")
+            if limits.disk.read_bps_bytes:
+                ET.SubElement(iotune, "read_bytes_sec").text = str(limits.disk.read_bps_bytes)
+            if limits.disk.write_bps_bytes:
+                ET.SubElement(iotune, "write_bytes_sec").text = str(limits.disk.write_bps_bytes)
+            if limits.disk.read_iops:
+                ET.SubElement(iotune, "read_iops_sec").text = str(limits.disk.read_iops)
+            if limits.disk.write_iops:
+                ET.SubElement(iotune, "write_iops_sec").text = str(limits.disk.write_iops)
 
         # Cloud-init ISO
         if cloudinit_iso:
@@ -516,6 +591,15 @@ class SelectiveVMCloner:
             iface = ET.SubElement(devices, "interface", type="network")
             ET.SubElement(iface, "source", network="default")
             ET.SubElement(iface, "model", type="virtio")
+        
+        # Network bandwidth tuning
+        if limits.network.inbound or limits.network.outbound:
+            bandwidth = ET.SubElement(iface, "bandwidth")
+            if limits.network.inbound_kbps:
+                # average in KB/s
+                ET.SubElement(bandwidth, "inbound", average=str(limits.network.inbound_kbps // 8))
+            if limits.network.outbound_kbps:
+                ET.SubElement(bandwidth, "outbound", average=str(limits.network.outbound_kbps // 8))
 
         # Serial console
         serial = ET.SubElement(devices, "serial", type="pty")
@@ -1114,7 +1198,50 @@ fi
         return encoded
 
     def _create_cloudinit_iso(self, vm_dir: Path, config: VMConfig) -> Path:
-        """Create cloud-init ISO with user-data and meta-data."""
+        """Create cloud-init ISO with secure credential handling."""
+        secrets_mgr = SecretsManager()
+
+        # Determine authentication method
+        auth_method = getattr(config, "auth_method", "ssh_key")
+
+        ssh_authorized_keys = []
+        chpasswd_config = ""
+        lock_passwd = "true"
+        ssh_pwauth = "false"
+        bootcmd_extra = []
+
+        if auth_method == "ssh_key":
+            ssh_key_path = vm_dir / "ssh_key"
+            provided_key = getattr(config, "ssh_public_key", None)
+
+            if provided_key:
+                ssh_authorized_keys = [provided_key]
+            else:
+                key_pair = SSHKeyPair.generate()
+                key_pair.save(ssh_key_path)
+                ssh_authorized_keys = [key_pair.public_key]
+                log.info(f"SSH key generated and saved to: {ssh_key_path}")
+
+        elif auth_method == "one_time_password":
+            otp, chpasswd_raw = SecretsManager.generate_one_time_password()
+            chpasswd_config = chpasswd_raw
+            bootcmd_extra = [
+                '  - echo "===================="',
+                f'  - echo "ONE-TIME PASSWORD: {otp}"',
+                '  - echo "You MUST change this on first login!"',
+                '  - echo "===================="',
+            ]
+            lock_passwd = "false"
+            ssh_pwauth = "true"
+            log.warning("One-time password generated. It will be shown on VM console.")
+
+        else:
+            # Fallback to legacy password from environment/secrets
+            password = secrets_mgr.get("VM_PASSWORD") or getattr(config, "password", "ubuntu")
+            chpasswd_config = f"chpasswd:\n  list: |\n    {config.username}:{password}\n  expire: False"
+            lock_passwd = "false"
+            ssh_pwauth = "true"
+            log.warning("DEPRECATED: Using password authentication. Switch to 'ssh_key' for better security.")
 
         cloudinit_dir = vm_dir / "cloud-init"
         cloudinit_dir.mkdir(exist_ok=True)
@@ -1745,7 +1872,7 @@ WantedBy=default.target
             runcmd_lines.append(f"  - echo '{service_b64}' | base64 -d > {service_path}")
 
         # Fix snap interfaces reconnection script to be more robust
-        snap_fix_script = r'''#!/bin/bash
+        snap_fix_script = r"""#!/bin/bash
 # Fix snap interfaces for GUI apps
 set -euo pipefail
 SNAP_LIST=$(snap list | awk 'NR>1 {print $1}')
@@ -1761,9 +1888,11 @@ for snap in $SNAP_LIST; do
     esac
 done
 systemctl restart snapd 2>/dev/null || true
-'''
+"""
         snap_fix_b64 = base64.b64encode(snap_fix_script.encode()).decode()
-        runcmd_lines.append(f"  - echo '{snap_fix_b64}' | base64 -d > /usr/local/bin/clonebox-fix-snaps")
+        runcmd_lines.append(
+            f"  - echo '{snap_fix_b64}' | base64 -d > /usr/local/bin/clonebox-fix-snaps"
+        )
         runcmd_lines.append("  - chmod +x /usr/local/bin/clonebox-fix-snaps")
         runcmd_lines.append("  - /usr/local/bin/clonebox-fix-snaps || true")
 
@@ -2027,30 +2156,40 @@ if __name__ == "__main__":
             runcmd_lines.append("  - sleep 10 && reboot")
 
         runcmd_yaml = "\n".join(runcmd_lines) if runcmd_lines else ""
-        bootcmd_yaml = "\n".join(mount_commands) if mount_commands else ""
-        bootcmd_block = f"\nbootcmd:\n{bootcmd_yaml}\n" if bootcmd_yaml else ""
+        
+        # Build bootcmd combining mount commands and extra security bootcmds
+        bootcmd_lines = list(mount_commands) if mount_commands else []
+        if bootcmd_extra:
+            bootcmd_lines.extend(bootcmd_extra)
+            
+        bootcmd_block = ""
+        if bootcmd_lines:
+            bootcmd_block = "\nbootcmd:\n" + "\n".join(bootcmd_lines) + "\n"
 
-        # Remove power_state - using shutdown -r instead
-        power_state_yaml = ""
-
-        user_data = f"""#cloud-config
+        # User-data components
+        user_data_header = f"""#cloud-config
 hostname: {config.name}
 manage_etc_hosts: true
 
-# Default user
 users:
   - name: {config.username}
     sudo: ALL=(ALL) NOPASSWD:ALL
     shell: /bin/bash
-    lock_passwd: false
     groups: sudo,adm,dialout,cdrom,floppy,audio,dip,video,plugdev,netdev,docker
-    plain_text_passwd: {config.password}
+    lock_passwd: {lock_passwd}
+"""
+        if ssh_authorized_keys:
+            user_data_header += "    ssh_authorized_keys:\n"
+            for key in ssh_authorized_keys:
+                user_data_header += f"      - {key}\n"
+        
+        if chpasswd_config:
+            user_data_header += f"\n{chpasswd_config}\n"
+            
+        user_data_header += f"ssh_pwauth: {ssh_pwauth}\n"
 
-# Allow password authentication
-ssh_pwauth: true
-chpasswd:
-  expire: false
-
+        # Assemble final user-data
+        user_data = f"""{user_data_header}
 # Make sure root partition + filesystem grows to fill the qcow2 disk size
 growpart:
   mode: auto
@@ -2070,7 +2209,6 @@ packages:
 # Run after packages are installed
 runcmd:
 {runcmd_yaml}
-{power_state_yaml}
 
 final_message: "CloneBox VM is ready after $UPTIME seconds"
 """

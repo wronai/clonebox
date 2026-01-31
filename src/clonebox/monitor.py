@@ -217,9 +217,7 @@ class ResourceMonitor:
     def _check_engine(self, engine: str) -> bool:
         """Check if container engine is available."""
         try:
-            result = subprocess.run(
-                [engine, "--version"], capture_output=True, timeout=5
-            )
+            result = subprocess.run([engine, "--version"], capture_output=True, timeout=5)
             return result.returncode == 0
         except Exception:
             return False
