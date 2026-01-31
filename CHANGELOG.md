@@ -1,3 +1,22 @@
+## [0.1.28] - 2026-01-31
+
+### Summary
+
+feat(docs): configuration management system
+
+### Docs
+
+- docs: update README
+
+### Test
+
+- update tests/test_coverage_boost_final.py
+
+### Other
+
+- update img_1.png
+
+
 ## [0.1.27] - 2026-01-31
 
 ### Summary

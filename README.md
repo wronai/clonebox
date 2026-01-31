@@ -40,6 +40,9 @@ CloneBox lets you create isolated virtual machines with only the applications, d
 - 🧪 **Configuration testing** - Validate VM settings and functionality
 - 📁 **App data sync** - Include browser profiles, IDE settings, and app configs
 
+### GUI - cloned ubuntu
+![img_1.png](img_1.png)
+
 ## Use Cases
 
 CloneBox excels in scenarios where developers need:
