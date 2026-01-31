@@ -1,3 +1,18 @@
+## [0.1.29] - 2026-01-31
+
+### Summary
+
+feat(tests): configuration management system
+
+### Core
+
+- update src/clonebox/cloner.py
+
+### Test
+
+- update tests/test_coverage_boost_final.py
+
+
 ## [0.1.28] - 2026-01-31
 
 ### Summary

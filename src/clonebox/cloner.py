@@ -443,7 +443,7 @@ class SelectiveVMCloner:
         self, config: VMConfig = None, root_disk: Path = None, cloudinit_iso: Optional[Path] = None
     ) -> str:
         """Generate libvirt XML for the VM."""
-        
+
         # Backward compatibility: if called without args, try to derive defaults
         if config is None:
             # Create a default config for backward compatibility
@@ -2204,7 +2204,7 @@ final_message: "CloneBox VM is ready after $UPTIME seconds"
             return {
                 "name": vm.name(),
                 "state": "running" if vm.isActive() else "stopped",
-                "uuid": vm.UUIDString()
+                "uuid": vm.UUIDString(),
             }
         except Exception:
             return {}
