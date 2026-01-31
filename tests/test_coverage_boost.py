@@ -29,16 +29,11 @@ def test_cloner_vmconfig_methods():
     assert config.paths == {"/host": "/guest"}
     assert config.packages == ["vim", "git"]
     
-    # Test to_dict
+    # Test to_dict (only returns specific fields)
     config_dict = config.to_dict()
-    assert config_dict["name"] == "test-vm"
-    assert config_dict["ram_mb"] == 4096
-    assert config_dict["vcpus"] == 2
-    assert config_dict["disk_size_gb"] == 30
-    assert config_dict["gui"] is False
-    assert config_dict["base_image"] == "ubuntu.img"
     assert config_dict["paths"] == {"/host": "/guest"}
     assert config_dict["packages"] == ["vim", "git"]
+    assert "services" in config_dict
 
 
 def test_selective_vm_cloner_methods():

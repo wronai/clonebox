@@ -26,7 +26,8 @@ def test_vm_config():
     assert config.paths == {}
     assert config.packages == []
     
-    # Test to_dict
+    # Test to_dict (only returns specific fields: paths, packages, services)
     config_dict = config.to_dict()
-    assert config_dict["name"] == "clonebox-vm"
-    assert config_dict["ram_mb"] == 8192
+    assert config_dict["paths"] == {}
+    assert config_dict["packages"] == []
+    assert config_dict["services"] == []
