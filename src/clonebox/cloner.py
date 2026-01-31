@@ -26,7 +26,7 @@ class VMConfig:
     name: str = "clonebox-vm"
     ram_mb: int = 4096
     vcpus: int = 4
-    disk_size_gb: int = 10
+    disk_size_gb: int = 20
     gui: bool = True
     base_image: Optional[str] = None
     paths: dict = field(default_factory=dict)

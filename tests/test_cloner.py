@@ -17,7 +17,7 @@ class TestVMConfig:
         assert config.name == "clonebox-vm"
         assert config.ram_mb == 4096
         assert config.vcpus == 4
-        assert config.disk_size_gb == 10
+        assert config.disk_size_gb == 20
         assert config.gui is True
         assert config.base_image is None
         assert config.paths == {}

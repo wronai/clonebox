@@ -16,7 +16,7 @@ class VMSettings(BaseModel):
     name: str = Field(default="clonebox-vm", description="VM name")
     ram_mb: int = Field(default=4096, ge=512, le=131072, description="RAM in MB")
     vcpus: int = Field(default=4, ge=1, le=128, description="Number of vCPUs")
-    disk_size_gb: int = Field(default=10, ge=1, le=2048, description="Disk size in GB")
+    disk_size_gb: int = Field(default=20, ge=1, le=2048, description="Disk size in GB")
     gui: bool = Field(default=True, description="Enable SPICE graphics")
     base_image: Optional[str] = Field(default=None, description="Path to base qcow2 image")
     network_mode: str = Field(default="auto", description="Network mode: auto|default|user")
@@ -107,6 +107,10 @@ class CloneBoxConfig(BaseModel):
         """Convert to legacy VMConfig dataclass for compatibility."""
         from clonebox.cloner import VMConfig as VMConfigDataclass
 
+        # Merge paths and app_data_paths
+        all_paths = dict(self.paths)
+        all_paths.update(self.app_data_paths)
+
         return VMConfigDataclass(
             name=self.vm.name,
             ram_mb=self.vm.ram_mb,
@@ -114,7 +118,7 @@ class CloneBoxConfig(BaseModel):
             disk_size_gb=self.vm.disk_size_gb,
             gui=self.vm.gui,
             base_image=self.vm.base_image,
-            paths=self.paths,
+            paths=all_paths,
             packages=self.packages,
             snap_packages=self.snap_packages,
             services=self.services,
