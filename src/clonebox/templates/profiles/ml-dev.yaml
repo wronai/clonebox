@@ -1,6 +1,26 @@
+# Machine Learning Development Profile
+# Usage: clonebox container up . --profile ml-dev
+#        clonebox clone . --profile ml-dev --user --run
+
 container:
   image: python:3.11-slim
-  packages: ["pip", "jupyterlab"]
-  ports: ["8888:8888"]
+  packages:
+    - pip
+    - jupyter
+    - build-essential
+  ports:
+    - "8888:8888"
+  env_from_dotenv: true
+
 vm:
-  packages: ["python3-pip", "jupyterlab"]
+  packages:
+    - python3-pip
+    - python3-venv
+    - jupyterlab
+    - build-essential
+    - git
+    - curl
+  services:
+    - postgresql
+  ram_mb: 8192
+  vcpus: 4

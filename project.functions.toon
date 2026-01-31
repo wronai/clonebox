@@ -1,5 +1,5 @@
 project: clonebox
-generated: "2026-01-31T16:55:21.523116"
+generated: "2026-01-31T17:09:49.235937"
 modules[27]{path,lang,items}:
   tests/conftest.py,python,17
   tests/test_profiles.py,python,5
@@ -243,13 +243,13 @@ function_details:
   src/clonebox/dashboard.py:
     functions[8]{name,kind,sig,loc,async,lines,cc,does}:
       _run_clonebox,function,"(args:List[str]) -> subprocess.CompletedProcess",12-17,false,6,1,starts clonebox
-      _render_table,function,"(title:str, headers:List[str], rows:List[List[str]]) -> str",20-30,false,11,4,formats table
-      dashboard,function,() -> str,34-57,true,24,1,dashboard
-      api_vms,function,() -> str,61-77,true,17,6,api vms
-      api_containers,function,() -> str,81-103,true,23,6,api containers
-      api_vms_json,function,() -> JSONResponse,107-115,true,9,4,api vms json
-      api_containers_json,function,() -> JSONResponse,119-127,true,9,4,api containers json
-      run_dashboard,function,"(port:int=8080) -> None",130-133,false,4,1,starts dashboard
+      _render_table,function,"(title:str, headers:List[str], rows:List[List[str]]) -> str",20-40,false,21,5,formats table
+      dashboard,function,() -> str,44-91,true,48,1,dashboard
+      api_vms,function,() -> str,95-111,true,17,6,api vms
+      api_containers,function,() -> str,115-137,true,23,6,api containers
+      api_vms_json,function,() -> JSONResponse,141-149,true,9,4,api vms json
+      api_containers_json,function,() -> JSONResponse,153-161,true,9,4,api containers json
+      run_dashboard,function,"(port:int=8080) -> None",164-167,false,4,1,starts dashboard
   src/clonebox/validator.py:
     functions[9]{name,kind,sig,loc,async,lines,cc,does}:
       VMValidator.__init__,method,"(config:dict, vm_name:str, conn_uri:str, console:Console=None, require_running_apps:bool=False, smoke_test:bool=False) -> None",19-42,false,24,2,creates
@@ -343,16 +343,16 @@ function_details:
       SelectiveVMCloner.check_prerequisites,method,() -> dict,245-308,false,64,10,Check system prerequisites for VM creation.
       SelectiveVMCloner.create_vm,method,"(config:VMConfig, console=None, replace:bool=False) -> str",310-440,false,131,17,Create a VM with only selected applications/paths.
       SelectiveVMCloner._generate_vm_xml,method,"(config:VMConfig=None, root_disk:Path=None, cloudinit_iso:Optional[Path]=None) -> str",442-558,false,117,9,Generate libvirt XML for the VM.
-      SelectiveVMCloner._generate_boot_diagnostic_script,method,"(config:VMConfig) -> str",560-931,false,372,16,Generate boot diagnostic script with self-healing capabilities.
-      SelectiveVMCloner._generate_health_check_script,method,"(config:VMConfig) -> str",933-1108,false,176,9,Generate a health check script that validates all installed components.
-      SelectiveVMCloner._create_cloudinit_iso,method,"(vm_dir:Path, config:VMConfig) -> Path",1110-2068,false,959,52,Create cloud-init ISO with user-data and meta-data.
-      SelectiveVMCloner.start_vm,method,"(vm_name:str, open_viewer:bool=True, console=None) -> bool",2070-2100,false,31,4,Start a VM and optionally open virt-viewer.
-      SelectiveVMCloner.stop_vm,method,"(vm_name:str, force:bool=False, console=None) -> bool",2102-2129,false,28,4,Stop a VM.
-      SelectiveVMCloner.delete_vm,method,"(vm_name:str, delete_storage:bool=True, console=None, ignore_not_found:bool=False) -> bool",2131-2169,false,39,5,Delete a VM and optionally its storage.
-      SelectiveVMCloner.list_vms,method,() -> list,2171-2182,false,12,3,List all VMs.
-      SelectiveVMCloner.close,method,() -> None,2184-2187,false,4,2,Close libvirt connection.
-      SelectiveVMCloner._get_base_image_info,method,"(image_path:str) -> dict",2190-2195,false,6,2,Get base image information - backward compatibility shim.
-      SelectiveVMCloner.get_vm_info,method,"(vm_name:str) -> dict",2197-2210,false,14,4,Get VM information - backward compatibility shim.
+      SelectiveVMCloner._generate_boot_diagnostic_script,method,"(config:VMConfig) -> str",560-937,false,378,16,Generate boot diagnostic script with self-healing capabilities.
+      SelectiveVMCloner._generate_health_check_script,method,"(config:VMConfig) -> str",939-1114,false,176,9,Generate a health check script that validates all installed components.
+      SelectiveVMCloner._create_cloudinit_iso,method,"(vm_dir:Path, config:VMConfig) -> Path",1116-2097,false,982,52,Create cloud-init ISO with user-data and meta-data.
+      SelectiveVMCloner.start_vm,method,"(vm_name:str, open_viewer:bool=True, console=None) -> bool",2099-2129,false,31,4,Start a VM and optionally open virt-viewer.
+      SelectiveVMCloner.stop_vm,method,"(vm_name:str, force:bool=False, console=None) -> bool",2131-2158,false,28,4,Stop a VM.
+      SelectiveVMCloner.delete_vm,method,"(vm_name:str, delete_storage:bool=True, console=None, ignore_not_found:bool=False) -> bool",2160-2198,false,39,5,Delete a VM and optionally its storage.
+      SelectiveVMCloner.list_vms,method,() -> list,2200-2211,false,12,3,List all VMs.
+      SelectiveVMCloner.close,method,() -> None,2213-2216,false,4,2,Close libvirt connection.
+      SelectiveVMCloner._get_base_image_info,method,"(image_path:str) -> dict",2219-2224,false,6,2,Get base image information - backward compatibility shim.
+      SelectiveVMCloner.get_vm_info,method,"(vm_name:str) -> dict",2226-2239,false,14,4,Get VM information - backward compatibility shim.
   src/clonebox/models.py:
     functions[13]{name,kind,sig,loc,async,lines,cc,does}:
       VMSettings.name_must_be_valid,method,"(v:str) -> str",28-33,false,6,4,name must be valid

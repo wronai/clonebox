@@ -1,4 +1,4 @@
-# clonebox | 27f 11319L | python:27
+# clonebox | 27f 11382L | python:27
 # Keys: M=modules, D=details, i=imports, c=classes, f=functions, m=methods
 M[27]:
   tests/conftest.py,345
@@ -18,14 +18,14 @@ M[27]:
   tests/e2e/test_full_workflow.py,243
   tests/e2e/__init__.py,1
   tests/e2e/test_container_workflow.py,61
-  src/clonebox/dashboard.py,104
+  src/clonebox/dashboard.py,136
   src/clonebox/validator.py,813
   src/clonebox/cli.py,2515
   src/clonebox/detector.py,589
   src/clonebox/__init__.py,10
   src/clonebox/__main__.py,4
   src/clonebox/container.py,154
-  src/clonebox/cloner.py,1790
+  src/clonebox/cloner.py,1816
   src/clonebox/models.py,181
   src/clonebox/profiles.py,47
 D:

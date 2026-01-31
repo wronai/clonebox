@@ -1,3 +1,16 @@
+## [1.1.2] - 2026-01-31
+
+### Summary
+
+feat(None): configuration management system
+
+### Other
+
+- update project.functions.toon
+- update project.toon
+- config: update ml-dev.yaml
+
+
 ## [1.1.1] - 2026-01-31
 
 ### Summary
