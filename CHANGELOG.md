@@ -1,3 +1,27 @@
+## [0.1.23] - 2026-01-31
+
+### Summary
+
+feat(examples): CLI interface improvements
+
+### Core
+
+- update src/clonebox/cli.py
+- update src/clonebox/cloner.py
+
+### Test
+
+- update tests/test_cloner.py
+
+### Build
+
+- update pyproject.toml
+
+### Other
+
+- update .env.example
+
+
 ## [0.1.22] - 2026-01-31
 
 ### Summary

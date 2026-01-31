@@ -3,6 +3,7 @@
 SelectiveVMCloner - Creates isolated VMs with only selected apps/paths/services.
 """
 
+import json
 import os
 import subprocess
 import tempfile
@@ -12,6 +13,12 @@ import xml.etree.ElementTree as ET
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional
+
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except ImportError:
+    pass  # dotenv is optional
 
 try:
     import libvirt
@@ -33,21 +40,23 @@ DEFAULT_SNAP_INTERFACES = ['desktop', 'desktop-legacy', 'x11', 'home', 'network'
 class VMConfig:
     """Configuration for the VM to create."""
 
-    name: str = "clonebox-vm"
-    ram_mb: int = 4096
-    vcpus: int = 4
-    disk_size_gb: int = 20
-    gui: bool = True
-    base_image: Optional[str] = None
+    name: str = field(default_factory=lambda: os.getenv("VM_NAME", "clonebox-vm"))
+    ram_mb: int = field(default_factory=lambda: int(os.getenv("VM_RAM_MB", "8192")))
+    vcpus: int = field(default_factory=lambda: int(os.getenv("VM_VCPUS", "4")))
+    disk_size_gb: int = field(default_factory=lambda: int(os.getenv("VM_DISK_SIZE_GB", "20")))
+    gui: bool = field(default_factory=lambda: os.getenv("VM_GUI", "true").lower() == "true")
+    base_image: Optional[str] = field(default_factory=lambda: os.getenv("VM_BASE_IMAGE") or None)
     paths: dict = field(default_factory=dict)
     packages: list = field(default_factory=list)
     snap_packages: list = field(default_factory=list)  # Snap packages to install
     services: list = field(default_factory=list)
     post_commands: list = field(default_factory=list)  # Commands to run after setup
-    user_session: bool = False  # Use qemu:///session instead of qemu:///system
-    network_mode: str = "auto"  # auto|default|user
-    username: str = "ubuntu"  # VM default username
-    password: str = "ubuntu"  # VM default password
+    user_session: bool = field(default_factory=lambda: os.getenv("VM_USER_SESSION", "false").lower() == "true")  # Use qemu:///session instead of qemu:///system
+    network_mode: str = field(default_factory=lambda: os.getenv("VM_NETWORK_MODE", "auto"))  # auto|default|user
+    username: str = field(default_factory=lambda: os.getenv("VM_USERNAME", "ubuntu"))  # VM default username
+    password: str = field(default_factory=lambda: os.getenv("VM_PASSWORD", "ubuntu"))  # VM default password
+    autostart_apps: bool = field(default_factory=lambda: os.getenv("VM_AUTOSTART_APPS", "true").lower() == "true")  # Auto-start GUI apps after login (desktop autostart)
+    web_services: list = field(default_factory=list)  # Web services to start (uvicorn, etc.)
 
     def to_dict(self) -> dict:
         return {
@@ -63,15 +72,6 @@ class SelectiveVMCloner:
     Uses bind mounts instead of full disk cloning.
     """
 
-    # Default images directories
-    SYSTEM_IMAGES_DIR = Path("/var/lib/libvirt/images")
-    USER_IMAGES_DIR = Path.home() / ".local/share/libvirt/images"
-
-    DEFAULT_BASE_IMAGE_URL = (
-        "https://cloud-images.ubuntu.com/jammy/current/jammy-server-cloudimg-amd64.img"
-    )
-    DEFAULT_BASE_IMAGE_FILENAME = "clonebox-ubuntu-jammy-amd64.qcow2"
-
     def __init__(self, conn_uri: str = None, user_session: bool = False):
         self.user_session = user_session
         if conn_uri:
@@ -80,6 +80,28 @@ class SelectiveVMCloner:
             self.conn_uri = "qemu:///session" if user_session else "qemu:///system"
         self.conn = None
         self._connect()
+
+    @property
+    def SYSTEM_IMAGES_DIR(self) -> Path:
+        return Path(os.getenv("CLONEBOX_SYSTEM_IMAGES_DIR", "/var/lib/libvirt/images"))
+
+    @property
+    def USER_IMAGES_DIR(self) -> Path:
+        return Path(os.getenv("CLONEBOX_USER_IMAGES_DIR", str(Path.home() / ".local/share/libvirt/images"))).expanduser()
+
+    @property
+    def DEFAULT_BASE_IMAGE_URL(self) -> str:
+        return os.getenv(
+            "CLONEBOX_BASE_IMAGE_URL",
+            "https://cloud-images.ubuntu.com/jammy/current/jammy-server-cloudimg-amd64.img"
+        )
+
+    @property
+    def DEFAULT_BASE_IMAGE_FILENAME(self) -> str:
+        return os.getenv(
+            "CLONEBOX_BASE_IMAGE_FILENAME",
+            "clonebox-ubuntu-jammy-amd64.qcow2"
+        )
 
     def _connect(self):
         """Connect to libvirt."""
@@ -599,8 +621,48 @@ write_status "starting" "boot diagnostic starting"
 APT_PACKAGES=({apt_packages})
 SNAP_PACKAGES=({snap_packages})
 SERVICES=({services})
+VM_USER="${{SUDO_USER:-ubuntu}}"
+VM_HOME="/home/$VM_USER"
 
-section "1/5" "Checking APT packages..."
+# ═══════════════════════════════════════════════════════════════════════════════
+# Section 0: Fix permissions for GNOME directories (runs first!)
+# ═══════════════════════════════════════════════════════════════════════════════
+section "0/7" "Fixing directory permissions..."
+write_status "fixing_permissions" "fixing directory permissions"
+
+GNOME_DIRS=(
+    "$VM_HOME/.config"
+    "$VM_HOME/.config/pulse"
+    "$VM_HOME/.config/dconf"
+    "$VM_HOME/.config/ibus"
+    "$VM_HOME/.cache"
+    "$VM_HOME/.cache/ibus"
+    "$VM_HOME/.cache/tracker3"
+    "$VM_HOME/.cache/mesa_shader_cache"
+    "$VM_HOME/.local"
+    "$VM_HOME/.local/share"
+    "$VM_HOME/.local/share/applications"
+    "$VM_HOME/.local/share/keyrings"
+)
+
+for dir in "${{GNOME_DIRS[@]}}"; do
+    if [ ! -d "$dir" ]; then
+        mkdir -p "$dir" 2>/dev/null && log "    Created $dir" || true
+    fi
+done
+
+# Fix ownership for all critical directories
+chown -R 1000:1000 "$VM_HOME/.config" "$VM_HOME/.cache" "$VM_HOME/.local" 2>/dev/null || true
+chmod 700 "$VM_HOME/.config" "$VM_HOME/.cache" 2>/dev/null || true
+
+# Fix snap directories ownership
+for snap_dir in "$VM_HOME/snap"/*; do
+    [ -d "$snap_dir" ] && chown -R 1000:1000 "$snap_dir" 2>/dev/null || true
+done
+
+ok "Directory permissions fixed"
+
+section "1/7" "Checking APT packages..."
 write_status "checking_apt" "checking APT packages"
 for pkg in "${{APT_PACKAGES[@]}}"; do
     [ -z "$pkg" ] && continue
@@ -617,7 +679,7 @@ for pkg in "${{APT_PACKAGES[@]}}"; do
     fi
 done
 
-section "2/5" "Checking Snap packages..."
+section "2/7" "Checking Snap packages..."
 write_status "checking_snaps" "checking snap packages"
 timeout 120 snap wait system seed.loaded 2>/dev/null || true
 for pkg in "${{SNAP_PACKAGES[@]}}"; do
@@ -635,7 +697,7 @@ for pkg in "${{SNAP_PACKAGES[@]}}"; do
     fi
 done
 
-section "3/5" "Connecting Snap interfaces..."
+section "3/7" "Connecting Snap interfaces..."
 write_status "connecting_interfaces" "connecting snap interfaces"
 for pkg in "${{SNAP_PACKAGES[@]}}"; do
     [ -z "$pkg" ] && continue
@@ -643,7 +705,7 @@ for pkg in "${{SNAP_PACKAGES[@]}}"; do
 done
 systemctl restart snapd 2>/dev/null || true
 
-section "4/5" "Testing application launch..."
+section "4/7" "Testing application launch..."
 write_status "testing_launch" "testing application launch"
 APPS_TO_TEST=()
 for pkg in "${{SNAP_PACKAGES[@]}}"; do
@@ -692,7 +754,7 @@ for app in "${{APPS_TO_TEST[@]}}"; do
     fi
 done
 
-section "5/6" "Checking mount points..."
+section "5/7" "Checking mount points..."
 write_status "checking_mounts" "checking mount points"
 while IFS= read -r line; do
     tag=$(echo "$line" | awk '{{print $1}}')
@@ -713,7 +775,7 @@ while IFS= read -r line; do
     fi
 done < /etc/fstab
 
-section "6/6" "Checking services..."
+section "6/7" "Checking services..."
 write_status "checking_services" "checking services"
 for svc in "${{SERVICES[@]}}"; do
     [ -z "$svc" ] && continue
@@ -1003,10 +1065,60 @@ fi
         
         # Add GUI setup if enabled - runs AFTER package installation completes
         if config.gui:
+            # Create directories that GNOME services need BEFORE GUI starts
+            # These may conflict with mounted host directories, so ensure they exist with correct perms
             runcmd_lines.extend([
+                "  - mkdir -p /home/ubuntu/.config/pulse /home/ubuntu/.cache/ibus /home/ubuntu/.local/share",
+                "  - mkdir -p /home/ubuntu/.config/dconf /home/ubuntu/.cache/tracker3",
+                "  - mkdir -p /home/ubuntu/.config/autostart",
+                "  - chown -R 1000:1000 /home/ubuntu/.config /home/ubuntu/.cache /home/ubuntu/.local",
+                "  - chmod 700 /home/ubuntu/.config /home/ubuntu/.cache",
                 "  - systemctl set-default graphical.target",
                 "  - systemctl enable gdm3 || systemctl enable gdm || true",
             ])
+            
+            # Create autostart entries for GUI apps
+            autostart_apps = {
+                'pycharm-community': ('PyCharm Community', '/snap/bin/pycharm-community', 'pycharm-community'),
+                'firefox': ('Firefox', '/snap/bin/firefox', 'firefox'),
+                'chromium': ('Chromium', '/snap/bin/chromium', 'chromium'),
+                'google-chrome': ('Google Chrome', 'google-chrome-stable', 'google-chrome'),
+            }
+            
+            for snap_pkg in config.snap_packages:
+                if snap_pkg in autostart_apps:
+                    name, exec_cmd, icon = autostart_apps[snap_pkg]
+                    desktop_entry = f'''[Desktop Entry]
+Type=Application
+Name={name}
+Exec={exec_cmd}
+Icon={icon}
+X-GNOME-Autostart-enabled=true
+X-GNOME-Autostart-Delay=5
+Comment=CloneBox autostart
+'''
+                    import base64
+                    desktop_b64 = base64.b64encode(desktop_entry.encode()).decode()
+                    runcmd_lines.append(f"  - echo '{desktop_b64}' | base64 -d > /home/ubuntu/.config/autostart/{snap_pkg}.desktop")
+            
+            # Check if google-chrome is in paths (app_data_paths)
+            wants_chrome = any('/google-chrome' in str(p) for p in (config.paths or {}).values())
+            if wants_chrome:
+                name, exec_cmd, icon = autostart_apps['google-chrome']
+                desktop_entry = f'''[Desktop Entry]
+Type=Application
+Name={name}
+Exec={exec_cmd}
+Icon={icon}
+X-GNOME-Autostart-enabled=true
+X-GNOME-Autostart-Delay=5
+Comment=CloneBox autostart
+'''
+                desktop_b64 = base64.b64encode(desktop_entry.encode()).decode()
+                runcmd_lines.append(f"  - echo '{desktop_b64}' | base64 -d > /home/ubuntu/.config/autostart/google-chrome.desktop")
+            
+            # Fix ownership of autostart directory
+            runcmd_lines.append("  - chown -R 1000:1000 /home/ubuntu/.config/autostart")
         
         # Run user-defined post commands
         if config.post_commands:
@@ -1075,6 +1187,570 @@ echo ""'''
         motd_b64 = base64.b64encode(motd_banner.encode()).decode()
         runcmd_lines.append(f"  - echo '{motd_b64}' | base64 -d > /etc/update-motd.d/99-clonebox")
         runcmd_lines.append("  - chmod +x /etc/update-motd.d/99-clonebox")
+        
+        # Create user-friendly clonebox-repair script
+        repair_script = r'''#!/bin/bash
+# CloneBox Repair - User-friendly repair utility for CloneBox VMs
+# Usage: clonebox-repair [--auto|--status|--logs|--help]
+
+set -uo pipefail
+
+RED='\033[0;31m' GREEN='\033[0;32m' YELLOW='\033[1;33m' CYAN='\033[0;36m' NC='\033[0m' BOLD='\033[1m'
+
+show_help() {
+    echo -e "${BOLD}${CYAN}CloneBox Repair Utility${NC}"
+    echo ""
+    echo "Usage: clonebox-repair [OPTION]"
+    echo ""
+    echo "Options:"
+    echo "  --auto      Run full automatic repair (same as boot diagnostic)"
+    echo "  --status    Show current CloneBox status"
+    echo "  --logs      Show recent repair logs"
+    echo "  --perms     Fix directory permissions only"
+    echo "  --audio     Fix audio (PulseAudio) and restart"
+    echo "  --keyring   Reset GNOME Keyring (fixes password mismatch)"
+    echo "  --snaps     Reconnect all snap interfaces only"
+    echo "  --mounts    Remount all 9p filesystems only"
+    echo "  --all       Run all fixes (perms + audio + snaps + mounts)"
+    echo "  --help      Show this help message"
+    echo ""
+    echo "Without options, shows interactive menu."
+}
+
+show_status() {
+    echo -e "${BOLD}${CYAN}═══════════════════════════════════════════════════════════${NC}"
+    echo -e "${BOLD}${CYAN}              CloneBox VM Status${NC}"
+    echo -e "${BOLD}${CYAN}═══════════════════════════════════════════════════════════${NC}"
+    
+    if [ -f /var/run/clonebox-status ]; then
+        source /var/run/clonebox-status
+        if [ "${failed:-0}" -eq 0 ]; then
+            echo -e "  ${GREEN}✅ All systems operational${NC}"
+        else
+            echo -e "  ${RED}⚠️  $failed checks failed${NC}"
+        fi
+        echo -e "  Passed: ${passed:-0} | Repaired: ${repaired:-0} | Failed: ${failed:-0}"
+    else
+        echo -e "  ${YELLOW}No status information available${NC}"
+    fi
+    echo ""
+    echo -e "  Last boot diagnostic: $(stat -c %y /var/log/clonebox-boot.log 2>/dev/null || echo 'never')"
+    echo -e "${BOLD}${CYAN}═══════════════════════════════════════════════════════════${NC}"
+}
+
+show_logs() {
+    echo -e "${BOLD}Recent repair logs:${NC}"
+    echo ""
+    tail -n 50 /var/log/clonebox-boot.log 2>/dev/null || echo "No logs found"
+}
+
+fix_permissions() {
+    echo -e "${CYAN}Fixing directory permissions...${NC}"
+    VM_USER="${SUDO_USER:-ubuntu}"
+    VM_HOME="/home/$VM_USER"
+    
+    DIRS_TO_CREATE=(
+        "$VM_HOME/.config"
+        "$VM_HOME/.config/pulse"
+        "$VM_HOME/.config/dconf"
+        "$VM_HOME/.config/ibus"
+        "$VM_HOME/.cache"
+        "$VM_HOME/.cache/ibus"
+        "$VM_HOME/.cache/tracker3"
+        "$VM_HOME/.cache/mesa_shader_cache"
+        "$VM_HOME/.local"
+        "$VM_HOME/.local/share"
+        "$VM_HOME/.local/share/applications"
+        "$VM_HOME/.local/share/keyrings"
+    )
+    
+    for dir in "${DIRS_TO_CREATE[@]}"; do
+        if [ ! -d "$dir" ]; then
+            mkdir -p "$dir" 2>/dev/null && echo "  Created $dir"
+        fi
+    done
+    
+    chown -R 1000:1000 "$VM_HOME/.config" "$VM_HOME/.cache" "$VM_HOME/.local" 2>/dev/null
+    chmod 700 "$VM_HOME/.config" "$VM_HOME/.cache" 2>/dev/null
+    
+    for snap_dir in "$VM_HOME/snap"/*; do
+        [ -d "$snap_dir" ] && chown -R 1000:1000 "$snap_dir" 2>/dev/null
+    done
+    
+    echo -e "${GREEN}✅ Permissions fixed${NC}"
+}
+
+fix_audio() {
+    echo -e "${CYAN}Fixing audio (PulseAudio/PipeWire)...${NC}"
+    VM_USER="${SUDO_USER:-ubuntu}"
+    VM_HOME="/home/$VM_USER"
+    
+    # Create pulse config directory with correct permissions
+    mkdir -p "$VM_HOME/.config/pulse" 2>/dev/null
+    chown -R 1000:1000 "$VM_HOME/.config/pulse" 2>/dev/null
+    chmod 700 "$VM_HOME/.config/pulse" 2>/dev/null
+    
+    # Kill and restart audio services as user
+    if [ -n "$SUDO_USER" ]; then
+        sudo -u "$SUDO_USER" pulseaudio --kill 2>/dev/null || true
+        sleep 1
+        sudo -u "$SUDO_USER" pulseaudio --start 2>/dev/null || true
+        echo "  Restarted PulseAudio for $SUDO_USER"
+    else
+        pulseaudio --kill 2>/dev/null || true
+        sleep 1
+        pulseaudio --start 2>/dev/null || true
+        echo "  Restarted PulseAudio"
+    fi
+    
+    # Restart pipewire if available
+    systemctl --user restart pipewire pipewire-pulse 2>/dev/null || true
+    
+    echo -e "${GREEN}✅ Audio fixed${NC}"
+}
+
+fix_keyring() {
+    echo -e "${CYAN}Resetting GNOME Keyring...${NC}"
+    VM_USER="${SUDO_USER:-ubuntu}"
+    VM_HOME="/home/$VM_USER"
+    KEYRING_DIR="$VM_HOME/.local/share/keyrings"
+    
+    echo -e "${YELLOW}⚠️  This will delete existing keyrings and create a new one on next login${NC}"
+    echo -e "${YELLOW}   Stored passwords (WiFi, Chrome, etc.) will be lost!${NC}"
+    
+    if [ -t 0 ]; then
+        read -rp "Continue? [y/N] " confirm
+        [[ "$confirm" != [yY]* ]] && { echo "Cancelled"; return; }
+    fi
+    
+    # Backup old keyrings
+    if [ -d "$KEYRING_DIR" ] && [ "$(ls -A "$KEYRING_DIR" 2>/dev/null)" ]; then
+        backup_dir="$VM_HOME/.local/share/keyrings.backup.$(date +%Y%m%d%H%M%S)"
+        mv "$KEYRING_DIR" "$backup_dir" 2>/dev/null
+        echo "  Backed up to $backup_dir"
+    fi
+    
+    # Create fresh keyring directory
+    mkdir -p "$KEYRING_DIR" 2>/dev/null
+    chown -R 1000:1000 "$KEYRING_DIR" 2>/dev/null
+    chmod 700 "$KEYRING_DIR" 2>/dev/null
+    
+    # Kill gnome-keyring-daemon to force restart on next login
+    pkill -u "$VM_USER" gnome-keyring-daemon 2>/dev/null || true
+    
+    echo -e "${GREEN}✅ Keyring reset - log out and back in to create new keyring${NC}"
+}
+
+fix_ibus() {
+    echo -e "${CYAN}Fixing IBus input method...${NC}"
+    VM_USER="${SUDO_USER:-ubuntu}"
+    VM_HOME="/home/$VM_USER"
+    
+    # Create ibus cache directory
+    mkdir -p "$VM_HOME/.cache/ibus" 2>/dev/null
+    chown -R 1000:1000 "$VM_HOME/.cache/ibus" 2>/dev/null
+    chmod 700 "$VM_HOME/.cache/ibus" 2>/dev/null
+    
+    # Restart ibus
+    if [ -n "$SUDO_USER" ]; then
+        sudo -u "$SUDO_USER" ibus restart 2>/dev/null || true
+    else
+        ibus restart 2>/dev/null || true
+    fi
+    
+    echo -e "${GREEN}✅ IBus fixed${NC}"
+}
+
+fix_snaps() {
+    echo -e "${CYAN}Reconnecting snap interfaces...${NC}"
+    IFACES="desktop desktop-legacy x11 wayland home network audio-playback audio-record camera opengl"
+    
+    for snap in $(snap list --color=never 2>/dev/null | tail -n +2 | awk '{print $1}'); do
+        [[ "$snap" =~ ^(core|snapd|gnome-|gtk-|mesa-) ]] && continue
+        echo -e "  ${YELLOW}$snap${NC}"
+        for iface in $IFACES; do
+            snap connect "$snap:$iface" ":$iface" 2>/dev/null && echo "    ✓ $iface" || true
+        done
+    done
+    
+    systemctl restart snapd 2>/dev/null || true
+    echo -e "${GREEN}✅ Snap interfaces reconnected${NC}"
+}
+
+fix_mounts() {
+    echo -e "${CYAN}Remounting filesystems...${NC}"
+    
+    while IFS= read -r line; do
+        tag=$(echo "$line" | awk '{print $1}')
+        mp=$(echo "$line" | awk '{print $2}')
+        if [[ "$tag" =~ ^mount[0-9]+$ ]] && [[ "$mp" == /* ]]; then
+            if ! mountpoint -q "$mp" 2>/dev/null; then
+                mkdir -p "$mp" 2>/dev/null
+                if mount "$mp" 2>/dev/null; then
+                    echo -e "  ${GREEN}✓${NC} $mp"
+                else
+                    echo -e "  ${RED}✗${NC} $mp (failed)"
+                fi
+            else
+                echo -e "  ${GREEN}✓${NC} $mp (already mounted)"
+            fi
+        fi
+    done < /etc/fstab
+    
+    echo -e "${GREEN}✅ Mounts checked${NC}"
+}
+
+fix_all() {
+    echo -e "${BOLD}${CYAN}Running all fixes...${NC}"
+    echo ""
+    fix_permissions
+    echo ""
+    fix_audio
+    echo ""
+    fix_ibus
+    echo ""
+    fix_snaps
+    echo ""
+    fix_mounts
+    echo ""
+    echo -e "${BOLD}${GREEN}All fixes completed!${NC}"
+}
+
+interactive_menu() {
+    while true; do
+        echo ""
+        echo -e "${BOLD}${CYAN}═══════════════════════════════════════════════════════════${NC}"
+        echo -e "${BOLD}${CYAN}              CloneBox Repair Menu${NC}"
+        echo -e "${BOLD}${CYAN}═══════════════════════════════════════════════════════════${NC}"
+        echo ""
+        echo "  1) Run full automatic repair (boot diagnostic)"
+        echo "  2) Run all quick fixes (perms + audio + snaps + mounts)"
+        echo "  3) Fix permissions only"
+        echo "  4) Fix audio (PulseAudio) only"
+        echo "  5) Reset GNOME Keyring (⚠️  deletes saved passwords)"
+        echo "  6) Reconnect snap interfaces only"
+        echo "  7) Remount filesystems only"
+        echo "  8) Show status"
+        echo "  9) Show logs"
+        echo "  q) Quit"
+        echo ""
+        read -rp "Select option: " choice
+        
+        case "$choice" in
+            1) sudo /usr/local/bin/clonebox-boot-diagnostic ;;
+            2) fix_all ;;
+            3) fix_permissions ;;
+            4) fix_audio ;;
+            5) fix_keyring ;;
+            6) fix_snaps ;;
+            7) fix_mounts ;;
+            8) show_status ;;
+            9) show_logs ;;
+            q|Q) exit 0 ;;
+            *) echo -e "${RED}Invalid option${NC}" ;;
+        esac
+    done
+}
+
+# Main
+case "${1:-}" in
+    --auto)    exec sudo /usr/local/bin/clonebox-boot-diagnostic ;;
+    --all)     fix_all ;;
+    --status)  show_status ;;
+    --logs)    show_logs ;;
+    --perms)   fix_permissions ;;
+    --audio)   fix_audio ;;
+    --keyring) fix_keyring ;;
+    --snaps)   fix_snaps ;;
+    --mounts)  fix_mounts ;;
+    --help|-h) show_help ;;
+    "") interactive_menu ;;
+    *) show_help; exit 1 ;;
+esac
+'''
+        repair_b64 = base64.b64encode(repair_script.encode()).decode()
+        runcmd_lines.append(f"  - echo '{repair_b64}' | base64 -d > /usr/local/bin/clonebox-repair")
+        runcmd_lines.append("  - chmod +x /usr/local/bin/clonebox-repair")
+        runcmd_lines.append("  - ln -sf /usr/local/bin/clonebox-repair /usr/local/bin/cb-repair")
+        
+        # === AUTOSTART: Systemd user services + Desktop autostart files ===
+        # Create directories for user systemd services and autostart
+        runcmd_lines.append(f"  - mkdir -p /home/{config.username}/.config/systemd/user")
+        runcmd_lines.append(f"  - mkdir -p /home/{config.username}/.config/autostart")
+        
+        # Enable lingering for the user (allows user services to run without login)
+        runcmd_lines.append(f"  - loginctl enable-linger {config.username}")
+        
+        # Generate autostart configurations based on installed apps (if enabled)
+        autostart_apps = []
+        
+        if getattr(config, 'autostart_apps', True):
+            # Detect apps from snap_packages
+            for snap_pkg in (config.snap_packages or []):
+                if snap_pkg == "pycharm-community":
+                    autostart_apps.append({
+                        "name": "pycharm-community",
+                        "display_name": "PyCharm Community",
+                        "exec": "/snap/bin/pycharm-community %U",
+                        "type": "snap",
+                        "after": "graphical-session.target",
+                    })
+                elif snap_pkg == "chromium":
+                    autostart_apps.append({
+                        "name": "chromium",
+                        "display_name": "Chromium Browser",
+                        "exec": "/snap/bin/chromium %U",
+                        "type": "snap",
+                        "after": "graphical-session.target",
+                    })
+                elif snap_pkg == "firefox":
+                    autostart_apps.append({
+                        "name": "firefox",
+                        "display_name": "Firefox",
+                        "exec": "/snap/bin/firefox %U",
+                        "type": "snap",
+                        "after": "graphical-session.target",
+                    })
+                elif snap_pkg == "code":
+                    autostart_apps.append({
+                        "name": "code",
+                        "display_name": "Visual Studio Code",
+                        "exec": "/snap/bin/code --new-window",
+                        "type": "snap",
+                        "after": "graphical-session.target",
+                    })
+            
+            # Detect apps from packages (APT)
+            for apt_pkg in (config.packages or []):
+                if apt_pkg == "firefox":
+                    # Only add if not already added from snap
+                    if not any(a["name"] == "firefox" for a in autostart_apps):
+                        autostart_apps.append({
+                            "name": "firefox",
+                            "display_name": "Firefox",
+                            "exec": "/usr/bin/firefox %U",
+                            "type": "apt",
+                            "after": "graphical-session.target",
+                        })
+            
+            # Check for google-chrome from app_data_paths
+            for host_path, guest_path in (config.paths or {}).items():
+                if guest_path == "/home/ubuntu/.config/google-chrome":
+                    autostart_apps.append({
+                        "name": "google-chrome",
+                        "display_name": "Google Chrome",
+                        "exec": "/usr/bin/google-chrome-stable %U",
+                        "type": "deb",
+                        "after": "graphical-session.target",
+                    })
+                    break
+        
+        # Generate systemd user services for each app
+        for app in autostart_apps:
+            service_content = f'''[Unit]
+Description={app["display_name"]} Autostart
+After={app["after"]}
+
+[Service]
+Type=simple
+Environment=DISPLAY=:0
+Environment=XDG_RUNTIME_DIR=/run/user/1000
+ExecStart={app["exec"]}
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=default.target
+'''
+            service_b64 = base64.b64encode(service_content.encode()).decode()
+            service_path = f"/home/{config.username}/.config/systemd/user/{app['name']}.service"
+            runcmd_lines.append(f"  - echo '{service_b64}' | base64 -d > {service_path}")
+        
+        # Generate desktop autostart files for GUI apps (alternative to systemd user services)
+        for app in autostart_apps:
+            desktop_content = f'''[Desktop Entry]
+Type=Application
+Name={app["display_name"]}
+Exec={app["exec"]}
+Hidden=false
+NoDisplay=false
+X-GNOME-Autostart-enabled=true
+X-GNOME-Autostart-Delay=5
+'''
+            desktop_b64 = base64.b64encode(desktop_content.encode()).decode()
+            desktop_path = f"/home/{config.username}/.config/autostart/{app['name']}.desktop"
+            runcmd_lines.append(f"  - echo '{desktop_b64}' | base64 -d > {desktop_path}")
+        
+        # Fix ownership of all autostart files
+        runcmd_lines.append(f"  - chown -R 1000:1000 /home/{config.username}/.config/systemd")
+        runcmd_lines.append(f"  - chown -R 1000:1000 /home/{config.username}/.config/autostart")
+        
+        # Enable systemd user services (must run as user)
+        if autostart_apps:
+            services_to_enable = " ".join(f"{app['name']}.service" for app in autostart_apps)
+            runcmd_lines.append(f"  - sudo -u {config.username} XDG_RUNTIME_DIR=/run/user/1000 systemctl --user daemon-reload || true")
+            # Note: We don't enable services by default as desktop autostart is more reliable for GUI apps
+            # User can enable them manually with: systemctl --user enable <service>
+        
+        # === WEB SERVICES: System-wide services for uvicorn, nginx, etc. ===
+        web_services = getattr(config, 'web_services', []) or []
+        for svc in web_services:
+            svc_name = svc.get("name", "clonebox-web")
+            svc_desc = svc.get("description", f"CloneBox {svc_name}")
+            svc_workdir = svc.get("workdir", "/mnt/project0")
+            svc_exec = svc.get("exec", "uvicorn app:app --host 0.0.0.0 --port 8000")
+            svc_user = svc.get("user", config.username)
+            svc_after = svc.get("after", "network.target")
+            svc_env = svc.get("environment", [])
+            
+            env_lines = "\n".join(f"Environment={e}" for e in svc_env) if svc_env else ""
+            
+            web_service_content = f'''[Unit]
+Description={svc_desc}
+After={svc_after}
+
+[Service]
+Type=simple
+User={svc_user}
+WorkingDirectory={svc_workdir}
+{env_lines}
+ExecStart={svc_exec}
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target
+'''
+            web_svc_b64 = base64.b64encode(web_service_content.encode()).decode()
+            runcmd_lines.append(f"  - echo '{web_svc_b64}' | base64 -d > /etc/systemd/system/{svc_name}.service")
+            runcmd_lines.append("  - systemctl daemon-reload")
+            runcmd_lines.append(f"  - systemctl enable {svc_name}.service")
+            runcmd_lines.append(f"  - systemctl start {svc_name}.service || true")
+        
+        # Create Python monitor service for continuous diagnostics
+        monitor_script = f'''#!/usr/bin/env python3
+"""CloneBox Monitor - Continuous diagnostics and app restart service."""
+import subprocess
+import time
+import os
+import sys
+import json
+from pathlib import Path
+
+REQUIRED_APPS = {json.dumps([app["name"] for app in autostart_apps])}
+CHECK_INTERVAL = 60  # seconds
+LOG_FILE = "/var/log/clonebox-monitor.log"
+STATUS_FILE = "/var/run/clonebox-monitor-status.json"
+
+def log(msg):
+    timestamp = time.strftime("%Y-%m-%d %H:%M:%S")
+    line = f"[{{timestamp}}] {{msg}}"
+    print(line)
+    try:
+        with open(LOG_FILE, "a") as f:
+            f.write(line + "\\n")
+    except:
+        pass
+
+def get_running_processes():
+    try:
+        result = subprocess.run(["ps", "aux"], capture_output=True, text=True, timeout=10)
+        return result.stdout
+    except:
+        return ""
+
+def is_app_running(app_name, ps_output):
+    patterns = {{
+        "pycharm-community": ["pycharm", "idea"],
+        "chromium": ["chromium"],
+        "firefox": ["firefox", "firefox-esr"],
+        "google-chrome": ["chrome", "google-chrome"],
+        "code": ["code", "vscode"],
+    }}
+    for pattern in patterns.get(app_name, [app_name]):
+        if pattern.lower() in ps_output.lower():
+            return True
+    return False
+
+def restart_app(app_name):
+    log(f"Restarting {{app_name}}...")
+    try:
+        subprocess.run(
+            ["sudo", "-u", "{config.username}", "systemctl", "--user", "restart", f"{{app_name}}.service"],
+            timeout=30, capture_output=True
+        )
+        return True
+    except Exception as e:
+        log(f"Failed to restart {{app_name}}: {{e}}")
+        return False
+
+def check_mounts():
+    try:
+        with open("/etc/fstab", "r") as f:
+            fstab = f.read()
+        for line in fstab.split("\\n"):
+            parts = line.split()
+            if len(parts) >= 2 and parts[0].startswith("mount"):
+                mp = parts[1]
+                result = subprocess.run(["mountpoint", "-q", mp], capture_output=True)
+                if result.returncode != 0:
+                    log(f"Mount {{mp}} not active, attempting remount...")
+                    subprocess.run(["mount", mp], capture_output=True)
+    except Exception as e:
+        log(f"Mount check failed: {{e}}")
+
+def write_status(status):
+    try:
+        with open(STATUS_FILE, "w") as f:
+            json.dump(status, f)
+    except:
+        pass
+
+def main():
+    log("CloneBox Monitor started")
+    
+    while True:
+        status = {{"timestamp": time.strftime("%Y-%m-%dT%H:%M:%S"), "apps": {{}}, "mounts_ok": True}}
+        
+        # Check mounts
+        check_mounts()
+        
+        # Check apps (only if GUI session is active)
+        if os.path.exists("/run/user/1000"):
+            ps_output = get_running_processes()
+            for app in REQUIRED_APPS:
+                running = is_app_running(app, ps_output)
+                status["apps"][app] = "running" if running else "stopped"
+                # Don't auto-restart apps - user may have closed them intentionally
+        
+        write_status(status)
+        time.sleep(CHECK_INTERVAL)
+
+if __name__ == "__main__":
+    main()
+'''
+        monitor_b64 = base64.b64encode(monitor_script.encode()).decode()
+        runcmd_lines.append(f"  - echo '{monitor_b64}' | base64 -d > /usr/local/bin/clonebox-monitor")
+        runcmd_lines.append("  - chmod +x /usr/local/bin/clonebox-monitor")
+        
+        # Create systemd service for the Python monitor
+        monitor_service = '''[Unit]
+Description=CloneBox Monitor Service
+After=network.target graphical.target
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/python3 /usr/local/bin/clonebox-monitor
+Restart=always
+RestartSec=30
+
+[Install]
+WantedBy=multi-user.target'''
+        monitor_svc_b64 = base64.b64encode(monitor_service.encode()).decode()
+        runcmd_lines.append(f"  - echo '{monitor_svc_b64}' | base64 -d > /etc/systemd/system/clonebox-monitor.service")
+        runcmd_lines.append("  - systemctl daemon-reload")
+        runcmd_lines.append("  - systemctl enable clonebox-monitor.service")
+        runcmd_lines.append("  - systemctl start clonebox-monitor.service || true")
         
         # Add reboot command at the end if GUI is enabled
         if config.gui:

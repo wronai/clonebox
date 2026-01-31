@@ -15,7 +15,7 @@ class TestVMConfig:
     def test_default_values(self):
         config = VMConfig()
         assert config.name == "clonebox-vm"
-        assert config.ram_mb == 4096
+        assert config.ram_mb == 8192
         assert config.vcpus == 4
         assert config.disk_size_gb == 20
         assert config.gui is True
@@ -54,11 +54,13 @@ class TestSelectiveVMClonerInit:
     """Test SelectiveVMCloner initialization."""
 
     def test_system_images_dir(self):
-        assert SelectiveVMCloner.SYSTEM_IMAGES_DIR == Path("/var/lib/libvirt/images")
+        cloner = SelectiveVMCloner()
+        assert cloner.SYSTEM_IMAGES_DIR == Path("/var/lib/libvirt/images")
 
     def test_user_images_dir(self):
+        cloner = SelectiveVMCloner()
         expected = Path.home() / ".local/share/libvirt/images"
-        assert SelectiveVMCloner.USER_IMAGES_DIR == expected
+        assert cloner.USER_IMAGES_DIR == expected
 
     @pytest.mark.parametrize("user_session,expected_uri", [
         (False, "qemu:///system"),

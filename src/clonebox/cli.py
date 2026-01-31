@@ -63,7 +63,7 @@ def print_banner():
     console.print(f"  Version {__version__}\n", style="dim")
 
 
-def _resolve_vm_name_and_config_file(name: Optional[str]) -> tuple[str, Optional[Path]]:
+def _resolve_vm_name_and_config_file(name: Optional[str]) -> Tuple[str, Optional[Path]]:
     config_file: Optional[Path] = None
 
     if name and (name.startswith(".") or name.startswith("/") or name.startswith("~")):
