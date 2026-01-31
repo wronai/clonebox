@@ -3,14 +3,15 @@
 ## 🚀 High Priority
 
 ### Core Features
-- [ ] Add `clonebox exec` command for executing commands in VM via QEMU Guest Agent
+- [x] Add `clonebox exec` command for executing commands in VM via QEMU Guest Agent ✅ v1.1.2
 - [ ] Implement VM snapshot functionality (save/restore state)
 - [ ] Add support for multiple VMs in single project (docker-compose style)
-- [ ] Create web-based dashboard for VM management
+- [x] Create web-based dashboard for VM management ✅ v1.1.0
 - [ ] Add automatic port forwarding configuration
+- [x] P2P secure transfer with AES-256 encryption ✅ v1.1.2
 
 ### Monitoring & Diagnostics
-- [ ] Add real-time resource usage monitoring (CPU, RAM, disk)
+- [x] Add real-time resource usage monitoring (CPU, RAM, disk) ✅ v1.1.2 (`clonebox monitor`)
 - [ ] Implement alert system for failed services/apps
 - [ ] Create health check API endpoint
 - [ ] Add performance benchmarks for VM operations
@@ -20,13 +21,13 @@
 
 ### Usability
 - [ ] Add progress bars for long operations (clone, export, import)
-- [ ] Implement configuration profiles (dev, test, production)
-- [ ] Add auto-completion for bash/zsh
+- [x] Implement configuration profiles (dev, test, production) ✅ v1.1.0 (`ml-dev`, `web-stack`)
+- [x] Add auto-completion for bash/zsh ✅ v1.1.2 (see `scripts/clonebox-completion.*`)
 - [ ] Create GUI configuration wizard
-- [ ] Add dark mode for terminal output
+- [x] Add dark mode for terminal output ✅ v1.1.0 (rich console)
 
 ### Integration
-- [ ] Docker/Podman integration (run containers inside VM)
+- [x] Docker/Podman integration (run containers inside VM) ✅ v1.1.0 (container runtime)
 - [ ] Kubernetes cluster mode (multiple VMs as nodes)
 - [ ] CI/CD pipeline templates
 - [ ] VS Code extension for CloneBox management
@@ -118,20 +119,28 @@
 
 ## 📊 Progress Tracking
 
-### Current Version: 0.1.23
+### Current Version: 1.1.2
 
-### Next Release (0.2.0) Goals:
-- [ ] `clonebox exec` command
-- [ ] VM snapshots
-- [ ] Web dashboard MVP
+### Completed in v1.1.x:
+- [x] `clonebox exec` command ✅
+- [x] Web dashboard MVP (FastAPI + HTMX + Tailwind) ✅
+- [x] Container runtime (Podman/Docker) ✅
+- [x] Configuration profiles ✅
+- [x] P2P secure transfer (AES-256) ✅
+- [x] Real-time resource monitoring ✅
+- [x] Bash/Zsh auto-completion ✅
+
+### Next Release (1.2.0) Goals:
+- [ ] VM snapshots (save/restore state)
+- [ ] Progress bars for long operations
+- [ ] Health check API endpoint
 - [ ] Improved error handling
-- [ ] Windows WSL2 support
+- [ ] Alert system for failed services
 
 ### Roadmap
-- **Q1 2024**: Core improvements and Windows support
-- **Q2 2024**: Web dashboard and advanced monitoring
-- **Q3 2024**: Cloud provider integrations
-- **Q4 2024**: Multi-VM orchestration
+- **v1.2.0**: VM snapshots, progress bars, health API
+- **v1.3.0**: Multi-VM orchestration, cluster mode
+- **v2.0.0**: Cloud provider support (AWS, GCP, Azure), Windows WSL2
 
 ---
 

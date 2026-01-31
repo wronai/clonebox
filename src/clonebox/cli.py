@@ -30,6 +30,7 @@ from clonebox.models import ContainerConfig
 from clonebox.profiles import merge_with_profile
 from clonebox.exporter import SecureExporter, VMExporter
 from clonebox.importer import SecureImporter, VMImporter
+from clonebox.monitor import ResourceMonitor, format_bytes
 from clonebox.p2p import P2PManager
 
 # Custom questionary style
@@ -2638,6 +2639,118 @@ def cmd_detect(args):
         console.print(table)
 
 
+def cmd_monitor(args) -> None:
+    """Real-time resource monitoring for VMs and containers."""
+    conn_uri = "qemu:///session" if getattr(args, "user", False) else "qemu:///system"
+    refresh = getattr(args, "refresh", 2.0)
+    once = getattr(args, "once", False)
+
+    monitor = ResourceMonitor(conn_uri)
+
+    try:
+        while True:
+            # Clear screen for live update
+            if not once:
+                console.clear()
+
+            console.print("[bold cyan]📊 CloneBox Resource Monitor[/]")
+            console.print()
+
+            # VM Stats
+            vm_stats = monitor.get_all_vm_stats()
+            if vm_stats:
+                table = Table(title="🖥️ Virtual Machines", border_style="cyan")
+                table.add_column("Name", style="bold")
+                table.add_column("State")
+                table.add_column("CPU %")
+                table.add_column("Memory")
+                table.add_column("Disk")
+                table.add_column("Network I/O")
+
+                for vm in vm_stats:
+                    state_color = "green" if vm.state == "running" else "yellow"
+                    cpu_color = "red" if vm.cpu_percent > 80 else "green"
+                    mem_pct = (vm.memory_used_mb / vm.memory_total_mb * 100) if vm.memory_total_mb > 0 else 0
+                    mem_color = "red" if mem_pct > 80 else "green"
+
+                    table.add_row(
+                        vm.name,
+                        f"[{state_color}]{vm.state}[/]",
+                        f"[{cpu_color}]{vm.cpu_percent:.1f}%[/]",
+                        f"[{mem_color}]{vm.memory_used_mb}/{vm.memory_total_mb} MB[/]",
+                        f"{vm.disk_used_gb:.1f}/{vm.disk_total_gb:.1f} GB",
+                        f"↓{format_bytes(vm.network_rx_bytes)} ↑{format_bytes(vm.network_tx_bytes)}",
+                    )
+                console.print(table)
+            else:
+                console.print("[dim]No VMs found.[/]")
+
+            console.print()
+
+            # Container Stats
+            container_stats = monitor.get_container_stats()
+            if container_stats:
+                table = Table(title="🐳 Containers", border_style="blue")
+                table.add_column("Name", style="bold")
+                table.add_column("State")
+                table.add_column("CPU %")
+                table.add_column("Memory")
+                table.add_column("Network I/O")
+                table.add_column("PIDs")
+
+                for c in container_stats:
+                    cpu_color = "red" if c.cpu_percent > 80 else "green"
+                    mem_pct = (c.memory_used_mb / c.memory_limit_mb * 100) if c.memory_limit_mb > 0 else 0
+                    mem_color = "red" if mem_pct > 80 else "green"
+
+                    table.add_row(
+                        c.name,
+                        f"[green]{c.state}[/]",
+                        f"[{cpu_color}]{c.cpu_percent:.1f}%[/]",
+                        f"[{mem_color}]{c.memory_used_mb}/{c.memory_limit_mb} MB[/]",
+                        f"↓{format_bytes(c.network_rx_bytes)} ↑{format_bytes(c.network_tx_bytes)}",
+                        str(c.pids),
+                    )
+                console.print(table)
+            else:
+                console.print("[dim]No containers running.[/]")
+
+            if once:
+                break
+
+            console.print(f"\n[dim]Refreshing every {refresh}s. Press Ctrl+C to exit.[/]")
+            time.sleep(refresh)
+
+    except KeyboardInterrupt:
+        console.print("\n[yellow]Monitoring stopped.[/]")
+    finally:
+        monitor.close()
+
+
+def cmd_exec(args) -> None:
+    """Execute command in VM via QEMU Guest Agent."""
+    vm_name, config_file = _resolve_vm_name_and_config_file(args.name)
+    conn_uri = "qemu:///session" if getattr(args, "user", False) else "qemu:///system"
+    command = args.command
+    timeout = getattr(args, "timeout", 30)
+
+    if not _qga_ping(vm_name, conn_uri):
+        console.print(f"[red]❌ Cannot connect to VM '{vm_name}' via QEMU Guest Agent[/]")
+        console.print("[dim]Make sure the VM is running and qemu-guest-agent is installed.[/]")
+        return
+
+    console.print(f"[cyan]▶ Executing in {vm_name}:[/] {command}")
+
+    result = _qga_exec(vm_name, conn_uri, command, timeout=timeout)
+
+    if result is None:
+        console.print("[red]❌ Command execution failed or timed out[/]")
+    elif result == "":
+        console.print("[dim](no output)[/]")
+    else:
+        console.print(result)
+
+
 def cmd_keygen(args) -> None:
     """Generate encryption key for secure P2P transfers."""
     key_path = SecureExporter.generate_key()
@@ -3197,6 +3310,35 @@ def main():
         help="Run smoke tests (installed ≠ works): headless launch checks for key apps",
     )
     test_parser.set_defaults(func=cmd_test)
+
+    # Monitor command - real-time resource monitoring
+    monitor_parser = subparsers.add_parser("monitor", help="Real-time resource monitoring")
+    monitor_parser.add_argument(
+        "-u", "--user", action="store_true", help="Use user session (qemu:///session)"
+    )
+    monitor_parser.add_argument(
+        "--refresh", "-r", type=float, default=2.0, help="Refresh interval in seconds (default: 2)"
+    )
+    monitor_parser.add_argument(
+        "--once", action="store_true", help="Show stats once and exit"
+    )
+    monitor_parser.set_defaults(func=cmd_monitor)
+
+    # Exec command - execute command in VM
+    exec_parser = subparsers.add_parser("exec", help="Execute command in VM via QEMU Guest Agent")
+    exec_parser.add_argument(
+        "name", nargs="?", default=None, help="VM name or '.' to use .clonebox.yaml"
+    )
+    exec_parser.add_argument(
+        "command", help="Command to execute in VM"
+    )
+    exec_parser.add_argument(
+        "-u", "--user", action="store_true", help="Use user session (qemu:///session)"
+    )
+    exec_parser.add_argument(
+        "--timeout", "-t", type=int, default=30, help="Command timeout in seconds (default: 30)"
+    )
+    exec_parser.set_defaults(func=cmd_exec)
 
     # === P2P Secure Transfer Commands ===
 

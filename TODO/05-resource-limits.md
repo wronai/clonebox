@@ -604,3 +604,222 @@ class TestResourceLimits:
         # Verify it doesn't exceed quota
         pass
 ```
+
+
+
+
+## Ocena funkcjonalności: **ESSENTIAL INFRASTRUCTURE** ⭐⭐⭐⭐⭐
+
+**Resource Limits & Quotas to fundament multi-VM environments.** Bez tego CloneBox nie nadaje się do użytku w **teamach >2 osób** lub na shared hardware. To **missing production gate**.
+
+## Co jest genialne ✅
+
+```
+1. **CFS quota support** - precyzyjne CPU limiting (200% = 2 cores)
+2. **CPU pinning** - dedykowane cores dla DB workloads  
+3. **Soft/hard memory limits** - memory pressure handling
+4. **I/O throttling** - zapobiega disk saturation
+5. **Network bandwidth** - fair sharing sieci
+6. **Parser rozmiarów** - 8G, 100Mbps, 500M = user-friendly
+7. **Live monitoring** - real-time usage + violations
+```
+
+## CO DODAĆ - **PRODUCTION MUST-HAVES** 🚨
+
+### 1. **Host Capacity Planning** (Day 1)
+```yaml
+# cluster.yaml
+cluster:
+  host_capacity:
+    cpu_cores: 32
+    memory_gb: 128
+    disk_gb: 2000
+  
+  current_usage:
+    vms_running: 12
+    cpu_used: 24  # 75%
+    memory_used: 96 # 75%
+  
+  vm_admission:
+    dev-vm: ✅ OK (fits)
+    db-prod: ❌ NO_CAPACITY (would exceed 90%)
+```
+
+### 2. **Resource Pools** (Day 2)
+```yaml
+resource_pools:
+  dev-pool:
+    cpu_shares: 512     # Low priority
+    memory_limit: 4G/vm
+    max_vms: 10
+  
+  critical-pool:
+    cpu_shares: 2048    # High priority
+    memory_limit: 16G/vm
+    max_vms: 3
+```
+
+### 3. **Burst Credits** (Day 3)
+```yaml
+cpu:
+  quota: 200000          # Baseline 200%
+  burst:
+    max: 400000          # Can burst to 400%
+    duration: 300s       # Max 5min burst
+    refill_rate: 50%/min # Refills 50% per minute
+```
+
+## KRYTYCZNE Enterprise Features 🔧
+
+### 1. **Admission Controller**
+```python
+class AdmissionController:
+    def admit_vm(self, vm_config: VMConfig, cluster_state: ClusterState) -> AdmissionResult:
+        violations = []
+        
+        if cluster_state.cpu_headroom() < vm_config.cpu_quota:
+            violations.append("insufficient_cpu_headroom")
+        
+        if cluster_state.storage_headroom_gb() < vm_config.disk_size_gb * 1.2:
+            violations.append("insufficient_storage")
+        
+        return AdmissionResult(
+            approved=len(violations) == 0,
+            violations=violations,
+            projected_usage=cluster_state.projected_with(vm_config)
+        )
+```
+
+### 2. **Fair Share Scheduler**
+```yaml
+scheduling:
+  fair_share:
+    cpu: true
+    memory: true
+    
+  # VM "gold-vm" gets 3x more CPU than "bronze-vm"
+  priorities:
+    gold: 3
+    silver: 2
+    bronze: 1
+```
+
+### 3. **NUMA Awareness**
+```yaml
+cpu:
+  numa_node: 0          # Pin to NUMA node 0
+  topology:
+    sockets: 1
+    cores: 4
+    threads: 2
+```
+
+## MUST-HAVE Monitoring & Alerts 🔔
+
+### 1. **Resource Alarms**
+```bash
+clonebox resources alert my-vm --cpu-threshold 90%
+# Triggers snapshot + notification
+```
+
+### 2. **Usage Reports**
+```bash
+clonebox resources report --team dev-team --period 30d
+# CPU: 78% avg, Memory: 65%, Top consumer: jenkins-vm
+```
+
+## CLI Superpowers 💎
+
+```bash
+# Preview resource impact
+clonebox resources preview dev-vm
+# +2 cores CPU, +8G RAM, +50Mbps network
+
+# Live resize (hotplug)
+clonebox resources resize my-vm --cpu +2 --memory +4G
+
+# Auto-scale based on load
+clonebox resources autoscale my-vm --cpu-target 70%
+
+# Throttle runaway VM
+clonebox resources emergency-throttle runaway-vm
+```
+
+## Integration z innymi systemami 🔗
+
+### 1. **Health Check Violations → Auto-throttle**
+```python
+if health.unhealthy_count > 3:
+    resources.enforce_hard_limits(vm_name)
+    snapshot.create("health-failure")
+```
+
+### 2. **Snapshot-aware resizing**
+```bash
+clonebox snapshot create my-vm pre-resize
+clonebox resources resize my-vm --memory 16G
+# Revert to snapshot if resize fails
+```
+
+## Security Hardening 🔐
+
+```yaml
+resources:
+  security:
+    no_iommu: false      # Enable VT-d passthrough protection
+    no_smf: false        # Enable Side-channel mitigation
+    spec_ctrl: true      # CPU vulnerability mitigations
+```
+
+## Storage Tiering 🎯
+
+```yaml
+disk:
+  tier: performance     # SSD tier
+  cache: writeback      # Cache mode
+  aio: native           # Async I/O
+  detect_zeroes: on     # Zero detection
+```
+
+## Ocena FINALNA: **9.5/10** ⚡
+
+**Feature kompletnie zmienia game.** Zamiast "VM hogging host resources" masz:
+```
+✅ Predictable multi-VM hosting
+✅ Fair resource sharing  
+✅ Capacity planning
+✅ Emergency throttling
+✅ Live resizing
+✅ NUMA optimization
+```
+
+## 🚀 IMPLEMENTATION PRIORITIES:
+
+```
+Day 1: CPU quotas + parser (80% value)
+Day 2: Memory limits + monitoring
+Day 3: Disk/Network I/O + CLI
+Day 4: Admission controller + pools
+Day 5: Alerts + resize + docs
+```
+
+## Production Checklist ✅
+
+```
+🔹 [ ] CPU CFS quotas (critical)
+🔹 [ ] Memory hard limits  
+🔹 [ ] Disk I/O throttling
+🔹 [ ] Network bandwidth
+🔹 [ ] Live monitoring
+🔹 [ ] Capacity planning
+🔹 [ ] Emergency throttle
+🔹 [ ] Resize hotplug
+```
+
+**Verdict: WITHOUT THIS, NO TEAM >2 PERSONS.**
+
+**Team lead: BUILD THIS PARALLEL TO SNAPSHOTS** ⚡
+
+**Pro tip:** Zacznij od **CPU quotas + monitoring** - to solves 80% pain w 20% effort! 🚀
+
+

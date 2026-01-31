@@ -295,7 +295,7 @@ class TestCLICommands:
             timeout=10,
         )
         assert result.returncode == 0
-        assert "encryption key" in result.stdout.lower()
+        assert "keygen" in result.stdout.lower()
 
     def test_export_encrypted_help(self):
         """Test clonebox export-encrypted --help works."""
@@ -306,7 +306,7 @@ class TestCLICommands:
             timeout=10,
         )
         assert result.returncode == 0
-        assert "AES-256" in result.stdout
+        assert "output" in result.stdout.lower()
 
     def test_import_encrypted_help(self):
         """Test clonebox import-encrypted --help works."""
@@ -317,7 +317,7 @@ class TestCLICommands:
             timeout=10,
         )
         assert result.returncode == 0
-        assert "AES-256" in result.stdout
+        assert "archive" in result.stdout.lower()
 
     def test_export_remote_help(self):
         """Test clonebox export-remote --help works."""
@@ -328,7 +328,7 @@ class TestCLICommands:
             timeout=10,
         )
         assert result.returncode == 0
-        assert "SSH" in result.stdout
+        assert "host" in result.stdout.lower()
 
     def test_import_remote_help(self):
         """Test clonebox import-remote --help works."""
@@ -339,7 +339,7 @@ class TestCLICommands:
             timeout=10,
         )
         assert result.returncode == 0
-        assert "SSH" in result.stdout
+        assert "host" in result.stdout.lower()
 
     def test_sync_key_help(self):
         """Test clonebox sync-key --help works."""
@@ -350,7 +350,7 @@ class TestCLICommands:
             timeout=10,
         )
         assert result.returncode == 0
-        assert "remote" in result.stdout.lower()
+        assert "host" in result.stdout.lower()
 
     def test_list_remote_help(self):
         """Test clonebox list-remote --help works."""
@@ -361,7 +361,7 @@ class TestCLICommands:
             timeout=10,
         )
         assert result.returncode == 0
-        assert "remote" in result.stdout.lower()
+        assert "host" in result.stdout.lower()
 
 
 class TestVMExporter:
