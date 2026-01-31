@@ -6,7 +6,7 @@ vm:
   vcpus: 8
   disk_size_gb: 30
   gui: true
-  base_image: /home/tom/ubuntu-22.04-cloud.qcow2
+  base_image: /home/user/ubuntu-22.04-cloud.qcow2
   network_mode: auto
   username: ubuntu
   password: ${VM_PASSWORD}
@@ -41,23 +41,23 @@ post_commands:
 # Enable lingering for ubuntu user to allow user services
 - loginctl enable-leave ubuntu || true
 paths:
-  /home/tom/github/wronai/clonebox: /mnt/project0
-  /home/tom/github: /mnt/project1
-  /home/tom/github/invutil: /mnt/project2
-  /home/tom/gitlab: /mnt/project3
-  /home/tom: /mnt/workdir4
-  /home/tom/Downloads: /home/ubuntu/Downloads
-  /home/tom/Documents: /home/ubuntu/Documents
+  /home/user/github/wronai/clonebox: /mnt/project0
+  /home/user/github: /mnt/project1
+  /home/user/github/invutil: /mnt/project2
+  /home/user/gitlab: /mnt/project3
+  /home/user: /mnt/workdir4
+  /home/user/Downloads: /home/ubuntu/Downloads
+  /home/user/Documents: /home/ubuntu/Documents
 app_data_paths:
-  /home/tom/.config/google-chrome: /home/ubuntu/.config/google-chrome
-  /home/tom/.config/chromium: /home/ubuntu/.config/chromium
-  /home/tom/.docker: /home/ubuntu/.docker
-  /home/tom/snap/firefox/common/.mozilla/firefox: /home/ubuntu/snap/firefox/common/.mozilla/firefox
-  /home/tom/snap/firefox/common/.cache/mozilla/firefox: /home/ubuntu/snap/firefox/common/.cache/mozilla/firefox
-  /home/tom/.config/JetBrains: /home/ubuntu/snap/pycharm-community/common/.config/JetBrains
-  /home/tom/.local/share/JetBrains: /home/ubuntu/snap/pycharm-community/common/.local/share/JetBrains
-  /home/tom/.cache/JetBrains: /home/ubuntu/snap/pycharm-community/common/.cache/JetBrains
-  /home/tom/.pyenv: /home/ubuntu/.pyenv
+  /home/user/.config/google-chrome: /home/ubuntu/.config/google-chrome
+  /home/user/.config/chromium: /home/ubuntu/.config/chromium
+  /home/user/.docker: /home/ubuntu/.docker
+  /home/user/snap/firefox/common/.mozilla/firefox: /home/ubuntu/snap/firefox/common/.mozilla/firefox
+  /home/user/snap/firefox/common/.cache/mozilla/firefox: /home/ubuntu/snap/firefox/common/.cache/mozilla/firefox
+  /home/user/.config/JetBrains: /home/ubuntu/snap/pycharm-community/common/.config/JetBrains
+  /home/user/.local/share/JetBrains: /home/ubuntu/snap/pycharm-community/common/.local/share/JetBrains
+  /home/user/.cache/JetBrains: /home/ubuntu/snap/pycharm-community/common/.cache/JetBrains
+  /home/user/.pyenv: /home/ubuntu/.pyenv
 web_services:
   - name: uvicorn
     description: "CloneBox uvicorn web server"
@@ -90,10 +90,10 @@ web_services:
 detected:
   running_apps:
   - name: pycharm
-    cwd: /home/tom
+    cwd: /home/user
     memory_mb: 5518
   - name: firefox
-    cwd: /home/tom
+    cwd: /home/user
     memory_mb: 1118
   - name: uvicorn
     cwd: ''
@@ -111,57 +111,57 @@ detected:
     cwd: ''
     memory_mb: 32
   - name: goa-daemon
-    cwd: /home/tom
+    cwd: /home/user
     memory_mb: 20
   - name: goa-identity-service
-    cwd: /home/tom
+    cwd: /home/user
     memory_mb: 8
   - name: gvfs-goa-volume-monitor
-    cwd: /home/tom
+    cwd: /home/user
     memory_mb: 7
   app_data_dirs:
-  - path: /home/tom/.config/google-chrome
+  - path: /home/user/.config/google-chrome
     app: chrome
     size_mb: 151.5
-  - path: /home/tom/.config/chromium
+  - path: /home/user/.config/chromium
     app: chrome
     size_mb: 1.8
-  - path: /home/tom/.docker
+  - path: /home/user/.docker
     app: docker
     size_mb: 70.3
-  - path: /home/tom/snap/firefox/common/.mozilla/firefox
+  - path: /home/user/snap/firefox/common/.mozilla/firefox
     app: firefox
     size_mb: 356.5
-  - path: /home/tom/snap/firefox/common/.cache/mozilla/firefox
+  - path: /home/user/snap/firefox/common/.cache/mozilla/firefox
     app: firefox
     size_mb: 20.4
-  - path: /home/tom/.config/JetBrains
+  - path: /home/user/.config/JetBrains
     app: pycharm
     size_mb: 166.4
-  - path: /home/tom/.local/share/JetBrains
+  - path: /home/user/.local/share/JetBrains
     app: pycharm
     size_mb: 219.2
-  - path: /home/tom/.cache/JetBrains
+  - path: /home/user/.cache/JetBrains
     app: pycharm
     size_mb: 4892.1
-  - path: /home/tom/.pyenv
+  - path: /home/user/.pyenv
     app: python
     size_mb: 20.5
   all_paths:
     projects:
-    - /home/tom/github/wronai/clonebox
-    - /home/tom/github
-    - /home/tom/github/invutil
-    - /home/tom/gitlab
+    - /home/user/github/wronai/clonebox
+    - /home/user/github
+    - /home/user/github/invutil
+    - /home/user/gitlab
     configs:
     - /etc/apache2
-    - /home/tom/.cargo
-    - /home/tom/.config
-    - /home/tom/.docker
-    - /home/tom/.kube
+    - /home/user/.cargo
+    - /home/user/.config
+    - /home/user/.docker
+    - /home/user/.kube
     data:
-    - /home/tom/.local/share
-    - /home/tom/.nvm
-    - /home/tom/.pyenv
-    - /home/tom/.rustup
-    - /home/tom/Documents
+    - /home/user/.local/share
+    - /home/user/.nvm
+    - /home/user/.pyenv
+    - /home/user/.rustup
+    - /home/user/Documents
