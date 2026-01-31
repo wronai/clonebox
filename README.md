@@ -53,7 +53,7 @@ CloneBox excels in scenarios where developers need:
 
 ## What's New in v1.1
 
-**v1.1.0** is production-ready with two full runtimes:
+**v1.1.2** is production-ready with two full runtimes and P2P secure sharing:
 
 | Feature | Status |
 |---------|--------|
@@ -62,7 +62,33 @@ CloneBox excels in scenarios where developers need:
 | 📊 Web Dashboard (FastAPI + HTMX + Tailwind) | ✅ Stable |
 | 🎛️ Profiles System (`ml-dev`, `web-stack`) | ✅ Stable |
 | 🔍 Auto-detection (services, apps, paths) | ✅ Stable |
+| 🔒 P2P Secure Transfer (AES-256) | ✅ **NEW** |
 | 🧪 95%+ Test Coverage | ✅ |
+
+### P2P Secure VM Sharing
+
+Share VMs between workstations with AES-256 encryption:
+
+```bash
+# Generate team encryption key (once per team)
+clonebox keygen
+# 🔑 Key saved: ~/.clonebox.key
+
+# Export encrypted VM
+clonebox export-encrypted my-dev-vm -o team-env.enc --user-data
+
+# Transfer via SCP/SMB/USB
+scp team-env.enc user@workstationB:~/
+
+# Import on another machine (needs same key)
+clonebox import-encrypted team-env.enc --name my-dev-copy
+
+# Or use P2P commands directly
+clonebox export-remote user@hostA my-vm -o local.enc --encrypted
+clonebox import-remote local.enc user@hostB --encrypted
+clonebox sync-key user@hostB  # Sync encryption key
+clonebox list-remote user@hostB  # List remote VMs
+```
 
 ### Roadmap
 

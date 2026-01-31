@@ -28,6 +28,9 @@ from clonebox.container import ContainerCloner
 from clonebox.detector import SystemDetector
 from clonebox.models import ContainerConfig
 from clonebox.profiles import merge_with_profile
+from clonebox.exporter import SecureExporter, VMExporter
+from clonebox.importer import SecureImporter, VMImporter
+from clonebox.p2p import P2PManager
 
 # Custom questionary style
 custom_style = Style(
@@ -2635,6 +2638,127 @@ def cmd_detect(args):
         console.print(table)
 
 
+def cmd_keygen(args) -> None:
+    """Generate encryption key for secure P2P transfers."""
+    key_path = SecureExporter.generate_key()
+    console.print(f"[green]🔑 Encryption key generated: {key_path}[/]")
+    console.print("[dim]Share this key with team members for encrypted transfers.[/]")
+
+
+def cmd_export_encrypted(args) -> None:
+    """Export VM with AES-256 encryption."""
+    vm_name, config_file = _resolve_vm_name_and_config_file(args.name)
+    conn_uri = "qemu:///session" if getattr(args, "user", False) else "qemu:///system"
+    output = Path(args.output) if args.output else Path(f"{vm_name}.enc")
+
+    console.print(f"[cyan]🔒 Exporting encrypted: {vm_name} → {output}[/]")
+
+    try:
+        exporter = SecureExporter(conn_uri)
+        exporter.export_encrypted(
+            vm_name=vm_name,
+            output_path=output,
+            include_user_data=getattr(args, "user_data", False),
+            include_app_data=getattr(args, "include_data", False),
+        )
+        console.print(f"[green]✅ Encrypted export complete: {output}[/]")
+    except FileNotFoundError as e:
+        console.print(f"[red]❌ {e}[/]")
+        console.print("[yellow]Run: clonebox keygen[/]")
+    finally:
+        exporter.close()
+
+
+def cmd_import_encrypted(args) -> None:
+    """Import VM with AES-256 decryption."""
+    archive = Path(args.archive)
+    conn_uri = "qemu:///session" if getattr(args, "user", False) else "qemu:///system"
+
+    console.print(f"[cyan]🔓 Importing encrypted: {archive}[/]")
+
+    try:
+        importer = SecureImporter(conn_uri)
+        vm_name = importer.import_decrypted(
+            encrypted_path=archive,
+            import_user_data=getattr(args, "user_data", False),
+            import_app_data=getattr(args, "include_data", False),
+            new_name=getattr(args, "name", None),
+        )
+        console.print(f"[green]✅ Import complete: {vm_name}[/]")
+    except FileNotFoundError as e:
+        console.print(f"[red]❌ {e}[/]")
+    finally:
+        importer.close()
+
+
+def cmd_export_remote(args) -> None:
+    """Export VM from remote host."""
+    p2p = P2PManager()
+
+    console.print(f"[cyan]📤 Remote export: {args.host}:{args.vm_name}[/]")
+
+    try:
+        output = Path(args.output)
+        p2p.export_remote(
+            host=args.host,
+            vm_name=args.vm_name,
+            output=output,
+            encrypted=getattr(args, "encrypted", False),
+            include_user_data=getattr(args, "user_data", False),
+            include_app_data=getattr(args, "include_data", False),
+        )
+        console.print(f"[green]✅ Remote export complete: {output}[/]")
+    except RuntimeError as e:
+        console.print(f"[red]❌ {e}[/]")
+
+
+def cmd_import_remote(args) -> None:
+    """Import VM to remote host."""
+    p2p = P2PManager()
+    archive = Path(args.archive)
+
+    console.print(f"[cyan]📥 Remote import: {archive} → {args.host}[/]")
+
+    try:
+        p2p.import_remote(
+            host=args.host,
+            archive_path=archive,
+            encrypted=getattr(args, "encrypted", False),
+            import_user_data=getattr(args, "user_data", False),
+            new_name=getattr(args, "name", None),
+        )
+        console.print(f"[green]✅ Remote import complete[/]")
+    except RuntimeError as e:
+        console.print(f"[red]❌ {e}[/]")
+
+
+def cmd_sync_key(args) -> None:
+    """Sync encryption key to remote host."""
+    p2p = P2PManager()
+
+    console.print(f"[cyan]🔑 Syncing key to: {args.host}[/]")
+
+    try:
+        p2p.sync_key(args.host)
+        console.print(f"[green]✅ Key synced to {args.host}[/]")
+    except (FileNotFoundError, RuntimeError) as e:
+        console.print(f"[red]❌ {e}[/]")
+
+
+def cmd_list_remote(args) -> None:
+    """List VMs on remote host."""
+    p2p = P2PManager()
+
+    console.print(f"[cyan]🔍 Listing VMs on: {args.host}[/]")
+
+    vms = p2p.list_remote_vms(args.host)
+    if vms:
+        for vm in vms:
+            console.print(f"  • {vm}")
+    else:
+        console.print("[yellow]No VMs found on remote host.[/]")
+
+
 def main():
     """Main entry point."""
     parser = argparse.ArgumentParser(
@@ -3073,6 +3197,99 @@ def main():
         help="Run smoke tests (installed ≠ works): headless launch checks for key apps",
     )
     test_parser.set_defaults(func=cmd_test)
+
+    # === P2P Secure Transfer Commands ===
+
+    # Keygen command - generate encryption key
+    keygen_parser = subparsers.add_parser("keygen", help="Generate encryption key for secure transfers")
+    keygen_parser.set_defaults(func=cmd_keygen)
+
+    # Export-encrypted command
+    export_enc_parser = subparsers.add_parser(
+        "export-encrypted", help="Export VM with AES-256 encryption"
+    )
+    export_enc_parser.add_argument(
+        "name", nargs="?", default=None, help="VM name or '.' to use .clonebox.yaml"
+    )
+    export_enc_parser.add_argument(
+        "-u", "--user", action="store_true", help="Use user session (qemu:///session)"
+    )
+    export_enc_parser.add_argument(
+        "-o", "--output", help="Output file (default: <vmname>.enc)"
+    )
+    export_enc_parser.add_argument(
+        "--user-data", action="store_true", help="Include user data (SSH keys, configs)"
+    )
+    export_enc_parser.add_argument(
+        "--include-data", "-d", action="store_true", help="Include app data"
+    )
+    export_enc_parser.set_defaults(func=cmd_export_encrypted)
+
+    # Import-encrypted command
+    import_enc_parser = subparsers.add_parser(
+        "import-encrypted", help="Import VM with AES-256 decryption"
+    )
+    import_enc_parser.add_argument("archive", help="Path to encrypted archive (.enc)")
+    import_enc_parser.add_argument(
+        "-u", "--user", action="store_true", help="Use user session (qemu:///session)"
+    )
+    import_enc_parser.add_argument("--name", "-n", help="New name for imported VM")
+    import_enc_parser.add_argument(
+        "--user-data", action="store_true", help="Import user data"
+    )
+    import_enc_parser.add_argument(
+        "--include-data", "-d", action="store_true", help="Import app data"
+    )
+    import_enc_parser.set_defaults(func=cmd_import_encrypted)
+
+    # Export-remote command
+    export_remote_parser = subparsers.add_parser(
+        "export-remote", help="Export VM from remote host via SSH"
+    )
+    export_remote_parser.add_argument("host", help="Remote host (user@hostname)")
+    export_remote_parser.add_argument("vm_name", help="VM name on remote host")
+    export_remote_parser.add_argument(
+        "-o", "--output", required=True, help="Local output file"
+    )
+    export_remote_parser.add_argument(
+        "--encrypted", "-e", action="store_true", help="Use encrypted export"
+    )
+    export_remote_parser.add_argument(
+        "--user-data", action="store_true", help="Include user data"
+    )
+    export_remote_parser.add_argument(
+        "--include-data", "-d", action="store_true", help="Include app data"
+    )
+    export_remote_parser.set_defaults(func=cmd_export_remote)
+
+    # Import-remote command
+    import_remote_parser = subparsers.add_parser(
+        "import-remote", help="Import VM to remote host via SSH"
+    )
+    import_remote_parser.add_argument("archive", help="Local archive to upload")
+    import_remote_parser.add_argument("host", help="Remote host (user@hostname)")
+    import_remote_parser.add_argument("--name", "-n", help="New name for VM on remote")
+    import_remote_parser.add_argument(
+        "--encrypted", "-e", action="store_true", help="Use encrypted import"
+    )
+    import_remote_parser.add_argument(
+        "--user-data", action="store_true", help="Import user data"
+    )
+    import_remote_parser.set_defaults(func=cmd_import_remote)
+
+    # Sync-key command
+    sync_key_parser = subparsers.add_parser(
+        "sync-key", help="Sync encryption key to remote host"
+    )
+    sync_key_parser.add_argument("host", help="Remote host (user@hostname)")
+    sync_key_parser.set_defaults(func=cmd_sync_key)
+
+    # List-remote command
+    list_remote_parser = subparsers.add_parser(
+        "list-remote", help="List VMs on remote host"
+    )
+    list_remote_parser.add_argument("host", help="Remote host (user@hostname)")
+    list_remote_parser.set_defaults(func=cmd_list_remote)
 
     args = parser.parse_args()
 

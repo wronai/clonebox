@@ -1,3 +1,32 @@
+## [1.1.3] - 2026-01-31
+
+### Summary
+
+feat(docs): CLI interface improvements
+
+### Core
+
+- update src/clonebox/cli.py
+- update src/clonebox/exporter.py
+- update src/clonebox/importer.py
+- update src/clonebox/p2p.py
+
+### Docs
+
+- docs: update README
+- docs: update 01-secrets-isolation.md
+- docs: update 02-rollback-mechanism.md
+- docs: update 03-snapshot-management.md
+- docs: update 04-health-checks.md
+- docs: update 05-resource-limits.md
+- docs: update 06-dependency-injection.md
+- docs: update README
+
+### Test
+
+- update tests/e2e/test_p2p_workflow.py
+
+
 ## [1.1.2] - 2026-01-31
 
 ### Summary
