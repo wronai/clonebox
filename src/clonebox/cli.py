@@ -93,22 +93,30 @@ def _resolve_vm_name_and_config_file(name: Optional[str]) -> Tuple[str, Optional
 def _qga_ping(vm_name: str, conn_uri: str) -> bool:
     import subprocess
     import json
+    import time
 
     try:
-        result = subprocess.run(
-            [
-                "virsh",
-                "--connect",
-                conn_uri,
-                "qemu-agent-command",
-                vm_name,
-                json.dumps({"execute": "guest-ping"}),
-            ],
-            capture_output=True,
-            text=True,
-            timeout=5,
-        )
-        return result.returncode == 0
+        for _ in range(5):
+            try:
+                result = subprocess.run(
+                    [
+                        "virsh",
+                        "--connect",
+                        conn_uri,
+                        "qemu-agent-command",
+                        vm_name,
+                        json.dumps({"execute": "guest-ping"}),
+                    ],
+                    capture_output=True,
+                    text=True,
+                    timeout=5,
+                )
+                if result.returncode == 0:
+                    return True
+            except subprocess.TimeoutExpired:
+                pass
+            time.sleep(1)
+        return False
     except Exception:
         return False
 
@@ -1656,6 +1664,7 @@ def cmd_test(args):
     """Test VM configuration and health."""
     import subprocess
     import json
+    import time
     from clonebox.validator import VMValidator
 
     name = args.name
@@ -1735,6 +1744,15 @@ def cmd_test(args):
         if state == "running":
             console.print("[green]✅ VM is running[/]")
 
+            # Give QEMU Guest Agent some time to come up (common during early boot)
+            qga_ready = _qga_ping(vm_name, conn_uri)
+            if not qga_ready:
+                for _ in range(12):  # ~60s
+                    time.sleep(5)
+                    qga_ready = _qga_ping(vm_name, conn_uri)
+                    if qga_ready:
+                        break
+
             # Test network if running
             console.print("\n   Checking network...")
             try:
@@ -1753,11 +1771,7 @@ def cmd_test(args):
                 else:
                     console.print("[yellow]⚠️  No IP address detected via virsh domifaddr[/]")
                     # Fallback: try to get IP via QEMU Guest Agent (useful for slirp/user networking)
-                    try:
-                        from .cli import _qga_ping, _qga_exec
-                    except ImportError:
-                        from clonebox.cli import _qga_ping, _qga_exec
-                    if _qga_ping(vm_name, conn_uri):
+                    if qga_ready:
                         try:
                             ip_out = _qga_exec(
                                 vm_name,
@@ -1789,61 +1803,22 @@ def cmd_test(args):
     if not quick and state == "running":
         console.print("[bold]3. Cloud-init Status[/]")
         try:
-            # Try to get cloud-init status via QEMU guest agent
-            result = subprocess.run(
-                [
-                    "virsh",
-                    "--connect",
-                    conn_uri,
-                    "qemu-agent-command",
-                    vm_name,
-                    '{"execute":"guest-exec","arguments":{"path":"cloud-init","arg":["status"],"capture-output":true}}',
-                ],
-                capture_output=True,
-                text=True,
-                timeout=15,
-            )
-            if result.returncode == 0:
-                try:
-                    response = json.loads(result.stdout)
-                    if "return" in response:
-                        pid = response["return"]["pid"]
-                        # Get output
-                        result2 = subprocess.run(
-                            [
-                                "virsh",
-                                "--connect",
-                                conn_uri,
-                                "qemu-agent-command",
-                                vm_name,
-                                f'{{"execute":"guest-exec-status","arguments":{"pid":{pid}}}}',
-                            ],
-                            capture_output=True,
-                            text=True,
-                            timeout=15,
-                        )
-                        if result2.returncode == 0:
-                            resp2 = json.loads(result2.stdout)
-                            if "return" in resp2 and resp2["return"]["exited"]:
-                                output = resp2["return"]["out-data"]
-                                if output:
-                                    import base64
-
-                                    status = base64.b64decode(output).decode()
-                                    if "done" in status.lower():
-                                        console.print("[green]✅ Cloud-init completed[/]")
-                                    elif "running" in status.lower():
-                                        console.print("[yellow]⚠️  Cloud-init still running[/]")
-                                    else:
-                                        console.print(
-                                            f"[yellow]⚠️  Cloud-init status: {status.strip()}[/]"
-                                        )
-                except:
-                    pass
-        except:
-            console.print(
-                "[yellow]⚠️  Could not check cloud-init (QEMU agent may not be running)[/]"
-            )
+            if not qga_ready:
+                console.print("[yellow]⚠️  Cloud-init status unknown (QEMU Guest Agent not connected)[/]")
+            else:
+                status = _qga_exec(vm_name, conn_uri, "cloud-init status 2>/dev/null || true", timeout=15)
+                if status is None:
+                    console.print("[yellow]⚠️  Could not check cloud-init (QGA command failed)[/]")
+                elif "done" in status.lower():
+                    console.print("[green]✅ Cloud-init completed[/]")
+                elif "running" in status.lower():
+                    console.print("[yellow]⚠️  Cloud-init still running[/]")
+                elif status.strip():
+                    console.print(f"[yellow]⚠️  Cloud-init status: {status.strip()}[/]")
+                else:
+                    console.print("[yellow]⚠️  Cloud-init status: unknown[/]")
+        except Exception:
+            console.print("[yellow]⚠️  Could not check cloud-init (QEMU agent may not be running)[/]")
 
     console.print()
 
@@ -1878,25 +1853,31 @@ def cmd_test(args):
     if not quick and state == "running":
         console.print("[bold]5. Health Check[/]")
         try:
-            result = subprocess.run(
-                [
-                    "virsh",
-                    "--connect",
-                    conn_uri,
-                    "qemu-agent-command",
-                    vm_name,
-                    '{"execute":"guest-exec","arguments":{"path":"/usr/local/bin/clonebox-health","capture-output":true}}',
-                ],
-                capture_output=True,
-                text=True,
-                timeout=60,
-            )
-            if result.returncode == 0:
-                console.print("[green]✅ Health check triggered[/]")
-                console.print("   View results in VM: cat /var/log/clonebox-health.log")
+            if not qga_ready:
+                console.print("[yellow]⚠️  QEMU Guest Agent not connected - cannot run health check[/]")
             else:
-                console.print("[yellow]⚠️  Health check script not found[/]")
-                console.print("   VM may not have been created with health checks")
+                exists = _qga_exec(
+                    vm_name,
+                    conn_uri,
+                    "test -x /usr/local/bin/clonebox-health && echo yes || echo no",
+                    timeout=10,
+                )
+                if exists and exists.strip() == "yes":
+                    out = _qga_exec(
+                        vm_name,
+                        conn_uri,
+                        "/usr/local/bin/clonebox-health >/dev/null 2>&1 && echo yes || echo no",
+                        timeout=60,
+                    )
+                    if out and out.strip() == "yes":
+                        console.print("[green]✅ Health check ran successfully[/]")
+                        console.print("   View results in VM: cat /var/log/clonebox-health.log")
+                    else:
+                        console.print("[yellow]⚠️  Health check did not report success[/]")
+                        console.print("   View logs in VM: cat /var/log/clonebox-health.log")
+                else:
+                    console.print("[yellow]⚠️  Health check script not found[/]")
+                    console.print("   This is expected until cloud-init completes")
         except Exception as e:
             console.print(f"[yellow]⚠️  Could not run health check: {e}[/]")
 
@@ -2745,6 +2726,11 @@ def cmd_exec(args) -> None:
     vm_name, config_file = _resolve_vm_name_and_config_file(args.name)
     conn_uri = "qemu:///session" if getattr(args, "user", False) else "qemu:///system"
     command = args.command
+    if isinstance(command, list):
+        command = " ".join(command).strip()
+    if not command:
+        console.print("[red]❌ No command specified[/]")
+        return
     timeout = getattr(args, "timeout", 30)
 
     if not _qga_ping(vm_name, conn_uri):
@@ -3488,7 +3474,9 @@ def main():
     exec_parser.add_argument(
         "name", nargs="?", default=None, help="VM name or '.' to use .clonebox.yaml"
     )
-    exec_parser.add_argument("command", help="Command to execute in VM")
+    exec_parser.add_argument(
+        "command", nargs=argparse.REMAINDER, help="Command to execute in VM"
+    )
     exec_parser.add_argument(
         "-u", "--user", action="store_true", help="Use user session (qemu:///session)"
     )

@@ -623,8 +623,11 @@ class SelectiveVMCloner:
             ET.SubElement(devices, "input", type="tablet", bus="usb")
             ET.SubElement(devices, "input", type="keyboard", bus="usb")
 
+        ET.SubElement(devices, "controller", type="virtio-serial", index="0")
+
         # Channel for guest agent
         channel = ET.SubElement(devices, "channel", type="unix")
+        ET.SubElement(channel, "source", mode="bind")
         ET.SubElement(channel, "target", type="virtio", name="org.qemu.guest_agent.0")
 
         # Memory balloon
@@ -1254,8 +1257,22 @@ fi
         mount_commands = []
         fstab_entries = []
         all_paths = dict(config.paths) if config.paths else {}
+        pre_chown_dirs: set[str] = set()
         for idx, (host_path, guest_path) in enumerate(all_paths.items()):
             if Path(host_path).exists():
+                if str(guest_path).startswith("/home/ubuntu/snap/"):
+                    guest_parts = Path(guest_path).parts
+                    if len(guest_parts) > 4:
+                        snap_name = guest_parts[4]
+                        for d in (
+                            "/home/ubuntu",
+                            "/home/ubuntu/snap",
+                            f"/home/ubuntu/snap/{snap_name}",
+                        ):
+                            if d not in pre_chown_dirs:
+                                pre_chown_dirs.add(d)
+                                mount_commands.append(f"  - mkdir -p {d}")
+                                mount_commands.append(f"  - chown 1000:1000 {d}")
                 tag = f"mount{idx}"
                 # Use uid=1000,gid=1000 to give ubuntu user access to mounts
                 # mmap allows proper file mapping
@@ -1305,6 +1322,9 @@ fi
         # Add mounts (immediate, before reboot)
         for cmd in mount_commands:
             runcmd_lines.append(cmd)
+
+        runcmd_lines.append("  - chown -R 1000:1000 /home/ubuntu || true")
+        runcmd_lines.append("  - chown -R 1000:1000 /home/ubuntu/snap || true")
 
         # Install snap packages
         if config.snap_packages:
@@ -2146,7 +2166,7 @@ if __name__ == "__main__":
                 "  - cp -r /var/log/clonebox*.log /mnt/logs/var/log/ 2>/dev/null || true",
                 "  - cp -r /tmp/*-error.log /mnt/logs/tmp/ 2>/dev/null || true",
                 "  - echo 'Logs disk mounted at /mnt/logs - accessible from host as /var/lib/libvirt/images/clonebox-logs.qcow2'",
-                "  - echo 'To view logs on host: sudo mount -o loop /var/lib/libvirt/images/clonebox-logs.qcow2 /mnt/clonebox-logs'",
+                "  - \"echo 'To view logs on host: sudo mount -o loop /var/lib/libvirt/images/clonebox-logs.qcow2 /mnt/clonebox-logs'\"",
             ]
         )
 
@@ -2158,9 +2178,7 @@ if __name__ == "__main__":
         runcmd_yaml = "\n".join(runcmd_lines) if runcmd_lines else ""
         
         # Build bootcmd combining mount commands and extra security bootcmds
-        bootcmd_lines = list(mount_commands) if mount_commands else []
-        if bootcmd_extra:
-            bootcmd_lines.extend(bootcmd_extra)
+        bootcmd_lines = list(bootcmd_extra) if bootcmd_extra else []
             
         bootcmd_block = ""
         if bootcmd_lines:
