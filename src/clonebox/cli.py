@@ -2733,7 +2733,15 @@ def cmd_exec(args) -> None:
         return
     timeout = getattr(args, "timeout", 30)
 
-    if not _qga_ping(vm_name, conn_uri):
+    qga_ready = _qga_ping(vm_name, conn_uri)
+    if not qga_ready:
+        for _ in range(12):  # ~60s
+            time.sleep(5)
+            qga_ready = _qga_ping(vm_name, conn_uri)
+            if qga_ready:
+                break
+
+    if not qga_ready:
         console.print(f"[red]❌ Cannot connect to VM '{vm_name}' via QEMU Guest Agent[/]")
         console.print("[dim]Make sure the VM is running and qemu-guest-agent is installed.[/]")
         return

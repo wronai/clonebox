@@ -433,7 +433,13 @@ class SelectiveVMCloner:
 
                 # Create cloud-init ISO if packages/services specified
                 cloudinit_iso = None
-                if config.packages or config.services:
+                if (
+                    config.packages
+                    or config.services
+                    or config.snap_packages
+                    or config.post_commands
+                    or config.gui
+                ):
                     cloudinit_iso = ctx.add_file(self._create_cloudinit_iso(vm_dir, config))
                     log.info(f"Created cloud-init ISO with {len(config.packages)} packages")
 
@@ -1250,7 +1256,8 @@ fi
         cloudinit_dir.mkdir(exist_ok=True)
 
         # Meta-data
-        meta_data = f"instance-id: {config.name}\nlocal-hostname: {config.name}\n"
+        instance_id = f"{config.name}-{uuid.uuid4().hex}"
+        meta_data = f"instance-id: {instance_id}\nlocal-hostname: {config.name}\n"
         (cloudinit_dir / "meta-data").write_text(meta_data)
 
         # Generate mount commands and fstab entries for 9p filesystems
