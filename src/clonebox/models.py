@@ -167,6 +167,14 @@ class ContainerConfig(BaseModel):
                 raise ValueError(f"Container path must be absolute: {container_path}")
         return v
 
+    @field_validator("ports", mode="before")
+    @classmethod
+    def coerce_ports(cls, v):
+        # Accept mapping like {"8080": "80"} -> ["8080:80"]
+        if isinstance(v, dict):
+            return [f"{k}:{val}" for k, val in v.items()]
+        return v
+
     @field_validator("ports")
     @classmethod
     def ports_must_be_valid(cls, v: List[str]) -> List[str]:

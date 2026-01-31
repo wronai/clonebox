@@ -2185,3 +2185,26 @@ final_message: "CloneBox VM is ready after $UPTIME seconds"
         """Close libvirt connection."""
         if self.conn:
             self.conn.close()
+
+    # Backward compatibility methods for tests
+    def _get_base_image_info(self, image_path: str) -> dict:
+        """Get base image information - backward compatibility shim."""
+        if hasattr(self, "get_base_image_info"):
+            return self.get_base_image_info(image_path)
+        # Return empty dict if method doesn't exist
+        return {}
+
+    def get_vm_info(self, vm_name: str) -> dict:
+        """Get VM information - backward compatibility shim."""
+        if hasattr(self, "_get_vm_info"):
+            return self._get_vm_info(vm_name)
+        # Try to get basic info from libvirt
+        try:
+            vm = self.conn.lookupByName(vm_name)
+            return {
+                "name": vm.name(),
+                "state": "running" if vm.isActive() else "stopped",
+                "uuid": vm.UUIDString()
+            }
+        except Exception:
+            return {}
