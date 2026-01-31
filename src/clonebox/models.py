@@ -76,8 +76,17 @@ class CloneBoxConfig(BaseModel):
         if isinstance(data, dict):
             if "vm" in data and isinstance(data["vm"], dict):
                 return data
-            vm_fields = {"name", "ram_mb", "vcpus", "disk_size_gb", "gui", "base_image", 
-                        "network_mode", "username", "password"}
+            vm_fields = {
+                "name",
+                "ram_mb",
+                "vcpus",
+                "disk_size_gb",
+                "gui",
+                "base_image",
+                "network_mode",
+                "username",
+                "password",
+            }
             vm_data = {k: v for k, v in data.items() if k in vm_fields}
             if vm_data:
                 data = {k: v for k, v in data.items() if k not in vm_fields}

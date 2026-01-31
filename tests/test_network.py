@@ -53,8 +53,10 @@ class TestNetworkMode:
         # Handle missing libvirt module in test environment
         try:
             import libvirt as real_libvirt
+
             libvirt_error = real_libvirt.libvirtError
         except ImportError:
+
             class libvirt_error(Exception):
                 pass
 
@@ -135,8 +137,10 @@ class TestNetworkMode:
         # Handle missing libvirt module in test environment
         try:
             import libvirt as real_libvirt
+
             libvirt_error = real_libvirt.libvirtError
         except ImportError:
+
             class libvirt_error(Exception):
                 pass
 

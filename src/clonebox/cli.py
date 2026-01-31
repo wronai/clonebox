@@ -248,7 +248,12 @@ def run_vm_diagnostics(
             # Fallback: try to get IP via QEMU Guest Agent (useful for slirp/user networking)
             if guest_agent_ready:
                 try:
-                    ip_out = _qga_exec(vm_name, conn_uri, "ip -4 -o addr show scope global | awk '{print $4}'", timeout=5)
+                    ip_out = _qga_exec(
+                        vm_name,
+                        conn_uri,
+                        "ip -4 -o addr show scope global | awk '{print $4}'",
+                        timeout=5,
+                    )
                     if ip_out and ip_out.strip():
                         console.print(f"[green]IP (via QGA): {ip_out.strip()}[/]")
                         result["network"]["qga_ip"] = ip_out.strip()
@@ -306,27 +311,39 @@ def run_vm_diagnostics(
                 result["qga"]["ping_stdout"] = ping_attempt.stdout.strip()
                 result["qga"]["ping_stderr"] = ping_attempt.stderr.strip()
                 if ping_attempt.stderr.strip():
-                    console.print(f"[dim]qemu-agent-command stderr: {ping_attempt.stderr.strip()}[/]")
+                    console.print(
+                        f"[dim]qemu-agent-command stderr: {ping_attempt.stderr.strip()}[/]"
+                    )
             except Exception as e:
                 result["qga"]["ping_error"] = str(e)
 
-            console.print("[dim]If channel is present, the agent inside VM may not be running yet.[/]")
-            console.print("[dim]Inside VM try: sudo systemctl status qemu-guest-agent && sudo systemctl restart qemu-guest-agent[/]")
+            console.print(
+                "[dim]If channel is present, the agent inside VM may not be running yet.[/]"
+            )
+            console.print(
+                "[dim]Inside VM try: sudo systemctl status qemu-guest-agent && sudo systemctl restart qemu-guest-agent[/]"
+            )
 
     console.print("\n[bold]☁️  Checking cloud-init status...[/]")
     cloud_init_complete = False
     if not guest_agent_ready:
         result["cloud_init"] = {"status": "unknown", "reason": "qga_not_ready"}
-        console.print("[yellow]⏳ Cloud-init status: Unknown (QEMU guest agent not connected yet)[/]")
+        console.print(
+            "[yellow]⏳ Cloud-init status: Unknown (QEMU guest agent not connected yet)[/]"
+        )
     else:
-        ready_msg = _qga_exec(vm_name, conn_uri, "cat /var/log/clonebox-ready 2>/dev/null || true", timeout=10)
+        ready_msg = _qga_exec(
+            vm_name, conn_uri, "cat /var/log/clonebox-ready 2>/dev/null || true", timeout=10
+        )
         result["cloud_init"]["clonebox_ready_file"] = ready_msg
         if ready_msg and "CloneBox VM ready" in ready_msg:
             cloud_init_complete = True
             result["cloud_init"]["status"] = "complete"
             console.print("[green]✅ Cloud-init: Complete[/]")
         else:
-            ci_status = _qga_exec(vm_name, conn_uri, "cloud-init status 2>/dev/null || true", timeout=10)
+            ci_status = _qga_exec(
+                vm_name, conn_uri, "cloud-init status 2>/dev/null || true", timeout=10
+            )
             result["cloud_init"]["cloud_init_status"] = ci_status
             result["cloud_init"]["status"] = "running"
             console.print("[yellow]⏳ Cloud-init: Still running[/]")
@@ -373,10 +390,14 @@ def run_vm_diagnostics(
                 file_count: str = "?"
 
                 if is_mounted:
-                    test_out = _qga_exec(vm_name, conn_uri, f"test -d {guest_path} && echo yes || echo no", timeout=5)
+                    test_out = _qga_exec(
+                        vm_name, conn_uri, f"test -d {guest_path} && echo yes || echo no", timeout=5
+                    )
                     accessible = test_out == "yes"
                     if accessible:
-                        count_str = _qga_exec(vm_name, conn_uri, f"ls -A {guest_path} 2>/dev/null | wc -l", timeout=5)
+                        count_str = _qga_exec(
+                            vm_name, conn_uri, f"ls -A {guest_path} 2>/dev/null | wc -l", timeout=5
+                        )
                         if count_str and count_str.strip().isdigit():
                             file_count = count_str.strip()
 
@@ -386,7 +407,11 @@ def run_vm_diagnostics(
                 mount_table.add_row(
                     guest_path,
                     "[green]✅[/]" if is_mounted else "[red]❌[/]",
-                    "[green]✅[/]" if accessible else ("[red]❌[/]" if is_mounted else "[dim]N/A[/]"),
+                    (
+                        "[green]✅[/]"
+                        if accessible
+                        else ("[red]❌[/]" if is_mounted else "[dim]N/A[/]")
+                    ),
                     file_count,
                 )
                 mounts_detail.append(
@@ -410,7 +435,9 @@ def run_vm_diagnostics(
         result["health"]["status"] = "unknown"
         console.print("[dim]Health status: Not available yet (QEMU guest agent not ready)[/]")
     else:
-        health_status = _qga_exec(vm_name, conn_uri, "cat /var/log/clonebox-health-status 2>/dev/null || true", timeout=10)
+        health_status = _qga_exec(
+            vm_name, conn_uri, "cat /var/log/clonebox-health-status 2>/dev/null || true", timeout=10
+        )
         result["health"]["raw"] = health_status
         if health_status and "HEALTH_STATUS=OK" in health_status:
             result["health"]["status"] = "ok"
@@ -452,13 +479,27 @@ def cmd_watch(args):
         time.sleep(min(refresh, 2.0))
 
     if not _qga_ping(vm_name, conn_uri):
-        console.print("[yellow]⚠️  QEMU Guest Agent not connected - cannot watch diagnostic status yet[/]")
-        console.print(f"[dim]Try: clonebox status {name or vm_name} {'--user' if user_session else ''} --verbose[/]")
+        console.print(
+            "[yellow]⚠️  QEMU Guest Agent not connected - cannot watch diagnostic status yet[/]"
+        )
+        console.print(
+            f"[dim]Try: clonebox status {name or vm_name} {'--user' if user_session else ''} --verbose[/]"
+        )
         return
 
     def _read_status() -> Tuple[Optional[Dict[str, Any]], str]:
-        status_raw = _qga_exec(vm_name, conn_uri, "cat /var/run/clonebox-status.json 2>/dev/null || true", timeout=10)
-        log_tail = _qga_exec(vm_name, conn_uri, "tail -n 40 /var/log/clonebox-boot.log 2>/dev/null || true", timeout=10) or ""
+        status_raw = _qga_exec(
+            vm_name, conn_uri, "cat /var/run/clonebox-status.json 2>/dev/null || true", timeout=10
+        )
+        log_tail = (
+            _qga_exec(
+                vm_name,
+                conn_uri,
+                "tail -n 40 /var/log/clonebox-boot.log 2>/dev/null || true",
+                timeout=10,
+            )
+            or ""
+        )
 
         status_obj: Optional[Dict[str, Any]] = None
         if status_raw:
@@ -480,12 +521,14 @@ def cmd_watch(args):
 
             stats = ""
             if status_obj:
-                stats = (
-                    f"passed={status_obj.get('passed', 0)} failed={status_obj.get('failed', 0)} repaired={status_obj.get('repaired', 0)} total={status_obj.get('total', 0)}"
-                )
+                stats = f"passed={status_obj.get('passed', 0)} failed={status_obj.get('failed', 0)} repaired={status_obj.get('repaired', 0)} total={status_obj.get('total', 0)}"
 
             body = "\n".join([s for s in [header, stats, "", log_tail.strip()] if s])
-            live.update(Panel(body or "(no output yet)", title="CloneBox boot diagnostic", border_style="cyan"))
+            live.update(
+                Panel(
+                    body or "(no output yet)", title="CloneBox boot diagnostic", border_style="cyan"
+                )
+            )
 
             if phase == "complete":
                 break
@@ -515,9 +558,13 @@ def cmd_repair(args):
         return
 
     console.print(f"[cyan]🔧 Running boot diagnostic/repair in VM: {vm_name}[/]")
-    out = _qga_exec(vm_name, conn_uri, "/usr/local/bin/clonebox-boot-diagnostic || true", timeout=timeout)
+    out = _qga_exec(
+        vm_name, conn_uri, "/usr/local/bin/clonebox-boot-diagnostic || true", timeout=timeout
+    )
     if out is None:
-        console.print("[yellow]⚠️  Repair triggered but output not available via QGA (check VM console/log)[/]")
+        console.print(
+            "[yellow]⚠️  Repair triggered but output not available via QGA (check VM console/log)[/]"
+        )
     elif out.strip():
         console.print(Panel(out.strip()[-3000:], title="Command output", border_style="cyan"))
 
@@ -894,7 +941,9 @@ def cmd_start(args):
 
         # Create new VM from config
         console.print(f"[cyan]Creating VM '{vm_name}' from config...[/]\n")
-        vm_uuid = create_vm_from_config(config, start=True, user_session=getattr(args, "user", False))
+        vm_uuid = create_vm_from_config(
+            config, start=True, user_session=getattr(args, "user", False)
+        )
         console.print(f"\n[bold green]🎉 VM '{vm_name}' is running![/]")
         console.print(f"[dim]UUID: {vm_uuid}[/]")
 
@@ -927,11 +976,11 @@ def cmd_start(args):
 def cmd_open(args):
     """Open VM viewer window."""
     import subprocess
-    
+
     name = args.name
     user_session = getattr(args, "user", False)
     conn_uri = "qemu:///session" if user_session else "qemu:///system"
-    
+
     # If name is a path, load config
     if name and (name.startswith(".") or name.startswith("/") or name.startswith("~")):
         target_path = Path(name).expanduser().resolve()
@@ -948,18 +997,22 @@ def cmd_open(args):
             config = load_clonebox_config(config_file)
             name = config["vm"]["name"]
         else:
-            console.print("[red]❌ No VM name specified and no .clonebox.yaml in current directory[/]")
+            console.print(
+                "[red]❌ No VM name specified and no .clonebox.yaml in current directory[/]"
+            )
             console.print("[dim]Usage: clonebox open <vm-name> or clonebox open .[/]")
             return
-    
+
     # Check if VM is running
     try:
         result = subprocess.run(
             ["virsh", "--connect", conn_uri, "domstate", name],
-            capture_output=True, text=True, timeout=10
+            capture_output=True,
+            text=True,
+            timeout=10,
         )
         state = result.stdout.strip()
-        
+
         if state != "running":
             console.print(f"[yellow]⚠️  VM '{name}' is not running (state: {state})[/]")
             if questionary.confirm(
@@ -973,14 +1026,11 @@ def cmd_open(args):
     except Exception as e:
         console.print(f"[red]❌ Error checking VM state: {e}[/]")
         return
-    
+
     # Open virt-viewer
     console.print(f"[cyan]Opening viewer for VM: {name}[/]")
     try:
-        subprocess.run(
-            ["virt-viewer", "--connect", conn_uri, name],
-            check=True
-        )
+        subprocess.run(["virt-viewer", "--connect", conn_uri, name], check=True)
     except FileNotFoundError:
         console.print("[red]❌ virt-viewer not found[/]")
         console.print("Install with: sudo apt install virt-viewer")
@@ -991,7 +1041,7 @@ def cmd_open(args):
 def cmd_stop(args):
     """Stop a VM."""
     name = args.name
-    
+
     # If name is a path, load config
     if name and (name.startswith(".") or name.startswith("/") or name.startswith("~")):
         target_path = Path(name).expanduser().resolve()
@@ -1002,7 +1052,7 @@ def cmd_stop(args):
         else:
             console.print(f"[red]❌ Config not found: {config_file}[/]")
             return
-    
+
     cloner = SelectiveVMCloner(user_session=getattr(args, "user", False))
     cloner.stop_vm(name, force=args.force, console=console)
 
@@ -1010,7 +1060,7 @@ def cmd_stop(args):
 def cmd_restart(args):
     """Restart a VM (stop and start)."""
     name = args.name
-    
+
     # If name is a path, load config
     if name and (name.startswith(".") or name.startswith("/") or name.startswith("~")):
         target_path = Path(name).expanduser().resolve()
@@ -1021,20 +1071,20 @@ def cmd_restart(args):
         else:
             console.print(f"[red]❌ Config not found: {config_file}[/]")
             return
-    
+
     cloner = SelectiveVMCloner(user_session=getattr(args, "user", False))
-    
+
     # Stop the VM
     console.print("[bold yellow]🔄 Stopping VM...[/]")
     cloner.stop_vm(name, force=args.force, console=console)
-    
+
     # Wait a moment
     time.sleep(2)
-    
+
     # Start the VM
     console.print("[bold green]🚀 Starting VM...[/]")
     cloner.start_vm(name, wait_for_agent=True, console=console)
-    
+
     console.print("[bold green]✅ VM restarted successfully![/]")
     if getattr(args, "open", False):
         cloner.open_gui(name, console=console)
@@ -1043,7 +1093,7 @@ def cmd_restart(args):
 def cmd_delete(args):
     """Delete a VM."""
     name = args.name
-    
+
     # If name is a path, load config
     if name and (name.startswith(".") or name.startswith("/") or name.startswith("~")):
         target_path = Path(name).expanduser().resolve()
@@ -1054,7 +1104,7 @@ def cmd_delete(args):
         else:
             console.print(f"[red]❌ Config not found: {config_file}[/]")
             return
-    
+
     if not args.yes:
         if not questionary.confirm(
             f"Delete VM '{name}' and its storage?", default=False, style=custom_style
@@ -1230,16 +1280,26 @@ def cmd_status(args):
     console.print("    [cyan]sudo cloud-init status[/]  # Cloud-init status")
     console.print("    [cyan]clonebox-health[/]  # Re-run health check")
     console.print("  [dim]On host:[/]")
-    console.print("    [cyan]clonebox test . --user --validate[/]  # Full validation (mounts/packages/services)")
-    
+    console.print(
+        "    [cyan]clonebox test . --user --validate[/]  # Full validation (mounts/packages/services)"
+    )
+
     # Run full health check if requested
     if getattr(args, "health", False):
         console.print("\n[bold]🔄 Running full health check...[/]")
         try:
             result = subprocess.run(
-                ["virsh", "--connect", conn_uri, "qemu-agent-command", vm_name,
-                 '{"execute":"guest-exec","arguments":{"path":"/usr/local/bin/clonebox-health","capture-output":true}}'],
-                capture_output=True, text=True, timeout=60
+                [
+                    "virsh",
+                    "--connect",
+                    conn_uri,
+                    "qemu-agent-command",
+                    vm_name,
+                    '{"execute":"guest-exec","arguments":{"path":"/usr/local/bin/clonebox-health","capture-output":true}}',
+                ],
+                capture_output=True,
+                text=True,
+                timeout=60,
             )
             console.print("[green]Health check triggered. View results with:[/]")
             console.print(f"  [cyan]virsh --connect {conn_uri} console {vm_name}[/]")
@@ -1253,13 +1313,13 @@ def cmd_export(args):
     import subprocess
     import tarfile
     import shutil
-    
+
     name = args.name
     user_session = getattr(args, "user", False)
     conn_uri = "qemu:///session" if user_session else "qemu:///system"
     include_data = getattr(args, "include_data", False)
     output = getattr(args, "output", None)
-    
+
     # If name is a path, load config
     if name and (name.startswith(".") or name.startswith("/") or name.startswith("~")):
         target_path = Path(name).expanduser().resolve()
@@ -1279,112 +1339,117 @@ def cmd_export(args):
             console.print("[red]❌ No .clonebox.yaml found in current directory[/]")
             console.print("[dim]Usage: clonebox export . or clonebox export <vm-name>[/]")
             return
-    
+
     console.print(f"[bold cyan]📦 Exporting VM: {name}[/]\n")
-    
+
     # Get actual disk location from virsh
     try:
         result = subprocess.run(
             ["virsh", "--connect", conn_uri, "domblklist", name, "--details"],
-            capture_output=True, text=True, timeout=10
+            capture_output=True,
+            text=True,
+            timeout=10,
         )
         if result.returncode != 0:
             console.print(f"[red]❌ VM '{name}' not found[/]")
             return
-        
+
         # Parse disk paths from output
         disk_path = None
         cloudinit_path = None
-        for line in result.stdout.split('\n'):
-            if 'disk' in line and '.qcow2' in line:
+        for line in result.stdout.split("\n"):
+            if "disk" in line and ".qcow2" in line:
                 parts = line.split()
                 if len(parts) >= 4:
                     disk_path = Path(parts[3])
-            elif 'cdrom' in line or '.iso' in line:
+            elif "cdrom" in line or ".iso" in line:
                 parts = line.split()
                 if len(parts) >= 4:
                     cloudinit_path = Path(parts[3])
-        
+
         if not disk_path or not disk_path.exists():
             console.print(f"[red]❌ VM disk not found[/]")
             return
-            
+
         console.print(f"[dim]Disk location: {disk_path}[/]")
-        
+
     except Exception as e:
         console.print(f"[red]❌ Error getting VM disk: {e}[/]")
         return
-    
+
     # Create export directory
     export_name = output or f"{name}-export.tar.gz"
     if not export_name.endswith(".tar.gz"):
         export_name += ".tar.gz"
-    
+
     export_path = Path(export_name).resolve()
     temp_dir = Path(f"/tmp/clonebox-export-{name}")
-    
+
     try:
         # Clean up temp dir if exists
         if temp_dir.exists():
             shutil.rmtree(temp_dir)
         temp_dir.mkdir(parents=True)
-        
+
         # Stop VM if running
         console.print("[cyan]Stopping VM for export...[/]")
         subprocess.run(
-            ["virsh", "--connect", conn_uri, "shutdown", name],
-            capture_output=True, timeout=30
+            ["virsh", "--connect", conn_uri, "shutdown", name], capture_output=True, timeout=30
         )
         import time
+
         time.sleep(5)
         subprocess.run(
-            ["virsh", "--connect", conn_uri, "destroy", name],
-            capture_output=True, timeout=10
+            ["virsh", "--connect", conn_uri, "destroy", name], capture_output=True, timeout=10
         )
-        
+
         # Export VM XML
         console.print("[cyan]Exporting VM definition...[/]")
         result = subprocess.run(
             ["virsh", "--connect", conn_uri, "dumpxml", name],
-            capture_output=True, text=True, timeout=30
+            capture_output=True,
+            text=True,
+            timeout=30,
         )
         (temp_dir / "vm.xml").write_text(result.stdout)
-        
+
         # Copy disk image
         console.print("[cyan]Copying disk image (this may take a while)...[/]")
         if disk_path and disk_path.exists():
             shutil.copy2(disk_path, temp_dir / "disk.qcow2")
-            console.print(f"[green]✅ Disk copied: {disk_path.stat().st_size / (1024**3):.2f} GB[/]")
+            console.print(
+                f"[green]✅ Disk copied: {disk_path.stat().st_size / (1024**3):.2f} GB[/]"
+            )
         else:
             console.print("[yellow]⚠️  Disk image not found[/]")
-        
+
         # Copy cloud-init ISO
         if cloudinit_path and cloudinit_path.exists():
             shutil.copy2(cloudinit_path, temp_dir / "cloud-init.iso")
             console.print("[green]✅ Cloud-init ISO copied[/]")
-        
+
         # Copy config file
         config_file = Path.cwd() / ".clonebox.yaml"
         if config_file.exists():
             shutil.copy2(config_file, temp_dir / ".clonebox.yaml")
-        
+
         # Copy .env file (without sensitive data warning)
         env_file = Path.cwd() / ".env"
         if env_file.exists():
             shutil.copy2(env_file, temp_dir / ".env")
-        
+
         # Include shared data if requested
         if include_data:
             console.print("[cyan]Bundling shared data (browser profiles, configs)...[/]")
             data_dir = temp_dir / "data"
             data_dir.mkdir()
-            
+
             # Load config to get paths
             if config_file.exists():
                 config = load_clonebox_config(config_file)
                 all_paths = config.get("paths", {}).copy()
                 all_paths.update(config.get("app_data_paths", {}))
-                
+
                 for idx, (host_path, guest_path) in enumerate(all_paths.items()):
                     host_p = Path(host_path)
                     if host_p.exists():
@@ -1392,41 +1457,45 @@ def cmd_export(args):
                         console.print(f"  [dim]Copying {host_path}...[/]")
                         try:
                             if host_p.is_dir():
-                                shutil.copytree(host_p, dest, symlinks=True, 
-                                              ignore=shutil.ignore_patterns('*.pyc', '__pycache__', '.git'))
+                                shutil.copytree(
+                                    host_p,
+                                    dest,
+                                    symlinks=True,
+                                    ignore=shutil.ignore_patterns("*.pyc", "__pycache__", ".git"),
+                                )
                             else:
                                 shutil.copy2(host_p, dest)
                         except Exception as e:
                             console.print(f"  [yellow]⚠️  Skipped {host_path}: {e}[/]")
-                
+
                 # Save path mapping
                 import json
+
                 (data_dir / "paths.json").write_text(json.dumps(all_paths, indent=2))
-        
+
         # Create tarball
         console.print(f"[cyan]Creating archive: {export_path}[/]")
         with tarfile.open(export_path, "w:gz") as tar:
             tar.add(temp_dir, arcname=name)
-        
+
         # Get size
         size_mb = export_path.stat().st_size / 1024 / 1024
-        
+
         console.print(f"\n[bold green]✅ Export complete![/]")
         console.print(f"   File: [cyan]{export_path}[/]")
         console.print(f"   Size: [cyan]{size_mb:.1f} MB[/]")
         console.print(f"\n[bold]To import on another workstation:[/]")
         console.print(f"   [cyan]clonebox import {export_path.name}[/]")
-        
+
     finally:
         # Cleanup
         if temp_dir.exists():
             shutil.rmtree(temp_dir)
-        
+
         # Restart VM
         console.print("\n[cyan]Restarting VM...[/]")
         subprocess.run(
-            ["virsh", "--connect", conn_uri, "start", name],
-            capture_output=True, timeout=30
+            ["virsh", "--connect", conn_uri, "start", name], capture_output=True, timeout=30
         )
 
 
@@ -1435,89 +1504,92 @@ def cmd_import(args):
     import subprocess
     import tarfile
     import shutil
-    
+
     archive_path = Path(args.archive).resolve()
     user_session = getattr(args, "user", False)
     conn_uri = "qemu:///session" if user_session else "qemu:///system"
-    
+
     if not archive_path.exists():
         console.print(f"[red]❌ Archive not found: {archive_path}[/]")
         return
-    
+
     console.print(f"[bold cyan]📥 Importing VM from: {archive_path}[/]\n")
-    
+
     # Determine storage path
     if user_session:
         storage_base = Path.home() / ".local/share/libvirt/images"
     else:
         storage_base = Path("/var/lib/libvirt/images")
-    
+
     storage_base.mkdir(parents=True, exist_ok=True)
-    
+
     temp_dir = Path(f"/tmp/clonebox-import-{archive_path.stem}")
-    
+
     try:
         # Extract archive
         console.print("[cyan]Extracting archive...[/]")
         if temp_dir.exists():
             shutil.rmtree(temp_dir)
         temp_dir.mkdir(parents=True)
-        
+
         with tarfile.open(archive_path, "r:gz") as tar:
             tar.extractall(temp_dir)
-        
+
         # Find extracted VM directory
         vm_dirs = list(temp_dir.iterdir())
         if not vm_dirs:
             console.print("[red]❌ Empty archive[/]")
             return
-        
+
         extracted_dir = vm_dirs[0]
         vm_name = extracted_dir.name
-        
+
         console.print(f"[cyan]VM Name: {vm_name}[/]")
-        
+
         # Create VM storage directory
         vm_storage = storage_base / vm_name
         if vm_storage.exists():
             if not getattr(args, "replace", False):
-                console.print(f"[red]❌ VM '{vm_name}' already exists. Use --replace to overwrite.[/]")
+                console.print(
+                    f"[red]❌ VM '{vm_name}' already exists. Use --replace to overwrite.[/]"
+                )
                 return
             shutil.rmtree(vm_storage)
-        
+
         vm_storage.mkdir(parents=True)
-        
+
         # Copy disk image
         console.print("[cyan]Copying disk image...[/]")
         disk_src = extracted_dir / "disk.qcow2"
         if disk_src.exists():
             shutil.copy2(disk_src, vm_storage / f"{vm_name}.qcow2")
-        
+
         # Copy cloud-init ISO
         cloudinit_src = extracted_dir / "cloud-init.iso"
         if cloudinit_src.exists():
             shutil.copy2(cloudinit_src, vm_storage / "cloud-init.iso")
-        
+
         # Copy config files to current directory
         config_src = extracted_dir / ".clonebox.yaml"
         if config_src.exists():
             shutil.copy2(config_src, Path.cwd() / ".clonebox.yaml")
             console.print("[green]✅ Copied .clonebox.yaml[/]")
-        
+
         env_src = extracted_dir / ".env"
         if env_src.exists():
             shutil.copy2(env_src, Path.cwd() / ".env")
             console.print("[green]✅ Copied .env[/]")
-        
+
         # Restore data if included
         data_dir = extracted_dir / "data"
         if data_dir.exists():
             import json
+
             paths_file = data_dir / "paths.json"
             if paths_file.exists():
                 paths_mapping = json.loads(paths_file.read_text())
                 console.print("\n[cyan]Restoring shared data...[/]")
-                
+
                 for idx, (host_path, guest_path) in enumerate(paths_mapping.items()):
                     src = data_dir / f"mount{idx}"
                     if src.exists():
@@ -1534,38 +1606,38 @@ def cmd_import(args):
                                     shutil.copy2(src, dest)
                         except Exception as e:
                             console.print(f"    [yellow]⚠️  Error: {e}[/]")
-        
+
         # Modify and define VM XML
         console.print("\n[cyan]Defining VM...[/]")
         xml_src = extracted_dir / "vm.xml"
         if xml_src.exists():
             xml_content = xml_src.read_text()
-            
+
             # Update paths in XML to new storage location
             # This is a simple replacement - may need more sophisticated handling
-            xml_content = xml_content.replace(
-                f"/home/", f"{Path.home()}/"
-            )
-            
+            xml_content = xml_content.replace(f"/home/", f"{Path.home()}/")
+
             # Write modified XML
             modified_xml = temp_dir / "vm-modified.xml"
             modified_xml.write_text(xml_content)
-            
+
             # Define VM
             result = subprocess.run(
                 ["virsh", "--connect", conn_uri, "define", str(modified_xml)],
-                capture_output=True, text=True, timeout=30
+                capture_output=True,
+                text=True,
+                timeout=30,
             )
-            
+
             if result.returncode == 0:
                 console.print(f"[green]✅ VM '{vm_name}' defined successfully![/]")
             else:
                 console.print(f"[yellow]⚠️  VM definition warning: {result.stderr}[/]")
-        
+
         console.print(f"\n[bold green]✅ Import complete![/]")
         console.print(f"\n[bold]To start the VM:[/]")
         console.print(f"   [cyan]clonebox start . {'--user' if user_session else ''}[/]")
-        
+
     finally:
         # Cleanup
         if temp_dir.exists():
@@ -1577,7 +1649,7 @@ def cmd_test(args):
     import subprocess
     import json
     from clonebox.validator import VMValidator
-    
+
     name = args.name
     user_session = getattr(args, "user", False)
     quick = getattr(args, "quick", False)
@@ -1586,7 +1658,7 @@ def cmd_test(args):
     require_running_apps = getattr(args, "require_running_apps", False)
     smoke_test = getattr(args, "smoke_test", False)
     conn_uri = "qemu:///session" if user_session else "qemu:///system"
-    
+
     # If name is a path, load config
     if name and (name.startswith(".") or name.startswith("/") or name.startswith("~")):
         target_path = Path(name).expanduser().resolve()
@@ -1599,9 +1671,9 @@ def cmd_test(args):
         if not config_file.exists():
             console.print("[red]❌ No .clonebox.yaml found in current directory[/]")
             return
-    
+
     console.print(f"[bold cyan]🧪 Testing VM configuration: {config_file}[/]\n")
-    
+
     # Load config
     try:
         config = load_clonebox_config(config_file)
@@ -1614,21 +1686,23 @@ def cmd_test(args):
     except Exception as e:
         console.print(f"[red]❌ Failed to load config: {e}[/]")
         return
-    
+
     console.print()
-    
+
     # Test 1: Check VM exists
     console.print("[bold]1. VM Existence Check[/]")
     try:
         result = subprocess.run(
             ["virsh", "--connect", conn_uri, "dominfo", vm_name],
-            capture_output=True, text=True, timeout=10
+            capture_output=True,
+            text=True,
+            timeout=10,
         )
         if result.returncode == 0:
             console.print("[green]✅ VM is defined in libvirt[/]")
             if verbose:
-                for line in result.stdout.split('\n'):
-                    if ':' in line:
+                for line in result.stdout.split("\n"):
+                    if ":" in line:
                         console.print(f"   {line}")
         else:
             console.print("[red]❌ VM not found in libvirt[/]")
@@ -1637,32 +1711,36 @@ def cmd_test(args):
     except Exception as e:
         console.print(f"[red]❌ Error checking VM: {e}[/]")
         return
-    
+
     console.print()
-    
+
     # Test 2: Check VM state
     console.print("[bold]2. VM State Check[/]")
     try:
         result = subprocess.run(
             ["virsh", "--connect", conn_uri, "domstate", vm_name],
-            capture_output=True, text=True, timeout=10
+            capture_output=True,
+            text=True,
+            timeout=10,
         )
         state = result.stdout.strip()
         if state == "running":
             console.print("[green]✅ VM is running[/]")
-            
+
             # Test network if running
             console.print("\n   Checking network...")
             try:
                 result = subprocess.run(
                     ["virsh", "--connect", conn_uri, "domifaddr", vm_name],
-                    capture_output=True, text=True, timeout=10
+                    capture_output=True,
+                    text=True,
+                    timeout=10,
                 )
                 if "192.168" in result.stdout or "10.0" in result.stdout:
                     console.print("[green]✅ VM has network access[/]")
                     if verbose:
-                        for line in result.stdout.split('\n'):
-                            if '192.168' in line or '10.0' in line:
+                        for line in result.stdout.split("\n"):
+                            if "192.168" in line or "10.0" in line:
                                 console.print(f"   IP: {line.split()[-1]}")
                 else:
                     console.print("[yellow]⚠️  No IP address detected via virsh domifaddr[/]")
@@ -1673,9 +1751,16 @@ def cmd_test(args):
                         from clonebox.cli import _qga_ping, _qga_exec
                     if _qga_ping(vm_name, conn_uri):
                         try:
-                            ip_out = _qga_exec(vm_name, conn_uri, "ip -4 -o addr show scope global | awk '{print $4}'", timeout=5)
+                            ip_out = _qga_exec(
+                                vm_name,
+                                conn_uri,
+                                "ip -4 -o addr show scope global | awk '{print $4}'",
+                                timeout=5,
+                            )
                             if ip_out and ip_out.strip():
-                                console.print(f"[green]✅ VM has network access (IP via QGA: {ip_out.strip()})[/]")
+                                console.print(
+                                    f"[green]✅ VM has network access (IP via QGA: {ip_out.strip()})[/]"
+                                )
                             else:
                                 console.print("[yellow]⚠️  IP not available via QGA[/]")
                         except Exception as e:
@@ -1689,18 +1774,26 @@ def cmd_test(args):
             console.print("   Run: clonebox start .")
     except Exception as e:
         console.print(f"[red]❌ Error checking VM state: {e}[/]")
-    
+
     console.print()
-    
+
     # Test 3: Check cloud-init status (if running)
     if not quick and state == "running":
         console.print("[bold]3. Cloud-init Status[/]")
         try:
             # Try to get cloud-init status via QEMU guest agent
             result = subprocess.run(
-                ["virsh", "--connect", conn_uri, "qemu-agent-command", vm_name,
-                 '{"execute":"guest-exec","arguments":{"path":"cloud-init","arg":["status"],"capture-output":true}}'],
-                capture_output=True, text=True, timeout=15
+                [
+                    "virsh",
+                    "--connect",
+                    conn_uri,
+                    "qemu-agent-command",
+                    vm_name,
+                    '{"execute":"guest-exec","arguments":{"path":"cloud-init","arg":["status"],"capture-output":true}}',
+                ],
+                capture_output=True,
+                text=True,
+                timeout=15,
             )
             if result.returncode == 0:
                 try:
@@ -1709,9 +1802,17 @@ def cmd_test(args):
                         pid = response["return"]["pid"]
                         # Get output
                         result2 = subprocess.run(
-                            ["virsh", "--connect", conn_uri, "qemu-agent-command", vm_name,
-                             f'{{"execute":"guest-exec-status","arguments":{"pid":{pid}}}}'],
-                            capture_output=True, text=True, timeout=15
+                            [
+                                "virsh",
+                                "--connect",
+                                conn_uri,
+                                "qemu-agent-command",
+                                vm_name,
+                                f'{{"execute":"guest-exec-status","arguments":{"pid":{pid}}}}',
+                            ],
+                            capture_output=True,
+                            text=True,
+                            timeout=15,
                         )
                         if result2.returncode == 0:
                             resp2 = json.loads(result2.stdout)
@@ -1719,31 +1820,38 @@ def cmd_test(args):
                                 output = resp2["return"]["out-data"]
                                 if output:
                                     import base64
+
                                     status = base64.b64decode(output).decode()
                                     if "done" in status.lower():
                                         console.print("[green]✅ Cloud-init completed[/]")
                                     elif "running" in status.lower():
                                         console.print("[yellow]⚠️  Cloud-init still running[/]")
                                     else:
-                                        console.print(f"[yellow]⚠️  Cloud-init status: {status.strip()}[/]")
+                                        console.print(
+                                            f"[yellow]⚠️  Cloud-init status: {status.strip()}[/]"
+                                        )
                 except:
                     pass
         except:
-            console.print("[yellow]⚠️  Could not check cloud-init (QEMU agent may not be running)[/]")
-    
+            console.print(
+                "[yellow]⚠️  Could not check cloud-init (QEMU agent may not be running)[/]"
+            )
+
     console.print()
-    
+
     # Test 4: Check mounts (if running)
     if not quick and state == "running":
         console.print("[bold]4. Mount Points Check[/]")
         all_paths = config.get("paths", {}).copy()
         all_paths.update(config.get("app_data_paths", {}))
-        
+
         if all_paths:
             for idx, (host_path, guest_path) in enumerate(all_paths.items()):
                 try:
                     # Use the same QGA helper as diagnose/status
-                    is_accessible = _qga_exec(vm_name, conn_uri, f"test -d {guest_path} && echo yes || echo no", timeout=5)
+                    is_accessible = _qga_exec(
+                        vm_name, conn_uri, f"test -d {guest_path} && echo yes || echo no", timeout=5
+                    )
                     if is_accessible == "yes":
                         console.print(f"[green]✅ {guest_path}[/]")
                     else:
@@ -1752,17 +1860,25 @@ def cmd_test(args):
                     console.print(f"[yellow]⚠️  {guest_path} (could not check)[/]")
         else:
             console.print("[dim]No mount points configured[/]")
-    
+
     console.print()
-    
+
     # Test 5: Run health check (if running and not quick)
     if not quick and state == "running":
         console.print("[bold]5. Health Check[/]")
         try:
             result = subprocess.run(
-                ["virsh", "--connect", conn_uri, "qemu-agent-command", vm_name,
-                 '{"execute":"guest-exec","arguments":{"path":"/usr/local/bin/clonebox-health","capture-output":true}}'],
-                capture_output=True, text=True, timeout=60
+                [
+                    "virsh",
+                    "--connect",
+                    conn_uri,
+                    "qemu-agent-command",
+                    vm_name,
+                    '{"execute":"guest-exec","arguments":{"path":"/usr/local/bin/clonebox-health","capture-output":true}}',
+                ],
+                capture_output=True,
+                text=True,
+                timeout=60,
             )
             if result.returncode == 0:
                 console.print("[green]✅ Health check triggered[/]")
@@ -1772,9 +1888,9 @@ def cmd_test(args):
                 console.print("   VM may not have been created with health checks")
         except Exception as e:
             console.print(f"[yellow]⚠️  Could not run health check: {e}[/]")
-    
+
     console.print()
-    
+
     # Run full validation if requested
     if validate_all and state == "running":
         validator = VMValidator(
@@ -1786,7 +1902,7 @@ def cmd_test(args):
             smoke_test=smoke_test,
         )
         results = validator.validate_all()
-        
+
         # Exit with error code if validations failed
         if results["overall"] == "partial":
             return 1
@@ -1798,7 +1914,7 @@ def cmd_test(args):
         console.print("[dim]  clonebox test . --user --validate[/]")
         console.print("\n[dim]For detailed health report, run in VM:[/]")
         console.print("[dim]  cat /var/log/clonebox-health.log[/]")
-    
+
     return 0
 
 
@@ -1811,16 +1927,16 @@ def load_env_file(env_path: Path) -> dict:
     env_vars = {}
     if not env_path.exists():
         return env_vars
-    
+
     with open(env_path) as f:
         for line in f:
             line = line.strip()
-            if not line or line.startswith('#'):
+            if not line or line.startswith("#"):
                 continue
-            if '=' in line:
-                key, value = line.split('=', 1)
+            if "=" in line:
+                key, value = line.split("=", 1)
                 env_vars[key.strip()] = value.strip()
-    
+
     return env_vars
 
 
@@ -1831,7 +1947,8 @@ def expand_env_vars(value, env_vars: dict):
         def replacer(match):
             var_name = match.group(1)
             return env_vars.get(var_name, os.environ.get(var_name, match.group(0)))
-        return re.sub(r'\$\{([^}]+)\}', replacer, value)
+
+        return re.sub(r"\$\{([^}]+)\}", replacer, value)
     elif isinstance(value, dict):
         return {k: expand_env_vars(v, env_vars) for k, v in value.items()}
     elif isinstance(value, list):
@@ -1866,12 +1983,27 @@ def generate_clonebox_yaml(
 
     # Services that should NOT be cloned to VM (host-specific)
     VM_EXCLUDED_SERVICES = {
-        "libvirtd", "virtlogd", "libvirt-guests", "qemu-guest-agent",
-        "bluetooth", "bluez", "upower", "thermald", "tlp", "power-profiles-daemon",
-        "gdm", "gdm3", "sddm", "lightdm",
-        "snap.cups.cups-browsed", "snap.cups.cupsd",
-        "ModemManager", "wpa_supplicant",
-        "accounts-daemon", "colord", "switcheroo-control",
+        "libvirtd",
+        "virtlogd",
+        "libvirt-guests",
+        "qemu-guest-agent",
+        "bluetooth",
+        "bluez",
+        "upower",
+        "thermald",
+        "tlp",
+        "power-profiles-daemon",
+        "gdm",
+        "gdm3",
+        "sddm",
+        "lightdm",
+        "snap.cups.cups-browsed",
+        "snap.cups.cupsd",
+        "ModemManager",
+        "wpa_supplicant",
+        "accounts-daemon",
+        "colord",
+        "switcheroo-control",
     }
 
     # Collect services (excluding host-specific ones)
@@ -1971,7 +2103,7 @@ def generate_clonebox_yaml(
     # Auto-detect packages from running applications and services
     app_packages = detector.suggest_packages_for_apps(snapshot.applications)
     service_packages = detector.suggest_packages_for_services(snapshot.running_services)
-    
+
     # Combine with base packages (apt only)
     base_packages = [
         "build-essential",
@@ -1979,12 +2111,12 @@ def generate_clonebox_yaml(
         "curl",
         "vim",
     ]
-    
+
     # Merge apt packages and deduplicate
     all_apt_packages = base_packages + app_packages["apt"] + service_packages["apt"]
     if deduplicate:
         all_apt_packages = deduplicate_list(all_apt_packages)
-    
+
     # Merge snap packages and deduplicate
     all_snap_packages = app_packages["snap"] + service_packages["snap"]
     if deduplicate:
@@ -2000,7 +2132,9 @@ def generate_clonebox_yaml(
             if guest_path == "/home/ubuntu/.config/JetBrains":
                 remapped[host_path] = "/home/ubuntu/snap/pycharm-community/common/.config/JetBrains"
             elif guest_path == "/home/ubuntu/.local/share/JetBrains":
-                remapped[host_path] = "/home/ubuntu/snap/pycharm-community/common/.local/share/JetBrains"
+                remapped[host_path] = (
+                    "/home/ubuntu/snap/pycharm-community/common/.local/share/JetBrains"
+                )
             elif guest_path == "/home/ubuntu/.cache/JetBrains":
                 remapped[host_path] = "/home/ubuntu/snap/pycharm-community/common/.cache/JetBrains"
             else:
@@ -2074,10 +2208,10 @@ def load_clonebox_config(path: Path) -> dict:
     # Load YAML config
     with open(config_file) as f:
         config = yaml.safe_load(f)
-    
+
     # Expand environment variables in config
     config = expand_env_vars(config, env_vars)
-    
+
     return config
 
 
@@ -2085,42 +2219,45 @@ def monitor_cloud_init_status(vm_name: str, user_session: bool = False, timeout:
     """Monitor cloud-init status in VM and show progress."""
     import subprocess
     import time
-    
+
     conn_uri = "qemu:///session" if user_session else "qemu:///system"
     start_time = time.time()
     shutdown_count = 0  # Count consecutive shutdown detections
     restart_detected = False
-    
+
     with Progress(
         SpinnerColumn(),
         TextColumn("[progress.description]{task.description}"),
         console=console,
     ) as progress:
         task = progress.add_task("[cyan]Starting VM and initializing...", total=None)
-        
+
         while time.time() - start_time < timeout:
             try:
                 elapsed = int(time.time() - start_time)
                 minutes = elapsed // 60
                 seconds = elapsed % 60
-                
+
                 # Check VM state
                 result = subprocess.run(
                     ["virsh", "--connect", conn_uri, "domstate", vm_name],
                     capture_output=True,
                     text=True,
-                    timeout=5
+                    timeout=5,
                 )
-                
+
                 vm_state = result.stdout.strip().lower()
-                
+
                 if "shut off" in vm_state or "shutting down" in vm_state:
                     # VM is shutting down - count consecutive detections
                     shutdown_count += 1
                     if shutdown_count >= 3 and not restart_detected:
                         # Confirmed shutdown after 3 consecutive checks
                         restart_detected = True
-                        progress.update(task, description="[yellow]⟳ VM restarting after package installation...")
+                        progress.update(
+                            task,
+                            description="[yellow]⟳ VM restarting after package installation...",
+                        )
                     time.sleep(3)
                     continue
                 else:
@@ -2128,13 +2265,15 @@ def monitor_cloud_init_status(vm_name: str, user_session: bool = False, timeout:
                     if shutdown_count > 0 and shutdown_count < 3:
                         # Was a brief glitch, not a real shutdown
                         shutdown_count = 0
-                
+
                 if restart_detected and "running" in vm_state and shutdown_count >= 3:
                     # VM restarted successfully - GUI should be ready
-                    progress.update(task, description=f"[green]✓ GUI ready! Total time: {minutes}m {seconds}s")
+                    progress.update(
+                        task, description=f"[green]✓ GUI ready! Total time: {minutes}m {seconds}s"
+                    )
                     time.sleep(2)
                     break
-                
+
                 # Estimate remaining time (total ~12-15 minutes for full desktop install)
                 if elapsed < 60:
                     remaining = "~12-15 minutes"
@@ -2146,23 +2285,33 @@ def monitor_cloud_init_status(vm_name: str, user_session: bool = False, timeout:
                     remaining = "finishing soon..."
                 else:
                     remaining = "almost done"
-                
+
                 if restart_detected:
-                    progress.update(task, description=f"[cyan]Starting GUI... ({minutes}m {seconds}s, {remaining})")
+                    progress.update(
+                        task,
+                        description=f"[cyan]Starting GUI... ({minutes}m {seconds}s, {remaining})",
+                    )
                 else:
-                    progress.update(task, description=f"[cyan]Installing desktop packages... ({minutes}m {seconds}s, {remaining})")
-                
+                    progress.update(
+                        task,
+                        description=f"[cyan]Installing desktop packages... ({minutes}m {seconds}s, {remaining})",
+                    )
+
             except (subprocess.TimeoutExpired, Exception) as e:
                 elapsed = int(time.time() - start_time)
                 minutes = elapsed // 60
                 seconds = elapsed % 60
-                progress.update(task, description=f"[cyan]Configuring VM... ({minutes}m {seconds}s)")
-            
+                progress.update(
+                    task, description=f"[cyan]Configuring VM... ({minutes}m {seconds}s)"
+                )
+
             time.sleep(3)
-        
+
         # Final status
         if time.time() - start_time >= timeout:
-            progress.update(task, description="[yellow]⚠ Monitoring timeout - VM continues in background")
+            progress.update(
+                task, description="[yellow]⚠ Monitoring timeout - VM continues in background"
+            )
 
 
 def create_vm_from_config(
@@ -2175,7 +2324,7 @@ def create_vm_from_config(
     # Merge paths and app_data_paths
     all_paths = config.get("paths", {}).copy()
     all_paths.update(config.get("app_data_paths", {}))
-    
+
     vm_config = VMConfig(
         name=config["vm"]["name"],
         ram_mb=config["vm"].get("ram_mb", 4096),
@@ -2211,7 +2360,7 @@ def create_vm_from_config(
 
     if start:
         cloner.start_vm(vm_config.name, open_viewer=vm_config.gui, console=console)
-        
+
         # Monitor cloud-init progress if GUI is enabled
         if vm_config.gui:
             console.print("\n[bold cyan]📊 Monitoring setup progress...[/]")
@@ -2220,7 +2369,9 @@ def create_vm_from_config(
             except KeyboardInterrupt:
                 console.print("\n[yellow]Monitoring stopped. VM continues setup in background.[/]")
             except Exception as e:
-                console.print(f"\n[dim]Note: Could not monitor status ({e}). VM continues setup in background.[/]")
+                console.print(
+                    f"\n[dim]Note: Could not monitor status ({e}). VM continues setup in background.[/]"
+                )
 
     return vm_uuid
 
@@ -2292,17 +2443,19 @@ def cmd_clone(args):
     # Dry run - show what would be created and exit
     if dry_run:
         config = yaml.safe_load(yaml_content)
-        console.print(Panel(
-            f"[bold]VM Name:[/] {config['vm']['name']}\n"
-            f"[bold]RAM:[/] {config['vm'].get('ram_mb', 4096)} MB\n"
-            f"[bold]vCPUs:[/] {config['vm'].get('vcpus', 4)}\n"
-            f"[bold]Network:[/] {config['vm'].get('network_mode', 'auto')}\n"
-            f"[bold]Paths:[/] {len(config.get('paths', {}))} mounts\n"
-            f"[bold]Packages:[/] {len(config.get('packages', []))} packages\n"
-            f"[bold]Services:[/] {len(config.get('services', []))} services",
-            title="[bold cyan]Would create VM[/]",
-            border_style="cyan",
-        ))
+        console.print(
+            Panel(
+                f"[bold]VM Name:[/] {config['vm']['name']}\n"
+                f"[bold]RAM:[/] {config['vm'].get('ram_mb', 4096)} MB\n"
+                f"[bold]vCPUs:[/] {config['vm'].get('vcpus', 4)}\n"
+                f"[bold]Network:[/] {config['vm'].get('network_mode', 'auto')}\n"
+                f"[bold]Paths:[/] {len(config.get('paths', {}))} mounts\n"
+                f"[bold]Packages:[/] {len(config.get('packages', []))} packages\n"
+                f"[bold]Services:[/] {len(config.get('services', []))} services",
+                title="[bold cyan]Would create VM[/]",
+                border_style="cyan",
+            )
+        )
         console.print("\n[dim]Config preview:[/]")
         console.print(Panel(yaml_content, title="[bold].clonebox.yaml[/]", border_style="dim"))
         console.print("\n[yellow]ℹ️  Dry run complete. No changes made.[/]")
@@ -2357,14 +2510,16 @@ def cmd_clone(args):
 
             # Show GUI startup info if GUI is enabled
             if config.get("vm", {}).get("gui", False):
-                username = config['vm'].get('username', 'ubuntu')
-                password = config['vm'].get('password', 'ubuntu')
+                username = config["vm"].get("username", "ubuntu")
+                password = config["vm"].get("password", "ubuntu")
                 console.print("\n[bold yellow]⏰ GUI Setup Process:[/]")
                 console.print("  [yellow]•[/] Installing desktop environment (~5-10 minutes)")
                 console.print("  [yellow]•[/] Running health checks on all components")
                 console.print("  [yellow]•[/] Automatic restart after installation")
                 console.print("  [yellow]•[/] GUI login screen will appear")
-                console.print(f"  [yellow]•[/] Login: [cyan]{username}[/] / [cyan]{'*' * len(password)}[/] (from .env)")
+                console.print(
+                    f"  [yellow]•[/] Login: [cyan]{username}[/] / [cyan]{'*' * len(password)}[/] (from .env)"
+                )
                 console.print("\n[dim]💡 Progress will be monitored automatically below[/]")
 
             # Show health check info
@@ -2544,7 +2699,9 @@ def main():
 
     # Stop command
     stop_parser = subparsers.add_parser("stop", help="Stop a VM")
-    stop_parser.add_argument("name", nargs="?", default=None, help="VM name or '.' to use .clonebox.yaml")
+    stop_parser.add_argument(
+        "name", nargs="?", default=None, help="VM name or '.' to use .clonebox.yaml"
+    )
     stop_parser.add_argument("--force", "-f", action="store_true", help="Force stop")
     stop_parser.add_argument(
         "-u",
@@ -2556,7 +2713,9 @@ def main():
 
     # Restart command
     restart_parser = subparsers.add_parser("restart", help="Restart a VM (stop and start)")
-    restart_parser.add_argument("name", nargs="?", default=None, help="VM name or '.' to use .clonebox.yaml")
+    restart_parser.add_argument(
+        "name", nargs="?", default=None, help="VM name or '.' to use .clonebox.yaml"
+    )
     restart_parser.add_argument(
         "-f",
         "--force",
@@ -2578,7 +2737,9 @@ def main():
 
     # Delete command
     delete_parser = subparsers.add_parser("delete", help="Delete a VM")
-    delete_parser.add_argument("name", nargs="?", default=None, help="VM name or '.' to use .clonebox.yaml")
+    delete_parser.add_argument(
+        "name", nargs="?", default=None, help="VM name or '.' to use .clonebox.yaml"
+    )
     delete_parser.add_argument("--yes", "-y", action="store_true", help="Skip confirmation")
     delete_parser.add_argument("--keep-storage", action="store_true", help="Keep disk images")
     delete_parser.add_argument(
@@ -2609,7 +2770,9 @@ def main():
         help="Container engine: auto (default), podman, docker",
     )
     container_parser.set_defaults(func=lambda args, p=container_parser: p.print_help())
-    container_sub = container_parser.add_subparsers(dest="container_command", help="Container commands")
+    container_sub = container_parser.add_subparsers(
+        dest="container_command", help="Container commands"
+    )
 
     container_up = container_sub.add_parser("up", help="Start container")
     container_up.add_argument(
@@ -2695,7 +2858,9 @@ def main():
 
     # Dashboard command
     dashboard_parser = subparsers.add_parser("dashboard", help="Run local dashboard")
-    dashboard_parser.add_argument("--port", type=int, default=8080, help="Port to bind (default: 8080)")
+    dashboard_parser.add_argument(
+        "--port", type=int, default=8080, help="Port to bind (default: 8080)"
+    )
     dashboard_parser.set_defaults(func=cmd_dashboard)
 
     # Detect command
@@ -2770,9 +2935,7 @@ def main():
         action="store_true",
         help="Use user session (qemu:///session)",
     )
-    status_parser.add_argument(
-        "--health", "-H", action="store_true", help="Run full health check"
-    )
+    status_parser.add_argument("--health", "-H", action="store_true", help="Run full health check")
     status_parser.add_argument(
         "--verbose", "-v", action="store_true", help="Show detailed diagnostics (QGA, stderr, etc.)"
     )
@@ -2794,9 +2957,7 @@ def main():
     diagnose_parser.add_argument(
         "--verbose", "-v", action="store_true", help="Show more low-level details"
     )
-    diagnose_parser.add_argument(
-        "--json", action="store_true", help="Print diagnostics as JSON"
-    )
+    diagnose_parser.add_argument("--json", action="store_true", help="Print diagnostics as JSON")
     diagnose_parser.set_defaults(func=cmd_diagnose)
 
     watch_parser = subparsers.add_parser(
@@ -2868,8 +3029,10 @@ def main():
         "-o", "--output", help="Output archive filename (default: <vmname>-export.tar.gz)"
     )
     export_parser.add_argument(
-        "--include-data", "-d", action="store_true",
-        help="Include shared data (browser profiles, configs) in export"
+        "--include-data",
+        "-d",
+        action="store_true",
+        help="Include shared data (browser profiles, configs) in export",
     )
     export_parser.set_defaults(func=cmd_export)
 
@@ -2895,9 +3058,7 @@ def main():
     test_parser.add_argument(
         "--quick", action="store_true", help="Quick test (no deep health checks)"
     )
-    test_parser.add_argument(
-        "--verbose", "-v", action="store_true", help="Verbose output"
-    )
+    test_parser.add_argument("--verbose", "-v", action="store_true", help="Verbose output")
     test_parser.add_argument(
         "--validate", action="store_true", help="Run full validation (mounts, packages, services)"
     )

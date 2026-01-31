@@ -18,11 +18,14 @@ from clonebox.detector import (
 class TestDetectedDataclasses:
     """Test dataclasses for detected items."""
 
-    @pytest.mark.parametrize("name,status,enabled", [
-        ("docker", "running", True),
-        ("nginx", "stopped", False),
-        ("postgresql", "running", True),
-    ])
+    @pytest.mark.parametrize(
+        "name,status,enabled",
+        [
+            ("docker", "running", True),
+            ("nginx", "stopped", False),
+            ("postgresql", "running", True),
+        ],
+    )
     def test_detected_service(self, name, status, enabled):
         svc = DetectedService(
             name=name, status=status, description=f"{name} service", enabled=enabled
@@ -31,11 +34,14 @@ class TestDetectedDataclasses:
         assert svc.status == status
         assert svc.enabled is enabled
 
-    @pytest.mark.parametrize("name,pid,memory_mb", [
-        ("python3", 1234, 100.5),
-        ("node", 5678, 200.0),
-        ("java", 9012, 1024.0),
-    ])
+    @pytest.mark.parametrize(
+        "name,pid,memory_mb",
+        [
+            ("python3", 1234, 100.5),
+            ("node", 5678, 200.0),
+            ("java", 9012, 1024.0),
+        ],
+    )
     def test_detected_application(self, name, pid, memory_mb):
         app = DetectedApplication(
             name=name,
@@ -49,15 +55,16 @@ class TestDetectedDataclasses:
         assert app.pid == pid
         assert app.memory_mb == memory_mb
 
-    @pytest.mark.parametrize("path,path_type,size_mb", [
-        ("/home/user/projects", "project", 500.0),
-        ("/home/user/.config", "config", 10.0),
-        ("/home/user/data", "data", 1000.0),
-    ])
+    @pytest.mark.parametrize(
+        "path,path_type,size_mb",
+        [
+            ("/home/user/projects", "project", 500.0),
+            ("/home/user/.config", "config", 10.0),
+            ("/home/user/data", "data", 1000.0),
+        ],
+    )
     def test_detected_path(self, path, path_type, size_mb):
-        detected = DetectedPath(
-            path=path, type=path_type, size_mb=size_mb, description="Test path"
-        )
+        detected = DetectedPath(path=path, type=path_type, size_mb=size_mb, description="Test path")
         assert detected.path == path
         assert detected.type == path_type
 
@@ -172,13 +179,22 @@ class TestDetectorHelpers:
         assert size > 0
         assert size == len("Hello World!")
 
-    @pytest.mark.parametrize("docker_output,expected_count,expected_names", [
-        ("myapp\tmyimage:latest\tUp 2 hours\ndb\tpostgres:15\tUp 2 hours\n", 2, ["myapp", "db"]),
-        ("web\tnginx:latest\tUp 1 hour\n", 1, ["web"]),
-        ("", 0, []),
-    ])
+    @pytest.mark.parametrize(
+        "docker_output,expected_count,expected_names",
+        [
+            (
+                "myapp\tmyimage:latest\tUp 2 hours\ndb\tpostgres:15\tUp 2 hours\n",
+                2,
+                ["myapp", "db"],
+            ),
+            ("web\tnginx:latest\tUp 1 hour\n", 1, ["web"]),
+            ("", 0, []),
+        ],
+    )
     @patch("clonebox.detector.subprocess.run")
-    def test_detect_docker_containers(self, mock_run, docker_output, expected_count, expected_names):
+    def test_detect_docker_containers(
+        self, mock_run, docker_output, expected_count, expected_names
+    ):
         mock_run.return_value = MagicMock(stdout=docker_output, returncode=0)
 
         detector = SystemDetector()

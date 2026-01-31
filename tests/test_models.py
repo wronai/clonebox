@@ -19,13 +19,16 @@ class TestVMSettings:
         assert settings.vcpus == 4
         assert settings.gui is True
 
-    @pytest.mark.parametrize("name,valid", [
-        ("my-vm", True),
-        ("test-vm-123", True),
-        ("", False),
-        ("   ", False),
-        ("a" * 65, False),
-    ])
+    @pytest.mark.parametrize(
+        "name,valid",
+        [
+            ("my-vm", True),
+            ("test-vm-123", True),
+            ("", False),
+            ("   ", False),
+            ("a" * 65, False),
+        ],
+    )
     def test_name_validation(self, name, valid):
         if valid:
             settings = VMSettings(name=name)
@@ -34,13 +37,16 @@ class TestVMSettings:
             with pytest.raises(ValueError):
                 VMSettings(name=name)
 
-    @pytest.mark.parametrize("network_mode,valid", [
-        ("auto", True),
-        ("default", True),
-        ("user", True),
-        ("invalid", False),
-        ("bridge", False),
-    ])
+    @pytest.mark.parametrize(
+        "network_mode,valid",
+        [
+            ("auto", True),
+            ("default", True),
+            ("user", True),
+            ("invalid", False),
+            ("bridge", False),
+        ],
+    )
     def test_network_mode_validation(self, network_mode, valid):
         if valid:
             settings = VMSettings(network_mode=network_mode)
@@ -49,13 +55,16 @@ class TestVMSettings:
             with pytest.raises(ValueError):
                 VMSettings(network_mode=network_mode)
 
-    @pytest.mark.parametrize("ram_mb,valid", [
-        (512, True),
-        (4096, True),
-        (131072, True),
-        (256, False),
-        (200000, False),
-    ])
+    @pytest.mark.parametrize(
+        "ram_mb,valid",
+        [
+            (512, True),
+            (4096, True),
+            (131072, True),
+            (256, False),
+            (200000, False),
+        ],
+    )
     def test_ram_validation(self, ram_mb, valid):
         if valid:
             settings = VMSettings(ram_mb=ram_mb)
@@ -121,12 +130,12 @@ class TestCloneBoxConfig:
             packages=["git", "curl"],
             services=["docker"],
         )
-        
+
         config_file = tmp_path / ".clonebox.yaml"
         config.save(config_file)
-        
+
         assert config_file.exists()
-        
+
         loaded = CloneBoxConfig.load(config_file)
         assert loaded.vm.name == "test-vm"
         assert loaded.packages == ["git", "curl"]
@@ -134,7 +143,7 @@ class TestCloneBoxConfig:
     def test_load_from_directory(self, tmp_path):
         config = CloneBoxConfig(vm=VMSettings(name="dir-vm"))
         config.save(tmp_path / ".clonebox.yaml")
-        
+
         loaded = CloneBoxConfig.load(tmp_path)
         assert loaded.vm.name == "dir-vm"
 
@@ -148,9 +157,9 @@ class TestCloneBoxConfig:
             paths={"/home/user/project": "/mnt/project"},
             packages=["git"],
         )
-        
+
         vm_config = config.to_vm_config()
-        
+
         assert vm_config.name == "convert-vm"
         assert vm_config.ram_mb == 2048
         assert vm_config.vcpus == 2
@@ -171,12 +180,12 @@ class TestCloneBoxConfigYAML:
             services=["docker", "nginx"],
             post_commands=["echo hello"],
         )
-        
+
         config_file = tmp_path / "config.yaml"
         original.save(config_file)
-        
+
         loaded = CloneBoxConfig.load(config_file)
-        
+
         assert loaded.vm.name == original.vm.name
         assert loaded.vm.ram_mb == original.vm.ram_mb
         assert loaded.paths == original.paths
@@ -205,9 +214,9 @@ services:
 """
         config_file = tmp_path / ".clonebox.yaml"
         config_file.write_text(yaml_content)
-        
+
         config = CloneBoxConfig.load(config_file)
-        
+
         assert config.vm.name == "generated-vm"
         assert config.vm.ram_mb == 8192
         assert config.generated == "2024-01-01T00:00:00"

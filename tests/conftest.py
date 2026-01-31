@@ -1,6 +1,7 @@
 """
 Pytest fixtures and configuration for CloneBox tests.
 """
+
 import os
 import tempfile
 from pathlib import Path
@@ -46,11 +47,11 @@ def module_vm_config(tmp_path_factory):
         "services": ["docker"],
         "post_commands": [],
     }
-    
+
     config_file = tmp_path / ".clonebox.yaml"
     config_file.write_text(yaml.dump(config))
     (tmp_path / "projects").mkdir(exist_ok=True)
-    
+
     return tmp_path
 
 
@@ -80,71 +81,64 @@ def temp_config_dir(tmp_path):
         "services": ["docker"],
         "post_commands": [],
     }
-    
+
     config_file = tmp_path / ".clonebox.yaml"
     config_file.write_text(yaml.dump(config))
-    
+
     (tmp_path / "projects").mkdir(exist_ok=True)
     (tmp_path / "data").mkdir(exist_ok=True)
     (tmp_path / ".config/test").mkdir(parents=True, exist_ok=True)
-    
+
     (tmp_path / "projects" / "test.py").write_text("print('hello')")
     (tmp_path / "data" / "data.txt").write_text("test data")
-    
+
     yield tmp_path
 
 
 @pytest.fixture(scope="module")
 def module_mock_subprocess():
     """Module-scoped mock subprocess for shared tests."""
-    with patch('subprocess.run') as mock_run:
-        mock_run.return_value = MagicMock(
-            returncode=0,
-            stdout="",
-            stderr=""
-        )
+    with patch("subprocess.run") as mock_run:
+        mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
         yield mock_run
 
 
 @pytest.fixture
 def mock_subprocess():
     """Per-test mock subprocess when isolation needed."""
-    with patch('subprocess.run') as mock_run:
-        mock_run.return_value = MagicMock(
-            returncode=0,
-            stdout="",
-            stderr=""
-        )
+    with patch("subprocess.run") as mock_run:
+        mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
         yield mock_run
 
 
 @pytest.fixture(scope="module")
 def module_mock_virsh():
     """Module-scoped virsh mock for shared VM tests."""
-    with patch('subprocess.run') as mock_run:
+    with patch("subprocess.run") as mock_run:
+
         def side_effect(*args, **kwargs):
-            cmd = args[0] if args else kwargs.get('args', [])
-            cmd_str = ' '.join(cmd) if isinstance(cmd, list) else cmd
-            
+            cmd = args[0] if args else kwargs.get("args", [])
+            cmd_str = " ".join(cmd) if isinstance(cmd, list) else cmd
+
             result = MagicMock()
             result.returncode = 0
             result.stderr = ""
-            
-            if 'domstate' in cmd_str:
+
+            if "domstate" in cmd_str:
                 result.stdout = "running"
-            elif 'dominfo' in cmd_str:
+            elif "dominfo" in cmd_str:
                 result.stdout = "Name: test-vm\nState: running\n"
-            elif 'domifaddr' in cmd_str:
+            elif "domifaddr" in cmd_str:
                 result.stdout = "vnet0 52:54:00:xx:xx:xx ipv4 192.168.122.100/24"
-            elif 'list' in cmd_str:
+            elif "list" in cmd_str:
                 result.stdout = " Id   Name         State\n 1    test-vm     running"
-            elif 'qemu-agent-command' in cmd_str:
+            elif "qemu-agent-command" in cmd_str:
                 result.stdout = '{"return":{"pid":1234}}'
             else:
                 result.stdout = ""
-            
+
             return result
-        
+
         mock_run.side_effect = side_effect
         yield mock_run
 
@@ -152,30 +146,31 @@ def module_mock_virsh():
 @pytest.fixture
 def mock_virsh():
     """Mock virsh commands for VM testing."""
-    with patch('subprocess.run') as mock_run:
+    with patch("subprocess.run") as mock_run:
+
         def side_effect(*args, **kwargs):
-            cmd = args[0] if args else kwargs.get('args', [])
-            cmd_str = ' '.join(cmd) if isinstance(cmd, list) else cmd
-            
+            cmd = args[0] if args else kwargs.get("args", [])
+            cmd_str = " ".join(cmd) if isinstance(cmd, list) else cmd
+
             result = MagicMock()
             result.returncode = 0
             result.stderr = ""
-            
-            if 'domstate' in cmd_str:
+
+            if "domstate" in cmd_str:
                 result.stdout = "running"
-            elif 'dominfo' in cmd_str:
+            elif "dominfo" in cmd_str:
                 result.stdout = "Name: test-vm\nState: running\n"
-            elif 'domifaddr' in cmd_str:
+            elif "domifaddr" in cmd_str:
                 result.stdout = "vnet0 52:54:00:xx:xx:xx ipv4 192.168.122.100/24"
-            elif 'list' in cmd_str:
+            elif "list" in cmd_str:
                 result.stdout = " Id   Name         State\n 1    test-vm     running"
-            elif 'qemu-agent-command' in cmd_str:
+            elif "qemu-agent-command" in cmd_str:
                 result.stdout = '{"return":{"pid":1234}}'
             else:
                 result.stdout = ""
-            
+
             return result
-        
+
         mock_run.side_effect = side_effect
         yield mock_run
 
@@ -183,7 +178,7 @@ def mock_virsh():
 @pytest.fixture(scope="session")
 def session_libvirt_mock():
     """Session-scoped libvirt mock - shared across all tests."""
-    with patch('clonebox.cloner.libvirt') as mock_libvirt:
+    with patch("clonebox.cloner.libvirt") as mock_libvirt:
         mock_conn = MagicMock()
         mock_conn.isAlive.return_value = True
         mock_conn.listDomainsID.return_value = []
@@ -201,13 +196,13 @@ def module_system_detector():
         DetectedService,
         SystemSnapshot,
     )
-    
+
     services = [
         DetectedService("docker", "running", enabled=True),
         DetectedService("nginx", "running", enabled=True),
         DetectedService("postgresql", "running", enabled=True),
     ]
-    
+
     apps = [
         DetectedApplication(
             name="python3",
@@ -215,18 +210,18 @@ def module_system_detector():
             cmdline="python3 app.py",
             exe="/usr/bin/python3",
             cwd="/home/user/project",
-            memory_mb=100.0
+            memory_mb=100.0,
         ),
     ]
-    
+
     paths = [
         DetectedPath("/home/user/projects", "project", 500.0),
         DetectedPath("/home/user/.config/JetBrains", "config", 100.0),
     ]
-    
+
     snapshot = SystemSnapshot(services=services, applications=apps, paths=paths)
-    
-    with patch('clonebox.detector.SystemDetector') as MockDetector:
+
+    with patch("clonebox.detector.SystemDetector") as MockDetector:
         detector = MagicMock()
         detector.detect_all.return_value = snapshot
         detector.get_system_info.return_value = {
@@ -251,13 +246,13 @@ def mock_system_detector():
         DetectedService,
         SystemSnapshot,
     )
-    
+
     services = [
         DetectedService("docker", "running", enabled=True),
         DetectedService("nginx", "running", enabled=True),
         DetectedService("postgresql", "running", enabled=True),
     ]
-    
+
     apps = [
         DetectedApplication(
             name="python3",
@@ -265,7 +260,7 @@ def mock_system_detector():
             cmdline="python3 app.py",
             exe="/usr/bin/python3",
             cwd="/home/user/project",
-            memory_mb=100.0
+            memory_mb=100.0,
         ),
         DetectedApplication(
             name="pycharm",
@@ -273,19 +268,19 @@ def mock_system_detector():
             cmdline="pycharm",
             exe="/opt/pycharm/bin/pycharm",
             cwd="/home/user/projects",
-            memory_mb=2000.0
+            memory_mb=2000.0,
         ),
     ]
-    
+
     paths = [
         DetectedPath("/home/user/projects", "project", 500.0),
         DetectedPath("/home/user/.config/JetBrains", "config", 100.0),
         DetectedPath("/home/user/Downloads", "data", 1000.0),
     ]
-    
+
     snapshot = SystemSnapshot(services=services, applications=apps, paths=paths)
-    
-    with patch('clonebox.detector.SystemDetector') as MockDetector:
+
+    with patch("clonebox.detector.SystemDetector") as MockDetector:
         detector = MagicMock()
         detector.detect_all.return_value = snapshot
         detector.get_system_info.return_value = {
@@ -362,6 +357,7 @@ def sample_vm_config_session():
 def sample_vm_config(sample_vm_config_session):
     """Per-test sample VMConfig dictionary (copy of session-scoped)."""
     import copy
+
     return copy.deepcopy(sample_vm_config_session)
 
 
@@ -370,6 +366,7 @@ def sample_vm_config(sample_vm_config_session):
 def cli_runner():
     """Module-scoped CliRunner for CLI tests."""
     from click.testing import CliRunner
+
     return CliRunner()
 
 
@@ -377,6 +374,7 @@ def cli_runner():
 def isolated_cli_runner():
     """Per-test isolated CliRunner with temp directory."""
     from click.testing import CliRunner
+
     runner = CliRunner()
     with runner.isolated_filesystem():
         yield runner
@@ -394,24 +392,25 @@ def pytest_collection_modifyitems(config, items):
     """Auto-skip e2e tests when libvirt/KVM not available."""
     import os
     import shutil
-    
+
     # Check if libvirt is available
     try:
         import libvirt
+
         libvirt_available = True
     except ImportError:
         libvirt_available = False
-    
+
     # Check if KVM is available
     kvm_available = os.path.exists("/dev/kvm")
-    
+
     # Check if running in CI
     is_ci = os.environ.get("CI") == "true" or os.environ.get("GITHUB_ACTIONS") == "true"
-    
+
     skip_e2e = pytest.mark.skip(reason="libvirt/KVM not available or running in CI")
     container_available = shutil.which("podman") is not None or shutil.which("docker") is not None
     skip_container = pytest.mark.skip(reason="podman/docker not available or running in CI")
-    
+
     for item in items:
         is_container = "container" in item.keywords
         is_e2e = "e2e" in item.keywords

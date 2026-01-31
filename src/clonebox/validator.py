@@ -1,6 +1,7 @@
 """
 VM validation module - validates VM state against YAML configuration.
 """
+
 import subprocess
 import json
 import base64
@@ -14,7 +15,7 @@ from rich.table import Table
 
 class VMValidator:
     """Validates VM configuration against expected state from YAML."""
-    
+
     def __init__(
         self,
         config: dict,
@@ -37,100 +38,116 @@ class VMValidator:
             "services": {"passed": 0, "failed": 0, "total": 0, "details": []},
             "apps": {"passed": 0, "failed": 0, "total": 0, "details": []},
             "smoke": {"passed": 0, "failed": 0, "total": 0, "details": []},
-            "overall": "unknown"
+            "overall": "unknown",
         }
-    
+
     def _exec_in_vm(self, command: str, timeout: int = 10) -> Optional[str]:
         """Execute command in VM using QEMU guest agent."""
         try:
             # Execute command
             result = subprocess.run(
-                ["virsh", "--connect", self.conn_uri, "qemu-agent-command", self.vm_name,
-                 f'{{"execute":"guest-exec","arguments":{{"path":"/bin/sh","arg":["-c","{command}"],"capture-output":true}}}}'],
-                capture_output=True, text=True, timeout=timeout
+                [
+                    "virsh",
+                    "--connect",
+                    self.conn_uri,
+                    "qemu-agent-command",
+                    self.vm_name,
+                    f'{{"execute":"guest-exec","arguments":{{"path":"/bin/sh","arg":["-c","{command}"],"capture-output":true}}}}',
+                ],
+                capture_output=True,
+                text=True,
+                timeout=timeout,
             )
-            
+
             if result.returncode != 0:
                 return None
-            
+
             response = json.loads(result.stdout)
             if "return" not in response or "pid" not in response["return"]:
                 return None
-            
+
             pid = response["return"]["pid"]
-            
+
             # Wait a bit for command to complete
             time.sleep(0.3)
-            
+
             # Get result
             status_result = subprocess.run(
-                ["virsh", "--connect", self.conn_uri, "qemu-agent-command", self.vm_name,
-                 f'{{"execute":"guest-exec-status","arguments":{{"pid":{pid}}}}}'],
-                capture_output=True, text=True, timeout=5
+                [
+                    "virsh",
+                    "--connect",
+                    self.conn_uri,
+                    "qemu-agent-command",
+                    self.vm_name,
+                    f'{{"execute":"guest-exec-status","arguments":{{"pid":{pid}}}}}',
+                ],
+                capture_output=True,
+                text=True,
+                timeout=5,
             )
-            
+
             if status_result.returncode != 0:
                 return None
-            
+
             status_resp = json.loads(status_result.stdout)
             if "return" not in status_resp:
                 return None
-            
+
             ret = status_resp["return"]
             if not ret.get("exited", False):
                 return None
-            
+
             if "out-data" in ret:
                 return base64.b64decode(ret["out-data"]).decode().strip()
-            
+
             return ""
-            
+
         except Exception:
             return None
-    
+
     def validate_mounts(self) -> Dict:
         """Validate all mount points are accessible and contain data."""
         self.console.print("\n[bold]💾 Validating Mount Points...[/]")
-        
+
         all_paths = self.config.get("paths", {}).copy()
         all_paths.update(self.config.get("app_data_paths", {}))
-        
+
         if not all_paths:
             self.console.print("[dim]No mount points configured[/]")
             return self.results["mounts"]
-        
+
         # Get mounted filesystems
         mount_output = self._exec_in_vm("mount | grep 9p")
         mounted_paths = []
         if mount_output:
-            mounted_paths = [line.split()[2] for line in mount_output.split('\n') if line.strip()]
-        
+            mounted_paths = [line.split()[2] for line in mount_output.split("\n") if line.strip()]
+
         mount_table = Table(title="Mount Validation", border_style="cyan")
         mount_table.add_column("Guest Path", style="bold")
         mount_table.add_column("Mounted", justify="center")
         mount_table.add_column("Accessible", justify="center")
         mount_table.add_column("Files", justify="right")
-        
+
         for host_path, guest_path in all_paths.items():
             self.results["mounts"]["total"] += 1
-            
+
             # Check if mounted
             is_mounted = any(guest_path in mp for mp in mounted_paths)
-            
+
             # Check if accessible
             accessible = False
             file_count = "?"
-            
+
             if is_mounted:
                 test_result = self._exec_in_vm(f"test -d {guest_path} && echo 'yes' || echo 'no'")
                 accessible = test_result == "yes"
-                
+
                 if accessible:
                     # Get file count
                     count_str = self._exec_in_vm(f"ls -A {guest_path} 2>/dev/null | wc -l")
                     if count_str and count_str.isdigit():
                         file_count = count_str
-            
+
             # Determine status
             if is_mounted and accessible:
                 mount_status = "[green]✅[/]"
@@ -147,122 +164,137 @@ class VMValidator:
                 access_status = "[dim]N/A[/]"
                 self.results["mounts"]["failed"] += 1
                 status = "not_mounted"
-            
+
             mount_table.add_row(guest_path, mount_status, access_status, str(file_count))
-            
-            self.results["mounts"]["details"].append({
-                "path": guest_path,
-                "mounted": is_mounted,
-                "accessible": accessible,
-                "files": file_count,
-                "status": status
-            })
-        
+
+            self.results["mounts"]["details"].append(
+                {
+                    "path": guest_path,
+                    "mounted": is_mounted,
+                    "accessible": accessible,
+                    "files": file_count,
+                    "status": status,
+                }
+            )
+
         self.console.print(mount_table)
-        self.console.print(f"[dim]{self.results['mounts']['passed']}/{self.results['mounts']['total']} mounts working[/]")
-        
+        self.console.print(
+            f"[dim]{self.results['mounts']['passed']}/{self.results['mounts']['total']} mounts working[/]"
+        )
+
         return self.results["mounts"]
-    
+
     def validate_packages(self) -> Dict:
         """Validate APT packages are installed."""
         self.console.print("\n[bold]📦 Validating APT Packages...[/]")
-        
+
         packages = self.config.get("packages", [])
         if not packages:
             self.console.print("[dim]No APT packages configured[/]")
             return self.results["packages"]
-        
+
         pkg_table = Table(title="Package Validation", border_style="cyan")
         pkg_table.add_column("Package", style="bold")
         pkg_table.add_column("Status", justify="center")
         pkg_table.add_column("Version", style="dim")
-        
+
         for package in packages:
             self.results["packages"]["total"] += 1
-            
+
             # Check if installed
             check_cmd = f"dpkg -l | grep -E '^ii  {package}' | awk '{{print $3}}'"
             version = self._exec_in_vm(check_cmd)
-            
+
             if version:
                 pkg_table.add_row(package, "[green]✅ Installed[/]", version[:40])
                 self.results["packages"]["passed"] += 1
-                self.results["packages"]["details"].append({
-                    "package": package,
-                    "installed": True,
-                    "version": version
-                })
+                self.results["packages"]["details"].append(
+                    {"package": package, "installed": True, "version": version}
+                )
             else:
                 pkg_table.add_row(package, "[red]❌ Missing[/]", "")
                 self.results["packages"]["failed"] += 1
-                self.results["packages"]["details"].append({
-                    "package": package,
-                    "installed": False,
-                    "version": None
-                })
-        
+                self.results["packages"]["details"].append(
+                    {"package": package, "installed": False, "version": None}
+                )
+
         self.console.print(pkg_table)
-        self.console.print(f"[dim]{self.results['packages']['passed']}/{self.results['packages']['total']} packages installed[/]")
-        
+        self.console.print(
+            f"[dim]{self.results['packages']['passed']}/{self.results['packages']['total']} packages installed[/]"
+        )
+
         return self.results["packages"]
-    
+
     def validate_snap_packages(self) -> Dict:
         """Validate snap packages are installed."""
         self.console.print("\n[bold]📦 Validating Snap Packages...[/]")
-        
+
         snap_packages = self.config.get("snap_packages", [])
         if not snap_packages:
             self.console.print("[dim]No snap packages configured[/]")
             return self.results["snap_packages"]
-        
+
         snap_table = Table(title="Snap Package Validation", border_style="cyan")
         snap_table.add_column("Package", style="bold")
         snap_table.add_column("Status", justify="center")
         snap_table.add_column("Version", style="dim")
-        
+
         for package in snap_packages:
             self.results["snap_packages"]["total"] += 1
-            
+
             # Check if installed
             check_cmd = f"snap list | grep '^{package}' | awk '{{print $2}}'"
             version = self._exec_in_vm(check_cmd)
-            
+
             if version:
                 snap_table.add_row(package, "[green]✅ Installed[/]", version[:40])
                 self.results["snap_packages"]["passed"] += 1
-                self.results["snap_packages"]["details"].append({
-                    "package": package,
-                    "installed": True,
-                    "version": version
-                })
+                self.results["snap_packages"]["details"].append(
+                    {"package": package, "installed": True, "version": version}
+                )
             else:
                 snap_table.add_row(package, "[red]❌ Missing[/]", "")
                 self.results["snap_packages"]["failed"] += 1
-                self.results["snap_packages"]["details"].append({
-                    "package": package,
-                    "installed": False,
-                    "version": None
-                })
-        
+                self.results["snap_packages"]["details"].append(
+                    {"package": package, "installed": False, "version": None}
+                )
+
         self.console.print(snap_table)
-        self.console.print(f"[dim]{self.results['snap_packages']['passed']}/{self.results['snap_packages']['total']} snap packages installed[/]")
-        
+        self.console.print(
+            f"[dim]{self.results['snap_packages']['passed']}/{self.results['snap_packages']['total']} snap packages installed[/]"
+        )
+
         return self.results["snap_packages"]
-    
+
     # Services that should NOT be validated in VM (host-specific)
     VM_EXCLUDED_SERVICES = {
-        "libvirtd", "virtlogd", "libvirt-guests", "qemu-guest-agent",
-        "bluetooth", "bluez", "upower", "thermald", "tlp", "power-profiles-daemon",
-        "gdm", "gdm3", "sddm", "lightdm",
-        "snap.cups.cups-browsed", "snap.cups.cupsd",
-        "ModemManager", "wpa_supplicant",
-        "accounts-daemon", "colord", "switcheroo-control",
+        "libvirtd",
+        "virtlogd",
+        "libvirt-guests",
+        "qemu-guest-agent",
+        "bluetooth",
+        "bluez",
+        "upower",
+        "thermald",
+        "tlp",
+        "power-profiles-daemon",
+        "gdm",
+        "gdm3",
+        "sddm",
+        "lightdm",
+        "snap.cups.cups-browsed",
+        "snap.cups.cupsd",
+        "ModemManager",
+        "wpa_supplicant",
+        "accounts-daemon",
+        "colord",
+        "switcheroo-control",
     }
 
     def validate_services(self) -> Dict:
         """Validate services are enabled and running."""
         self.console.print("\n[bold]⚙️  Validating Services...[/]")
-        
+
         services = self.config.get("services", [])
         if not services:
             self.console.print("[dim]No services configured[/]")
@@ -305,7 +337,9 @@ class VMValidator:
 
             pid_value = ""
             if is_running:
-                pid_out = self._exec_in_vm(f"systemctl show -p MainPID --value {service} 2>/dev/null")
+                pid_out = self._exec_in_vm(
+                    f"systemctl show -p MainPID --value {service} 2>/dev/null"
+                )
                 if pid_out is None:
                     pid_value = "?"
                 else:
@@ -351,19 +385,47 @@ class VMValidator:
         snap_app_specs = {
             "pycharm-community": {
                 "process_patterns": ["pycharm-community", "pycharm", "jetbrains"],
-                "required_interfaces": ["desktop", "desktop-legacy", "x11", "wayland", "home", "network"],
+                "required_interfaces": [
+                    "desktop",
+                    "desktop-legacy",
+                    "x11",
+                    "wayland",
+                    "home",
+                    "network",
+                ],
             },
             "chromium": {
                 "process_patterns": ["chromium", "chromium-browser"],
-                "required_interfaces": ["desktop", "desktop-legacy", "x11", "wayland", "home", "network"],
+                "required_interfaces": [
+                    "desktop",
+                    "desktop-legacy",
+                    "x11",
+                    "wayland",
+                    "home",
+                    "network",
+                ],
             },
             "firefox": {
                 "process_patterns": ["firefox"],
-                "required_interfaces": ["desktop", "desktop-legacy", "x11", "wayland", "home", "network"],
+                "required_interfaces": [
+                    "desktop",
+                    "desktop-legacy",
+                    "x11",
+                    "wayland",
+                    "home",
+                    "network",
+                ],
             },
             "code": {
                 "process_patterns": ["code"],
-                "required_interfaces": ["desktop", "desktop-legacy", "x11", "wayland", "home", "network"],
+                "required_interfaces": [
+                    "desktop",
+                    "desktop-legacy",
+                    "x11",
+                    "wayland",
+                    "home",
+                    "network",
+                ],
             },
         }
 
@@ -449,9 +511,15 @@ class VMValidator:
                     )
 
             if app_name == "google-chrome":
-                add("journalctl -n 200 --no-pager 2>/dev/null | grep -i chrome | tail -n 60 || true", "Journal (chrome)")
+                add(
+                    "journalctl -n 200 --no-pager 2>/dev/null | grep -i chrome | tail -n 60 || true",
+                    "Journal (chrome)",
+                )
             if app_name == "firefox":
-                add("journalctl -n 200 --no-pager 2>/dev/null | grep -i firefox | tail -n 60 || true", "Journal (firefox)")
+                add(
+                    "journalctl -n 200 --no-pager 2>/dev/null | grep -i firefox | tail -n 60 || true",
+                    "Journal (firefox)",
+                )
 
             return "\n\n".join(chunks)
 
@@ -501,7 +569,7 @@ class VMValidator:
                     profile_ok = True
 
                 if installed:
-                    running = _check_any_process_running(["firefox"]) 
+                    running = _check_any_process_running(["firefox"])
                     pid = _find_first_pid(["firefox"]) if running else ""
 
             elif app in snap_app_specs:
@@ -543,7 +611,11 @@ class VMValidator:
 
                 if installed:
                     running = _check_any_process_running(["google-chrome", "google-chrome-stable"])
-                    pid = _find_first_pid(["google-chrome", "google-chrome-stable"]) if running else ""
+                    pid = (
+                        _find_first_pid(["google-chrome", "google-chrome-stable"])
+                        if running
+                        else ""
+                    )
 
             if self.require_running_apps and installed and profile_ok and running is None:
                 note = note or "running unknown"
@@ -551,7 +623,11 @@ class VMValidator:
             running_icon = (
                 "[dim]—[/]"
                 if not installed
-                else "[green]✅[/]" if running is True else "[yellow]⚠️[/]" if running is False else "[dim]?[/]"
+                else (
+                    "[green]✅[/]"
+                    if running is True
+                    else "[yellow]⚠️[/]" if running is False else "[dim]?[/]"
+                )
             )
 
             pid_value = "—" if not installed else ("?" if pid is None else (pid or "—"))
@@ -622,7 +698,9 @@ class VMValidator:
 
         def _installed(app: str) -> Optional[bool]:
             if app in {"pycharm-community", "chromium", "firefox", "code"}:
-                out = self._exec_in_vm(f"snap list {app} >/dev/null 2>&1 && echo yes || echo no", timeout=10)
+                out = self._exec_in_vm(
+                    f"snap list {app} >/dev/null 2>&1 && echo yes || echo no", timeout=10
+                )
                 return None if out is None else out.strip() == "yes"
 
             if app == "google-chrome":
@@ -633,14 +711,20 @@ class VMValidator:
                 return None if out is None else out.strip() == "yes"
 
             if app == "docker":
-                out = self._exec_in_vm("command -v docker >/dev/null 2>&1 && echo yes || echo no", timeout=10)
+                out = self._exec_in_vm(
+                    "command -v docker >/dev/null 2>&1 && echo yes || echo no", timeout=10
+                )
                 return None if out is None else out.strip() == "yes"
 
             if app == "firefox":
-                out = self._exec_in_vm("command -v firefox >/dev/null 2>&1 && echo yes || echo no", timeout=10)
+                out = self._exec_in_vm(
+                    "command -v firefox >/dev/null 2>&1 && echo yes || echo no", timeout=10
+                )
                 return None if out is None else out.strip() == "yes"
 
-            out = self._exec_in_vm(f"command -v {app} >/dev/null 2>&1 && echo yes || echo no", timeout=10)
+            out = self._exec_in_vm(
+                f"command -v {app} >/dev/null 2>&1 && echo yes || echo no", timeout=10
+            )
             return None if out is None else out.strip() == "yes"
 
         def _run_test(app: str) -> Optional[bool]:
@@ -675,10 +759,14 @@ class VMValidator:
                 return None if out is None else out.strip() == "yes"
 
             if app == "docker":
-                out = self._exec_in_vm("timeout 20 docker info >/dev/null 2>&1 && echo yes || echo no", timeout=30)
+                out = self._exec_in_vm(
+                    "timeout 20 docker info >/dev/null 2>&1 && echo yes || echo no", timeout=30
+                )
                 return None if out is None else out.strip() == "yes"
 
-            out = self._exec_in_vm(f"timeout 20 {app} --version >/dev/null 2>&1 && echo yes || echo no", timeout=30)
+            out = self._exec_in_vm(
+                f"timeout 20 {app} --version >/dev/null 2>&1 && echo yes || echo no", timeout=30
+            )
             return None if out is None else out.strip() == "yes"
 
         self.console.print("\n[bold]🧪 Smoke Tests (installed ≠ works)...[/]")
@@ -703,8 +791,20 @@ class VMValidator:
             else:
                 note = "install status unknown"
 
-            installed_icon = "[green]✅[/]" if installed is True else "[red]❌[/]" if installed is False else "[dim]?[/]"
-            launch_icon = "[green]✅[/]" if launched is True else "[red]❌[/]" if launched is False else ("[dim]—[/]" if installed is not True else "[dim]?[/]")
+            installed_icon = (
+                "[green]✅[/]"
+                if installed is True
+                else "[red]❌[/]" if installed is False else "[dim]?[/]"
+            )
+            launch_icon = (
+                "[green]✅[/]"
+                if launched is True
+                else (
+                    "[red]❌[/]"
+                    if launched is False
+                    else ("[dim]—[/]" if installed is not True else "[dim]?[/]")
+                )
+            )
 
             table.add_row(app, installed_icon, launch_icon, note)
 
@@ -725,19 +825,21 @@ class VMValidator:
 
         self.console.print(table)
         return self.results["smoke"]
-    
+
     def validate_all(self) -> Dict:
         """Run all validations and return comprehensive results."""
         self.console.print("[bold cyan]🔍 Running Full Validation...[/]")
-        
+
         # Check if VM is running
         try:
             result = subprocess.run(
                 ["virsh", "--connect", self.conn_uri, "domstate", self.vm_name],
-                capture_output=True, text=True, timeout=5
+                capture_output=True,
+                text=True,
+                timeout=5,
             )
             vm_state = result.stdout.strip()
-            
+
             if "running" not in vm_state.lower():
                 self.console.print(f"[yellow]⚠️  VM is not running (state: {vm_state})[/]")
                 self.console.print("[dim]Start VM with: clonebox start .[/]")
@@ -747,7 +849,7 @@ class VMValidator:
             self.console.print(f"[red]❌ Cannot check VM state: {e}[/]")
             self.results["overall"] = "error"
             return self.results
-        
+
         # Run all validations
         self.validate_mounts()
         self.validate_packages()
@@ -757,12 +859,16 @@ class VMValidator:
         if self.smoke_test:
             self.validate_smoke_tests()
 
-        recent_err = self._exec_in_vm("journalctl -p err -n 30 --no-pager 2>/dev/null || true", timeout=20)
+        recent_err = self._exec_in_vm(
+            "journalctl -p err -n 30 --no-pager 2>/dev/null || true", timeout=20
+        )
         if recent_err:
             recent_err = recent_err.strip()
             if recent_err:
-                self.console.print(Panel(recent_err, title="Recent system errors", border_style="red"))
-        
+                self.console.print(
+                    Panel(recent_err, title="Recent system errors", border_style="red")
+                )
+
         # Calculate overall status
         total_checks = (
             self.results["mounts"]["total"]
@@ -772,7 +878,7 @@ class VMValidator:
             + self.results["apps"]["total"]
             + (self.results["smoke"]["total"] if self.smoke_test else 0)
         )
-        
+
         total_passed = (
             self.results["mounts"]["passed"]
             + self.results["packages"]["passed"]
@@ -781,7 +887,7 @@ class VMValidator:
             + self.results["apps"]["passed"]
             + (self.results["smoke"]["passed"] if self.smoke_test else 0)
         )
-        
+
         total_failed = (
             self.results["mounts"]["failed"]
             + self.results["packages"]["failed"]
@@ -790,10 +896,10 @@ class VMValidator:
             + self.results["apps"]["failed"]
             + (self.results["smoke"]["failed"] if self.smoke_test else 0)
         )
-        
+
         # Get skipped services count
         skipped_services = self.results["services"].get("skipped", 0)
-        
+
         # Print summary
         self.console.print("\n[bold]📊 Validation Summary[/]")
         summary_table = Table(border_style="cyan")
@@ -802,30 +908,52 @@ class VMValidator:
         summary_table.add_column("Failed", justify="right", style="red")
         summary_table.add_column("Skipped", justify="right", style="dim")
         summary_table.add_column("Total", justify="right")
-        
-        summary_table.add_row("Mounts", str(self.results["mounts"]["passed"]), 
-                             str(self.results["mounts"]["failed"]), "—",
-                             str(self.results["mounts"]["total"]))
-        summary_table.add_row("APT Packages", str(self.results["packages"]["passed"]), 
-                             str(self.results["packages"]["failed"]), "—",
-                             str(self.results["packages"]["total"]))
-        summary_table.add_row("Snap Packages", str(self.results["snap_packages"]["passed"]), 
-                             str(self.results["snap_packages"]["failed"]), "—",
-                             str(self.results["snap_packages"]["total"]))
-        summary_table.add_row("Services", str(self.results["services"]["passed"]), 
-                             str(self.results["services"]["failed"]), 
-                             str(skipped_services),
-                             str(self.results["services"]["total"]))
-        summary_table.add_row("Apps", str(self.results["apps"]["passed"]), 
-                             str(self.results["apps"]["failed"]), "—",
-                             str(self.results["apps"]["total"]))
-        summary_table.add_row("[bold]TOTAL", f"[bold green]{total_passed}", 
-                             f"[bold red]{total_failed}", 
-                             f"[dim]{skipped_services}[/]",
-                             f"[bold]{total_checks}")
-        
+
+        summary_table.add_row(
+            "Mounts",
+            str(self.results["mounts"]["passed"]),
+            str(self.results["mounts"]["failed"]),
+            "—",
+            str(self.results["mounts"]["total"]),
+        )
+        summary_table.add_row(
+            "APT Packages",
+            str(self.results["packages"]["passed"]),
+            str(self.results["packages"]["failed"]),
+            "—",
+            str(self.results["packages"]["total"]),
+        )
+        summary_table.add_row(
+            "Snap Packages",
+            str(self.results["snap_packages"]["passed"]),
+            str(self.results["snap_packages"]["failed"]),
+            "—",
+            str(self.results["snap_packages"]["total"]),
+        )
+        summary_table.add_row(
+            "Services",
+            str(self.results["services"]["passed"]),
+            str(self.results["services"]["failed"]),
+            str(skipped_services),
+            str(self.results["services"]["total"]),
+        )
+        summary_table.add_row(
+            "Apps",
+            str(self.results["apps"]["passed"]),
+            str(self.results["apps"]["failed"]),
+            "—",
+            str(self.results["apps"]["total"]),
+        )
+        summary_table.add_row(
+            "[bold]TOTAL",
+            f"[bold green]{total_passed}",
+            f"[bold red]{total_failed}",
+            f"[dim]{skipped_services}[/]",
+            f"[bold]{total_checks}",
+        )
+
         self.console.print(summary_table)
-        
+
         # Determine overall status
         if total_failed == 0 and total_checks > 0:
             self.results["overall"] = "pass"
@@ -833,9 +961,11 @@ class VMValidator:
         elif total_failed > 0:
             self.results["overall"] = "partial"
             self.console.print(f"\n[bold yellow]⚠️  {total_failed}/{total_checks} checks failed[/]")
-            self.console.print("[dim]Consider rebuilding VM: clonebox clone . --user --run --replace[/]")
+            self.console.print(
+                "[dim]Consider rebuilding VM: clonebox clone . --user --run --replace[/]"
+            )
         else:
             self.results["overall"] = "no_checks"
             self.console.print("\n[dim]No validation checks configured[/]")
-        
+
         return self.results

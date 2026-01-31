@@ -1,6 +1,7 @@
 """
 Tests for the VM validator module.
 """
+
 import json
 from unittest.mock import MagicMock, patch
 
@@ -42,9 +43,9 @@ class TestVMValidator:
             config=sample_config,
             vm_name="test-vm",
             conn_uri="qemu:///session",
-            console=mock_console
+            console=mock_console,
         )
-        
+
         assert validator.vm_name == "test-vm"
         assert validator.conn_uri == "qemu:///session"
         assert validator.results["overall"] == "unknown"
@@ -55,16 +56,16 @@ class TestVMValidator:
             config=sample_config,
             vm_name="test-vm",
             conn_uri="qemu:///session",
-            console=mock_console
+            console=mock_console,
         )
-        
+
         assert "mounts" in validator.results
         assert "packages" in validator.results
         assert "snap_packages" in validator.results
         assert "services" in validator.results
         assert "apps" in validator.results
         assert "overall" in validator.results
-        
+
         for category in ["mounts", "packages", "snap_packages", "services", "apps"]:
             assert "passed" in validator.results[category]
             assert "failed" in validator.results[category]
@@ -107,7 +108,9 @@ class TestVMValidatorApps:
             "services": [],
         }
 
-        validator = VMValidator(config=config, vm_name="test-vm", conn_uri="qemu:///session", console=mock_console)
+        validator = VMValidator(
+            config=config, vm_name="test-vm", conn_uri="qemu:///session", console=mock_console
+        )
 
         def fake_exec(cmd: str, timeout: int = 10):
             # install checks
@@ -135,7 +138,10 @@ class TestVMValidatorApps:
                 or "pgrep -u ubuntu -f '[j]etbrains'" in cmd
             ):
                 return "yes"
-            if "pgrep -u ubuntu -f '[g]oogle-chrome'" in cmd or "pgrep -u ubuntu -f '[g]oogle-chrome-stable'" in cmd:
+            if (
+                "pgrep -u ubuntu -f '[g]oogle-chrome'" in cmd
+                or "pgrep -u ubuntu -f '[g]oogle-chrome-stable'" in cmd
+            ):
                 return "yes"
 
             return "no"
@@ -202,7 +208,9 @@ class TestVMValidatorApps:
             "services": [],
         }
 
-        validator = VMValidator(config=config, vm_name="test-vm", conn_uri="qemu:///session", console=mock_console)
+        validator = VMValidator(
+            config=config, vm_name="test-vm", conn_uri="qemu:///session", console=mock_console
+        )
 
         def fake_exec(cmd: str, timeout: int = 10):
             if "command -v firefox" in cmd:
@@ -219,7 +227,10 @@ class TestVMValidatorApps:
             # running checks
             if "pgrep -u ubuntu -f '[f]irefox'" in cmd:
                 return "yes"
-            if "pgrep -u ubuntu -f '[g]oogle-chrome'" in cmd or "pgrep -u ubuntu -f '[g]oogle-chrome-stable'" in cmd:
+            if (
+                "pgrep -u ubuntu -f '[g]oogle-chrome'" in cmd
+                or "pgrep -u ubuntu -f '[g]oogle-chrome-stable'" in cmd
+            ):
                 return "yes"
             return "no"
 
@@ -266,7 +277,9 @@ class TestVMValidatorServices:
             "services": ["libvirtd", "docker"],
         }
 
-        validator = VMValidator(config=config, vm_name="test-vm", conn_uri="qemu:///session", console=mock_console)
+        validator = VMValidator(
+            config=config, vm_name="test-vm", conn_uri="qemu:///session", console=mock_console
+        )
 
         def fake_exec(cmd: str, timeout: int = 10):
             if "systemctl is-enabled docker" in cmd:
@@ -284,99 +297,132 @@ class TestVMValidatorServices:
         assert results["passed"] == 1
         assert results.get("skipped") == 1
 
-    @patch('subprocess.run')
+    @patch("subprocess.run")
     def test_exec_in_vm_success(self, mock_run, sample_config, mock_console):
         """Test successful command execution in VM."""
         # Mock guest-exec response
         mock_run.side_effect = [
             MagicMock(returncode=0, stdout='{"return":{"pid":1234}}', stderr=""),
-            MagicMock(returncode=0, stdout='{"return":{"exited":true,"exitcode":0,"out-data":"dGVzdCBvdXRwdXQ="}}', stderr=""),
+            MagicMock(
+                returncode=0,
+                stdout='{"return":{"exited":true,"exitcode":0,"out-data":"dGVzdCBvdXRwdXQ="}}',
+                stderr="",
+            ),
         ]
-        
+
         validator = VMValidator(
             config=sample_config,
             vm_name="test-vm",
             conn_uri="qemu:///session",
-            console=mock_console
+            console=mock_console,
         )
-        
+
         result = validator._exec_in_vm("echo test")
         assert result == "test output"
 
-    @patch('subprocess.run')
+    @patch("subprocess.run")
     def test_exec_in_vm_failure(self, mock_run, sample_config, mock_console):
         """Test failed command execution in VM."""
         mock_run.return_value = MagicMock(returncode=1, stdout="", stderr="error")
-        
+
         validator = VMValidator(
             config=sample_config,
             vm_name="test-vm",
             conn_uri="qemu:///session",
-            console=mock_console
+            console=mock_console,
         )
-        
+
         result = validator._exec_in_vm("failing command")
         assert result is None
 
-    @patch('subprocess.run')
+    @patch("subprocess.run")
     def test_validate_mounts_all_mounted(self, mock_run, sample_config, mock_console):
         """Test mount validation when all mounts are active."""
         # Mock responses for mount check
         mock_run.side_effect = [
             # mount | grep 9p
             MagicMock(returncode=0, stdout='{"return":{"pid":1}}', stderr=""),
-            MagicMock(returncode=0, stdout='{"return":{"exited":true,"out-data":"bW91bnQwIG9uIC9tbnQvcHJvamVjdHMgdHlwZSA5cAptb3VudDEgb24gL21udC9kYXRhIHR5cGUgOXAKbW91bnQyIG9uIC9ob21lL3VidW50dS8uY29uZmlnL3Rlc3QgdHlwZSA5cA=="}}', stderr=""),
+            MagicMock(
+                returncode=0,
+                stdout='{"return":{"exited":true,"out-data":"bW91bnQwIG9uIC9tbnQvcHJvamVjdHMgdHlwZSA5cAptb3VudDEgb24gL21udC9kYXRhIHR5cGUgOXAKbW91bnQyIG9uIC9ob21lL3VidW50dS8uY29uZmlnL3Rlc3QgdHlwZSA5cA=="}}',
+                stderr="",
+            ),
             # test -d for each path (3 paths)
             MagicMock(returncode=0, stdout='{"return":{"pid":2}}', stderr=""),
-            MagicMock(returncode=0, stdout='{"return":{"exited":true,"exitcode":0,"out-data":"eWVz"}}', stderr=""),
+            MagicMock(
+                returncode=0,
+                stdout='{"return":{"exited":true,"exitcode":0,"out-data":"eWVz"}}',
+                stderr="",
+            ),
             MagicMock(returncode=0, stdout='{"return":{"pid":3}}', stderr=""),
-            MagicMock(returncode=0, stdout='{"return":{"exited":true,"exitcode":0,"out-data":"NQ=="}}', stderr=""),
+            MagicMock(
+                returncode=0,
+                stdout='{"return":{"exited":true,"exitcode":0,"out-data":"NQ=="}}',
+                stderr="",
+            ),
             MagicMock(returncode=0, stdout='{"return":{"pid":4}}', stderr=""),
-            MagicMock(returncode=0, stdout='{"return":{"exited":true,"exitcode":0,"out-data":"eWVz"}}', stderr=""),
+            MagicMock(
+                returncode=0,
+                stdout='{"return":{"exited":true,"exitcode":0,"out-data":"eWVz"}}',
+                stderr="",
+            ),
             MagicMock(returncode=0, stdout='{"return":{"pid":5}}', stderr=""),
-            MagicMock(returncode=0, stdout='{"return":{"exited":true,"exitcode":0,"out-data":"MTA="}}', stderr=""),
+            MagicMock(
+                returncode=0,
+                stdout='{"return":{"exited":true,"exitcode":0,"out-data":"MTA="}}',
+                stderr="",
+            ),
             MagicMock(returncode=0, stdout='{"return":{"pid":6}}', stderr=""),
-            MagicMock(returncode=0, stdout='{"return":{"exited":true,"exitcode":0,"out-data":"eWVz"}}', stderr=""),
+            MagicMock(
+                returncode=0,
+                stdout='{"return":{"exited":true,"exitcode":0,"out-data":"eWVz"}}',
+                stderr="",
+            ),
             MagicMock(returncode=0, stdout='{"return":{"pid":7}}', stderr=""),
-            MagicMock(returncode=0, stdout='{"return":{"exited":true,"exitcode":0,"out-data":"Mw=="}}', stderr=""),
+            MagicMock(
+                returncode=0,
+                stdout='{"return":{"exited":true,"exitcode":0,"out-data":"Mw=="}}',
+                stderr="",
+            ),
         ]
-        
+
         validator = VMValidator(
             config=sample_config,
             vm_name="test-vm",
             conn_uri="qemu:///session",
-            console=mock_console
+            console=mock_console,
         )
-        
+
         results = validator.validate_mounts()
-        
+
         assert results["total"] == 3
         # Console should have been called with table output
         assert mock_console.print.called
 
-    @patch('subprocess.run')
+    @patch("subprocess.run")
     def test_validate_packages_all_installed(self, mock_run, sample_config, mock_console):
         """Test package validation when all packages are installed."""
+
         # Mock dpkg -l responses
         def run_side_effect(*args, **kwargs):
             result = MagicMock(returncode=0, stderr="")
             result.stdout = '{"return":{"pid":1}}'
             return result
-        
+
         mock_run.side_effect = run_side_effect
-        
+
         validator = VMValidator(
             config=sample_config,
             vm_name="test-vm",
             conn_uri="qemu:///session",
-            console=mock_console
+            console=mock_console,
         )
-        
+
         # Manually set results for testing
         validator.results["packages"]["total"] = 3
         validator.results["packages"]["passed"] = 3
         validator.results["packages"]["failed"] = 0
-        
+
         assert validator.results["packages"]["total"] == 3
         assert validator.results["packages"]["passed"] == 3
 
@@ -390,18 +436,18 @@ class TestVMValidatorServices:
             "snap_packages": [],
             "services": [],
         }
-        
+
         validator = VMValidator(
             config=empty_config,
             vm_name="empty-vm",
             conn_uri="qemu:///session",
-            console=mock_console
+            console=mock_console,
         )
-        
+
         # Validate mounts with empty paths
         results = validator.validate_mounts()
         assert results["total"] == 0
-        
+
         # Validate packages with empty list
         results = validator.validate_packages()
         assert results["total"] == 0
@@ -410,17 +456,13 @@ class TestVMValidatorServices:
 class TestVMValidatorIntegration:
     """Integration tests for VMValidator (require mocking)."""
 
-    @patch('subprocess.run')
+    @patch("subprocess.run")
     def test_validate_all_with_vm_not_running(self, mock_run, mock_console=None):
         """Test validate_all when VM is not running."""
         mock_console = MagicMock()
-        
-        mock_run.return_value = MagicMock(
-            returncode=0,
-            stdout="shut off",
-            stderr=""
-        )
-        
+
+        mock_run.return_value = MagicMock(returncode=0, stdout="shut off", stderr="")
+
         config = {
             "vm": {"name": "stopped-vm"},
             "paths": {},
@@ -429,16 +471,13 @@ class TestVMValidatorIntegration:
             "snap_packages": [],
             "services": [],
         }
-        
+
         validator = VMValidator(
-            config=config,
-            vm_name="stopped-vm",
-            conn_uri="qemu:///session",
-            console=mock_console
+            config=config, vm_name="stopped-vm", conn_uri="qemu:///session", console=mock_console
         )
-        
+
         results = validator.validate_all()
-        
+
         assert results["overall"] == "vm_not_running"
 
 
@@ -456,22 +495,25 @@ class TestValidatorResultsCalculation:
             "snap_packages": [],
             "services": [],
         }
-        
+
         validator = VMValidator(config, "test", "qemu:///session", console)
-        
+
         # Simulate all passed
         validator.results["mounts"] = {"passed": 5, "failed": 0, "total": 5, "details": []}
         validator.results["packages"] = {"passed": 3, "failed": 0, "total": 3, "details": []}
         validator.results["snap_packages"] = {"passed": 1, "failed": 0, "total": 1, "details": []}
         validator.results["services"] = {"passed": 2, "failed": 0, "total": 2, "details": []}
-        
-        total_failed = sum(r["failed"] for r in [
-            validator.results["mounts"],
-            validator.results["packages"],
-            validator.results["snap_packages"],
-            validator.results["services"],
-        ])
-        
+
+        total_failed = sum(
+            r["failed"]
+            for r in [
+                validator.results["mounts"],
+                validator.results["packages"],
+                validator.results["snap_packages"],
+                validator.results["services"],
+            ]
+        )
+
         assert total_failed == 0
 
     def test_overall_partial(self):
@@ -485,16 +527,15 @@ class TestValidatorResultsCalculation:
             "snap_packages": [],
             "services": [],
         }
-        
+
         validator = VMValidator(config, "test", "qemu:///session", console)
-        
+
         # Simulate some failed
         validator.results["mounts"] = {"passed": 3, "failed": 2, "total": 5, "details": []}
         validator.results["packages"] = {"passed": 2, "failed": 1, "total": 3, "details": []}
-        
+
         total_failed = (
-            validator.results["mounts"]["failed"] +
-            validator.results["packages"]["failed"]
+            validator.results["mounts"]["failed"] + validator.results["packages"]["failed"]
         )
-        
+
         assert total_failed == 3

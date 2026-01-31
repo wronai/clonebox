@@ -19,9 +19,7 @@ def _run_clonebox(args: List[str]) -> subprocess.CompletedProcess:
 
 def _render_table(title: str, headers: List[str], rows: List[List[str]]) -> str:
     head_html = "".join(f"<th>{h}</th>" for h in headers)
-    body_html = "".join(
-        "<tr>" + "".join(f"<td>{c}</td>" for c in row) + "</tr>" for row in rows
-    )
+    body_html = "".join("<tr>" + "".join(f"<td>{c}</td>" for c in row) + "</tr>" for row in rows)
 
     return (
         f"<h2>{title}</h2>"
@@ -73,7 +71,9 @@ async def api_vms() -> str:
     if not items:
         return "<h2>VMs</h2><p><em>No VMs found.</em></p>"
 
-    rows = [[str(i.get("name", "")), str(i.get("state", "")), str(i.get("uuid", ""))] for i in items]
+    rows = [
+        [str(i.get("name", "")), str(i.get("state", "")), str(i.get("uuid", ""))] for i in items
+    ]
     return _render_table("VMs", ["Name", "State", "UUID"], rows)
 
 

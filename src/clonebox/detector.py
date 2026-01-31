@@ -281,7 +281,6 @@ class SystemDetector:
             ".mozilla/firefox",
             ".cache/mozilla/firefox",
         ],
-        
         # IDEs and editors - settings, extensions, projects history
         "code": [".config/Code", ".vscode", ".vscode-server"],
         "vscode": [".config/Code", ".vscode", ".vscode-server"],
@@ -302,7 +301,6 @@ class SystemDetector:
         "nvim": [".config/nvim", ".local/share/nvim"],
         "emacs": [".emacs.d", ".emacs"],
         "cursor": [".config/Cursor", ".cursor"],
-        
         # Development tools
         "docker": [".docker"],
         "git": [".gitconfig", ".git-credentials", ".config/git"],
@@ -314,27 +312,22 @@ class SystemDetector:
         "go": [".go", "go"],
         "gradle": [".gradle"],
         "maven": [".m2"],
-        
         # Python environments
         "python": [".pyenv", ".virtualenvs", ".local/share/virtualenvs"],
         "python3": [".pyenv", ".virtualenvs", ".local/share/virtualenvs"],
         "conda": [".conda", "anaconda3", "miniconda3"],
-        
         # Node.js
         "node": [".nvm", ".node", ".npm"],
-        
         # Databases
         "postgres": [".pgpass", ".psqlrc", ".psql_history"],
         "mysql": [".my.cnf", ".mysql_history"],
         "mongodb": [".mongorc.js", ".dbshell"],
         "redis": [".rediscli_history"],
-        
         # Communication apps
         "slack": [".config/Slack"],
         "discord": [".config/discord"],
         "telegram": [".local/share/TelegramDesktop"],
         "teams": [".config/Microsoft/Microsoft Teams"],
-        
         # Other tools
         "postman": [".config/Postman"],
         "insomnia": [".config/Insomnia"],
@@ -346,7 +339,6 @@ class SystemDetector:
         "kubectl": [".kube"],
         "terraform": [".terraform.d"],
         "ansible": [".ansible"],
-        
         # General app data
         "spotify": [".config/spotify"],
         "vlc": [".config/vlc"],
@@ -360,12 +352,12 @@ class SystemDetector:
 
     def detect_app_data_dirs(self, applications: list) -> list:
         """Detect config/data directories for running applications.
-        
+
         Returns list of paths that contain user data needed by running apps.
         """
         app_data_paths = []
         seen_paths = set()
-        
+
         matched_patterns = set()
 
         for app in applications:
@@ -394,13 +386,15 @@ class SystemDetector:
                         size = self._get_dir_size(full_path, max_depth=2)
                     except Exception:
                         size = 0
-                    app_data_paths.append({
-                        "path": str(full_path),
-                        "app": pattern,
-                        "type": "app_data",
-                        "size_mb": round(size / 1024 / 1024, 1),
-                    })
-        
+                    app_data_paths.append(
+                        {
+                            "path": str(full_path),
+                            "app": pattern,
+                            "type": "app_data",
+                            "size_mb": round(size / 1024 / 1024, 1),
+                        }
+                    )
+
         return app_data_paths
 
     def detect_all(self) -> SystemSnapshot:
@@ -645,13 +639,13 @@ class SystemDetector:
 
     def suggest_packages_for_apps(self, applications: list) -> dict:
         """Suggest packages based on detected applications.
-        
+
         Returns:
             dict with 'apt' and 'snap' keys containing lists of packages
         """
         apt_packages = set()
         snap_packages = set()
-        
+
         for app in applications:
             app_name = app.name.lower()
             for key, (package, install_type) in self.APP_TO_PACKAGE_MAP.items():
@@ -661,21 +655,18 @@ class SystemDetector:
                     else:
                         apt_packages.add(package)
                     break
-        
-        return {
-            "apt": sorted(list(apt_packages)),
-            "snap": sorted(list(snap_packages))
-        }
+
+        return {"apt": sorted(list(apt_packages)), "snap": sorted(list(snap_packages))}
 
     def suggest_packages_for_services(self, services: list) -> dict:
         """Suggest packages based on detected services.
-        
+
         Returns:
             dict with 'apt' and 'snap' keys containing lists of packages
         """
         apt_packages = set()
         snap_packages = set()
-        
+
         for service in services:
             service_name = service.name.lower()
             for key, (package, install_type) in self.APP_TO_PACKAGE_MAP.items():
@@ -685,11 +676,8 @@ class SystemDetector:
                     else:
                         apt_packages.add(package)
                     break
-        
-        return {
-            "apt": sorted(list(apt_packages)),
-            "snap": sorted(list(snap_packages))
-        }
+
+        return {"apt": sorted(list(apt_packages)), "snap": sorted(list(snap_packages))}
 
     def get_system_info(self) -> dict:
         """Get basic system information."""

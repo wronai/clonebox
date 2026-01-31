@@ -234,16 +234,19 @@ class TestCLIConstants:
 class TestCLIIntegration:
     """Integration tests for CLI commands."""
 
-    @pytest.mark.parametrize("command,expected_exit", [
-        (["--version"], 0),
-        (["--help"], 0),
-        (["detect", "--help"], 0),
-        (["clone", "--help"], 0),
-        (["list", "--help"], 0),
-        (["container", "--help"], 0),
-        (["container", "ps", "--help"], 0),
-        (["container", "up", "--help"], 0),
-    ])
+    @pytest.mark.parametrize(
+        "command,expected_exit",
+        [
+            (["--version"], 0),
+            (["--help"], 0),
+            (["detect", "--help"], 0),
+            (["clone", "--help"], 0),
+            (["list", "--help"], 0),
+            (["container", "--help"], 0),
+            (["container", "ps", "--help"], 0),
+            (["container", "up", "--help"], 0),
+        ],
+    )
     def test_cli_help_commands(self, command, expected_exit):
         """Test CLI help and version commands."""
         result = subprocess.run(
@@ -258,12 +261,10 @@ class TestCLIIntegration:
     def test_detect_json_output(self, mock_console, mock_detector_class, tmp_path):
         """Test detect command with JSON output."""
         from clonebox.cli import cmd_detect
-        
+
         mock_detector = MagicMock()
         mock_detector.detect_all.return_value = SystemSnapshot(
-            services=[DetectedService("docker", "running", enabled=True)],
-            applications=[],
-            paths=[]
+            services=[DetectedService("docker", "running", enabled=True)], applications=[], paths=[]
         )
         mock_detector.get_system_info.return_value = {
             "hostname": "test",
@@ -287,12 +288,12 @@ class TestCLIIntegration:
     def test_detect_yaml_output(self, mock_console, mock_detector_class):
         """Test detect command with YAML output."""
         from clonebox.cli import cmd_detect
-        
+
         mock_detector = MagicMock()
         mock_detector.detect_all.return_value = SystemSnapshot(
             services=[DetectedService("nginx", "running", enabled=True)],
             applications=[],
-            paths=[DetectedPath("/home/user/project", "project", 100.0)]
+            paths=[DetectedPath("/home/user/project", "project", 100.0)],
         )
         mock_detector.get_system_info.return_value = {
             "hostname": "test",
@@ -317,16 +318,20 @@ class TestCLIIntegration:
     @patch("clonebox.cli.console")
     @patch("clonebox.cli.SystemDetector")
     def test_clone_creates_config_file(
-        self, mock_detector_class, mock_console, mock_progress, mock_questionary, mock_cloner, tmp_path
+        self,
+        mock_detector_class,
+        mock_console,
+        mock_progress,
+        mock_questionary,
+        mock_cloner,
+        tmp_path,
     ):
         """Test clone command creates .clonebox.yaml config file."""
         config_file = tmp_path / CLONEBOX_CONFIG_FILE
-        
+
         mock_detector = MagicMock()
         mock_detector.detect_all.return_value = SystemSnapshot(
-            services=[DetectedService("docker", "running", enabled=True)],
-            applications=[],
-            paths=[]
+            services=[DetectedService("docker", "running", enabled=True)], applications=[], paths=[]
         )
         mock_detector.get_system_info.return_value = {
             "hostname": "test",
@@ -342,7 +347,7 @@ class TestCLIIntegration:
         mock_questionary.confirm.return_value.ask.return_value = False
 
         from clonebox.cli import cmd_clone
-        
+
         args = argparse.Namespace(
             path=str(tmp_path),
             name=None,
@@ -395,17 +400,18 @@ class TestCLIIntegration:
 class TestCLIParametrized:
     """Parametrized CLI tests."""
 
-    @pytest.mark.parametrize("vm_name,expected", [
-        ("my-vm", "my-vm"),
-        ("test-project", "test-project"),
-        ("clone-app", "clone-app"),
-    ])
+    @pytest.mark.parametrize(
+        "vm_name,expected",
+        [
+            ("my-vm", "my-vm"),
+            ("test-project", "test-project"),
+            ("clone-app", "clone-app"),
+        ],
+    )
     def test_generate_yaml_custom_vm_names(self, vm_name, expected):
         """Test YAML generation with various VM names."""
         snapshot = SystemSnapshot(
-            services=[DetectedService("docker", "running", enabled=True)],
-            applications=[],
-            paths=[]
+            services=[DetectedService("docker", "running", enabled=True)], applications=[], paths=[]
         )
         detector = MagicMock(spec=SystemDetector)
         detector.get_system_info.return_value = {
@@ -423,22 +429,19 @@ class TestCLIParametrized:
 
         assert config["vm"]["name"] == expected
 
-    @pytest.mark.parametrize("services,expected_count", [
-        (["docker"], 1),
-        (["docker", "nginx"], 2),
-        (["docker", "nginx", "postgresql"], 3),
-        ([], 0),
-    ])
+    @pytest.mark.parametrize(
+        "services,expected_count",
+        [
+            (["docker"], 1),
+            (["docker", "nginx"], 2),
+            (["docker", "nginx", "postgresql"], 3),
+            ([], 0),
+        ],
+    )
     def test_generate_yaml_services_count(self, services, expected_count):
         """Test YAML generation with various service configurations."""
-        detected_services = [
-            DetectedService(name, "running", enabled=True) for name in services
-        ]
-        snapshot = SystemSnapshot(
-            services=detected_services,
-            applications=[],
-            paths=[]
-        )
+        detected_services = [DetectedService(name, "running", enabled=True) for name in services]
+        snapshot = SystemSnapshot(services=detected_services, applications=[], paths=[])
         detector = MagicMock(spec=SystemDetector)
         detector.get_system_info.return_value = {
             "hostname": "test-host",
