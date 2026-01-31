@@ -1,3 +1,17 @@
+## [0.1.26] - 2026-01-31
+
+### Summary
+
+fix(tests): configuration management system
+
+### Test
+
+- update tests/test_cloner_comprehensive.py
+- update tests/test_cloner_simple.py
+- update tests/test_coverage_boost.py
+- update tests/test_dashboard_coverage.py
+
+
 ## [0.1.25] - 2026-01-31
 
 ### Summary
