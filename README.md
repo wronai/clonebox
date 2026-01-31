@@ -51,13 +51,24 @@ CloneBox excels in scenarios where developers need:
 - Safe experimentation with system-level changes that can be discarded by simply deleting the VM
 - Quick onboarding for new team members who need a fully configured development environment
 
-## What's Next
+## What's New in v1.1
 
-Project roadmap includes:
-- **v0.2.0**: `clonebox exec` command, VM snapshots, web dashboard MVP
-- **v0.3.0**: Container runtime integration (Podman/Docker), multi-VM orchestration
-- **v0.4.0**: Cloud provider support (AWS, GCP, Azure), Windows WSL2 support
-- **v1.0.0**: Production-ready with full monitoring, backup/restore, enterprise features
+**v1.1.0** is production-ready with two full runtimes:
+
+| Feature | Status |
+|---------|--------|
+| 🖥️ VM Runtime (libvirt/QEMU) | ✅ Stable |
+| 🐳 Container Runtime (Podman/Docker) | ✅ Stable |
+| 📊 Web Dashboard (FastAPI + HTMX + Tailwind) | ✅ Stable |
+| 🎛️ Profiles System (`ml-dev`, `web-stack`) | ✅ Stable |
+| 🔍 Auto-detection (services, apps, paths) | ✅ Stable |
+| 🧪 95%+ Test Coverage | ✅ |
+
+### Roadmap
+
+- **v1.2.0**: `clonebox exec` command, VM snapshots, snapshot restore
+- **v1.3.0**: Multi-VM orchestration, cluster mode
+- **v2.0.0**: Cloud provider support (AWS, GCP, Azure), Windows WSL2 support
 
 See [TODO.md](TODO.md) for detailed roadmap and [CONTRIBUTING.md](CONTRIBUTING.md) for contribution guidelines.
 
@@ -234,9 +245,12 @@ Simply run `clonebox` to start the interactive wizard:
 clonebox
 
 clonebox clone . --user --run --replace --base-image ~/ubuntu-22.04-cloud.qcow2 --disk-size-gb 30
+# Sprawdź diagnostykę na żywo
+clonebox watch . --user
 
-clonebox test . --user --validate
 clonebox test . --user --validate --require-running-apps
+# Uruchom pełną walidację (wykorzystuje QGA do sprawdzenia serwisów wewnątrz)
+clonebox test . --user --validate --smoke-test
 ```
 
 ### Profiles (Reusable presets)

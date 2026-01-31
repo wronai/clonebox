@@ -1,0 +1,30 @@
+# Web Development Stack Profile
+# Usage: clonebox container up . --profile web-stack
+#        clonebox clone . --profile web-stack --user --run
+
+container:
+  image: node:20-slim
+  packages:
+    - nginx
+    - curl
+    - git
+  ports:
+    - "3000:3000"
+    - "8080:80"
+  env_from_dotenv: true
+
+vm:
+  packages:
+    - nginx
+    - nodejs
+    - npm
+    - postgresql
+    - redis-server
+    - git
+    - curl
+  services:
+    - nginx
+    - postgresql
+    - redis-server
+  ram_mb: 4096
+  vcpus: 4

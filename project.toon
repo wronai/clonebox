@@ -1,26 +1,33 @@
-# clonebox | 20f 7687L | python:20
+# clonebox | 27f 11319L | python:27
 # Keys: M=modules, D=details, i=imports, c=classes, f=functions, m=methods
-M[20]:
-  tests/conftest.py,343
-  tests/test_cloner.py,186
+M[27]:
+  tests/conftest.py,345
+  tests/test_profiles.py,39
+  tests/test_cloner.py,201
   tests/__init__.py,0
-  tests/test_validator.py,225
+  tests/test_cloner_simple.py,24
+  tests/test_validator.py,442
   tests/test_container.py,168
-  tests/test_models.py,251
+  tests/test_coverage_boost_final.py,289
+  tests/test_dashboard_coverage.py,90
+  tests/test_models.py,260
   tests/test_network.py,133
-  tests/test_detector.py,154
-  tests/test_cli.py,333
-  tests/e2e/test_full_workflow.py,271
+  tests/test_coverage_additional.py,28
+  tests/test_detector.py,183
+  tests/test_cli.py,373
+  tests/e2e/test_full_workflow.py,243
   tests/e2e/__init__.py,1
-  src/clonebox/validator.py,319
-  src/clonebox/cli.py,2054
-  src/clonebox/detector.py,571
+  tests/e2e/test_container_workflow.py,61
+  src/clonebox/dashboard.py,104
+  src/clonebox/validator.py,813
+  src/clonebox/cli.py,2515
+  src/clonebox/detector.py,589
   src/clonebox/__init__.py,10
   src/clonebox/__main__.py,4
   src/clonebox/container.py,154
-  src/clonebox/cloner.py,712
-  src/clonebox/models.py,164
-  src/clonebox/profiles.py,37
+  src/clonebox/cloner.py,1790
+  src/clonebox/models.py,181
+  src/clonebox/profiles.py,47
 D:
   tests/conftest.py:
     i: os,tempfile,pytest,yaml,pathlib.Path,unittest.mock.{MagicMock,patch}
@@ -33,18 +40,33 @@ D:
     mock_subprocess()->None
     module_mock_virsh()->None
     mock_virsh()->None
+  tests/test_profiles.py:
+    i: pytest,clonebox.profiles.{load_profile,merge_with_profile},pathlib.Path
+    e: test_profile_loader_finds_default_profiles,test_profile_merges_over_base,test_profile_deep_merge_nested_dicts,test_merge_with_profile_invalid_profile_is_noop,test_load_profile_prefers_search_paths_over_builtins
+    test_profile_loader_finds_default_profiles(tmp_path:Path)->None
+    test_profile_merges_over_base()->None
+    test_profile_deep_merge_nested_dicts()->None
+    test_merge_with_profile_invalid_profile_is_noop()->None
+    test_load_profile_prefers_search_paths_over_builtins(tmp_path:Path)->None
   tests/test_cloner.py:
     i: pytest,clonebox.cloner.{SelectiveVMCloner,VMConfig},pathlib.Path,unittest.mock.{MagicMock,patch}
     e: TestVMConfig,TestSelectiveVMClonerInit,TestSelectiveVMClonerMethods,TestVMXMLGeneration,TestVMCreation
     TestVMConfig: test_default_values(0),test_custom_values(0),test_to_dict(0)  # Test VMConfig dataclass.
-    TestSelectiveVMClonerInit: test_system_images_dir(0),test_user_images_dir(0),test_init_session_type(3),test_init_custom_uri(1),test_init_no_libvirt(0)  # Test SelectiveVMCloner initialization.
+    TestSelectiveVMClonerInit: test_system_images_dir(1),test_user_images_dir(1),test_init_session_type(3),test_init_custom_uri(1),test_init_no_libvirt(0)  # Test SelectiveVMCloner initialization.
     TestSelectiveVMClonerMethods: test_get_images_dir(3),test_check_prerequisites_returns_dict(1),test_check_prerequisites_session_type(3),test_list_vms(1),test_close(1)  # Test SelectiveVMCloner methods.
     TestVMXMLGeneration: test_generate_vm_xml_basic(1),test_generate_vm_xml_with_paths(1)  # Test VM XML generation.
     TestVMCreation: test_create_vm_permission_error(2)  # Test VM creation (with mocked libvirt).
+  tests/test_cloner_simple.py:
+    i: pytest,unittest.mock.{Mock,patch}
+    e: test_cloner_import,test_vm_config
+    test_cloner_import()->None
+    test_vm_config()->None
   tests/test_validator.py:
     i: json,pytest,clonebox.validator.VMValidator,unittest.mock.{MagicMock,patch}
-    e: TestVMValidator,TestVMValidatorIntegration,TestValidatorResultsCalculation
-    TestVMValidator: sample_config(0),mock_console(0),test_validator_init(2),test_results_structure(2),test_exec_in_vm_success(3)  # Test VMValidator class.
+    e: TestVMValidator,TestVMValidatorApps,TestVMValidatorServices,TestVMValidatorIntegration,TestValidatorResultsCalculation
+    TestVMValidator: sample_config(0),mock_console(0),test_validator_init(2),test_results_structure(2)  # Test VMValidator class.
+    TestVMValidatorApps: sample_config(0),mock_console(0),test_validate_apps_all_ok(1),test_validate_apps_require_running_fails_when_not_running(1),test_validate_apps_missing_profile_fails(1)
+    TestVMValidatorServices: sample_config(0),mock_console(0),test_validate_services_skips_host_only(1),test_exec_in_vm_success(3),test_exec_in_vm_failure(3)
     TestVMValidatorIntegration: test_validate_all_with_vm_not_running(2)  # Integration tests for VMValidator (re...
     TestValidatorResultsCalculation: test_overall_pass(0),test_overall_partial(0)  # Test results calculation logic.
   tests/test_container.py:
@@ -55,6 +77,24 @@ D:
     TestContainerClonerUpAndPs: test_up_runs_interactive_with_env_file(2),test_up_detach_runs_sleep_infinity(2),test_ps_docker_parses_tab_format(1),test_ps_podman_json_uses_a_when_all(1)
     TestContainerClonerStopRm: test_stop_calls_engine(1),test_rm_force_adds_f(1)
     _which_side_effect(mapping)->None
+  tests/test_coverage_boost_final.py:
+    i: pytest,os,tempfile,sys,clonebox.cloner.SelectiveVMCloner,clonebox.validator.VMValidator,pathlib.Path,unittest.mock.{MagicMock,Mock,patch}
+    e: ValidatorResponder,test_validator_comprehensive_coverage,test_cloner_additional_branches,test_cloner_create_vm_branches,test_dashboard_endpoints,test_dashboard_error_paths,test_dashboard_run,test_cloner_cloudinit_generation
+    ValidatorResponder: __init__(1),__call__(2)
+    test_validator_comprehensive_coverage(monkeypatch)->None
+    test_cloner_additional_branches()->None
+    test_cloner_create_vm_branches()->None
+    test_dashboard_endpoints(monkeypatch)->None
+    test_dashboard_error_paths(monkeypatch)->None
+    test_dashboard_run(monkeypatch)->None
+    test_cloner_cloudinit_generation()->None
+    test_cloner_delete_vm_branches()->None
+  tests/test_dashboard_coverage.py:
+    i: pytest,sys,os,unittest.mock.{MagicMock,Mock,patch}
+    e: test_dashboard_import_and_functions,test_dashboard_with_mocked_dependencies,test_dashboard_constant_values
+    test_dashboard_import_and_functions()->None
+    test_dashboard_with_mocked_dependencies()->None
+    test_dashboard_constant_values()->None
   tests/test_models.py:
     i: pytest,yaml,clonebox.models.{CloneBoxConfig,ContainerConfig,VMSettings},pathlib.Path
     e: TestVMSettings,TestCloneBoxConfig,TestCloneBoxConfigYAML,TestContainerConfig
@@ -66,12 +106,20 @@ D:
     i: clonebox.cloner.{SelectiveVMCloner,VMConfig},pathlib.Path,unittest.mock.{MagicMock,patch}
     e: TestNetworkMode
     TestNetworkMode: test_vm_config_network_mode_default(1),test_vm_config_network_mode_custom(1),test_resolve_network_mode_auto_system(1),test_resolve_network_mode_auto_user_with_default(1),test_resolve_network_mode_auto_user_no_default(1)  # Test network mode resolution and fall...
+  tests/test_coverage_additional.py:
+    i: pytest,unittest.mock.{Mock,patch}
+    e: test_cloner_imports,test_dashboard_import,test_main_module,test_init_module
+    test_cloner_imports()->None
+    test_dashboard_import()->None
+    test_main_module()->None
+    test_init_module()->None
   tests/test_detector.py:
     i: pytest,clonebox.detector.{DetectedApplication,DetectedPath,DetectedService,SystemDetector,SystemSnapshot},pathlib.Path,unittest.mock.{MagicMock,patch}
-    e: TestDetectedDataclasses,TestSystemDetector,TestDetectorHelpers
+    e: TestDetectedDataclasses,TestSystemDetector,TestDetectorHelpers,TestDetectorAppDataDirs
     TestDetectedDataclasses: test_detected_service(3),test_detected_application(3),test_detected_path(3),test_system_snapshot_running_services(0)  # Test dataclasses for detected items.
     TestSystemDetector: test_init(0),test_detect_services_parses_output(1),test_detect_applications(1),test_detect_paths_finds_home_dirs(0),test_get_system_info(0)  # Test SystemDetector class.
     TestDetectorHelpers: test_get_dir_size_nonexistent(0),test_get_dir_size_existing(1),test_detect_docker_containers(4),test_detect_docker_containers_no_docker(1)  # Test helper methods.
+    TestDetectorAppDataDirs: test_detect_app_data_dirs_prefers_snap_paths(2)
   tests/test_cli.py:
     i: argparse,subprocess,sys,pytest,yaml,clonebox.cli.CLONEBOX_CONFIG_FILE,io.StringIO,pathlib.Path,unittest.mock.{MagicMock,patch}
     e: TestDeduplicateList,TestGenerateCloneboxYaml,TestLoadCloneboxConfig,TestCLIConstants,TestCLIIntegration,TestCLIParametrized
@@ -79,7 +127,7 @@ D:
     TestGenerateCloneboxYaml: create_mock_snapshot(0),create_mock_detector(0),test_generate_yaml_basic(0),test_generate_yaml_vm_name_from_path(0),test_generate_yaml_custom_vm_name(0)  # Test YAML config generation.
     TestLoadCloneboxConfig: test_load_config_from_file(1),test_load_config_from_directory(1),test_load_config_not_found(1)  # Test loading .clonebox.yaml configs.
     TestCLIConstants: test_config_file_name(0)  # Test CLI constants.
-    TestCLIIntegration: test_cli_help_commands(2),test_detect_json_output(3),test_detect_yaml_output(2),test_clone_creates_config_file(6)  # Integration tests for CLI commands.
+    TestCLIIntegration: test_cli_help_commands(2),test_detect_json_output(3),test_detect_yaml_output(2),test_clone_creates_config_file(6),test_create_vm_from_config_propagates_disk_size(2)  # Integration tests for CLI commands.
   tests/e2e/test_full_workflow.py:
     i: os,shutil,subprocess,tempfile,time,pytest,yaml,pathlib.Path
     e: TestFullWorkflow,TestVMLifecycle,TestConfigValidation,TestExportImport
@@ -87,21 +135,36 @@ D:
     TestVMLifecycle: lifecycle_config_dir(0),test_full_vm_lifecycle(1)  # Test VM lifecycle operations (require...
     TestConfigValidation: test_invalid_yaml_rejected(1),test_missing_vm_name_rejected(1)  # Test configuration validation.
     TestExportImport: test_export_requires_existing_vm(1)  # Test export/import functionality.
+  tests/e2e/test_container_workflow.py:
+    i: json,shutil,subprocess,sys,pytest,uuid.uuid4
+    e: test_container_full_workflow
+    test_container_full_workflow(tmp_path)->None
+  src/clonebox/dashboard.py:
+    i: json,subprocess,sys,fastapi.FastAPI,fastapi.responses.{HTMLResponse,JSONResponse},typing.{Any,List}
+    e: dashboard,api_vms,api_containers,api_vms_json,api_containers_json,run_dashboard
+    _run_clonebox(args:List[str])->subprocess.CompletedProcess
+    _render_table(title:str;headers:List[str];rows:List[List[str]])->str
+    dashboard()->str
+    api_vms()->str
+    api_containers()->str
+    api_vms_json()->JSONResponse
+    api_containers_json()->JSONResponse
+    run_dashboard(port:int=8080)->None
   src/clonebox/validator.py:
     i: subprocess,json,base64,time,pathlib.Path,rich.console.Console,typing.{Dict,List,Optional,Tuple}
     e: VMValidator
-    VMValidator: __init__(4),_exec_in_vm(2),validate_mounts(0),validate_packages(0),validate_snap_packages(0)  # Validates VM configuration against ex...
+    VMValidator: __init__(6),_exec_in_vm(2),validate_mounts(0),validate_packages(0),validate_snap_packages(0)  # Validates VM configuration against ex...
   src/clonebox/cli.py:
-    i: argparse,json,os,re,sys,datetime,questionary,yaml,pathlib.Path,typing.Optional
-    e: print_banner,run_vm_diagnostics,interactive_mode,cmd_create,cmd_start,cmd_open,cmd_stop,cmd_delete
+    i: argparse,json,os,re,sys,time,typing.{Any,Dict,Optional,Tuple}
+    e: print_banner,run_vm_diagnostics,cmd_watch,cmd_repair,interactive_mode,cmd_create,cmd_start,cmd_open
     print_banner()->None
-    _resolve_vm_name_and_config_file(name:Optional[str])->tuple[str, Optional[Path]]
+    _resolve_vm_name_and_config_file(name:Optional[str])->Tuple[str, Optional[Path]]
     _qga_ping(vm_name:str;conn_uri:str)->bool
     _qga_exec(vm_name:str;conn_uri:str;command:str;timeout:int=10)->Optional[str]
     run_vm_diagnostics(vm_name:str;conn_uri:str;config_file:Optional[Path])->dict
+    cmd_watch(args)->None
+    cmd_repair(args)->None
     interactive_mode()->None
-    cmd_create(args)->None
-    cmd_start(args)->None
   src/clonebox/detector.py:
     i: os,pwd,subprocess,psutil,dataclasses.{dataclass,field},pathlib.Path
     e: DetectedService,DetectedApplication,DetectedPath,SystemSnapshot,SystemDetector
@@ -115,16 +178,16 @@ D:
     e: ContainerCloner
     ContainerCloner: __init__(1),_resolve_engine(1),detect_engine(0),_run(4),build_dockerfile(1)
   src/clonebox/cloner.py:
-    i: os,subprocess,tempfile,uuid,dataclasses.{dataclass,field},pathlib.Path,typing.Optional,urllib.request,xml.etree.ElementTree
-    e: VMConfig,SelectiveVMCloner
+    i: json,os,subprocess,tempfile,uuid,dataclasses.{dataclass,field},pathlib.Path,urllib.request,xml.etree.ElementTree
+    e: SNAP_INTERFACES,DEFAULT_SNAP_INTERFACES,VMConfig,SelectiveVMCloner
     VMConfig: to_dict(0)  # Configuration for the VM to create.
-    SelectiveVMCloner: __init__(2),_connect(0),get_images_dir(0),_get_downloads_dir(0),_ensure_default_base_image(1)  # Creates VMs with only selected applic...
+    SelectiveVMCloner: __init__(2),SYSTEM_IMAGES_DIR(0),USER_IMAGES_DIR(0),DEFAULT_BASE_IMAGE_URL(0),DEFAULT_BASE_IMAGE_FILENAME(0)  # Creates VMs with only selected applic...
   src/clonebox/models.py:
     i: pathlib.Path,pydantic.{BaseModel,Field,field_validator},typing.{Any,Dict,List,Literal,Optional},uuid.uuid4
     e: VMSettings,CloneBoxConfig,ContainerConfig
     VMSettings: name_must_be_valid(1),network_mode_must_be_valid(1)  # VM-specific settings.
     CloneBoxConfig: paths_must_be_absolute(1),handle_nested_vm(1),save(1),load(1),to_vm_config(0)  # Complete CloneBox configuration with...
-    ContainerConfig: name_must_be_valid(1),extra_mounts_must_be_absolute(1),ports_must_be_valid(1),mounts(0),to_docker_run_cmd(0)
+    ContainerConfig: name_must_be_valid(1),extra_mounts_must_be_absolute(1),coerce_ports(1),ports_must_be_valid(1),mounts(0)
   src/clonebox/profiles.py:
     i: pkgutil,yaml,pathlib.Path,typing.{Any,Dict,Optional}
     e: load_profile,merge_with_profile

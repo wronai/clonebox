@@ -18,15 +18,25 @@ def _run_clonebox(args: List[str]) -> subprocess.CompletedProcess:
 
 
 def _render_table(title: str, headers: List[str], rows: List[List[str]]) -> str:
-    head_html = "".join(f"<th>{h}</th>" for h in headers)
-    body_html = "".join("<tr>" + "".join(f"<td>{c}</td>" for c in row) + "</tr>" for row in rows)
+    head_html = "".join(
+        f'<th class="px-4 py-3 text-left text-xs font-medium text-gray-400 uppercase tracking-wider">{h}</th>'
+        for h in headers
+    )
+    body_html = "".join(
+        '<tr class="hover:bg-gray-700 transition-colors">'
+        + "".join(f'<td class="px-4 py-3 whitespace-nowrap">{c}</td>' for c in row)
+        + "</tr>"
+        for row in rows
+    )
 
     return (
-        f"<h2>{title}</h2>"
-        "<table>"
-        f"<thead><tr>{head_html}</tr></thead>"
-        f"<tbody>{body_html}</tbody>"
-        "</table>"
+        f'<h2 class="text-xl font-semibold text-cyan-400 mb-4 flex items-center gap-2">'
+        f'{"🖥️" if "VM" in title else "🐳"} {title}</h2>'
+        '<div class="overflow-x-auto">'
+        '<table class="min-w-full divide-y divide-gray-700">'
+        f'<thead class="bg-gray-900"><tr>{head_html}</tr></thead>'
+        f'<tbody class="divide-y divide-gray-700">{body_html}</tbody>'
+        "</table></div>"
     )
 
 
@@ -34,24 +44,48 @@ def _render_table(title: str, headers: List[str], rows: List[List[str]]) -> str:
 async def dashboard() -> str:
     return """
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>CloneBox Dashboard</title>
   <script src="https://unpkg.com/htmx.org@1.9.10"></script>
+  <script src="https://cdn.tailwindcss.com"></script>
   <style>
-    body { font-family: system-ui, -apple-system, sans-serif; margin: 20px; }
-    table { border-collapse: collapse; width: 100%; margin-bottom: 24px; }
-    th, td { border: 1px solid #ddd; padding: 8px; text-align: left; }
-    th { background: #f6f6f6; }
-    code { background: #f6f6f6; padding: 2px 4px; border-radius: 4px; }
+    .htmx-request { opacity: 0.5; transition: opacity 200ms ease-in; }
   </style>
 </head>
-<body>
-  <h1>CloneBox Dashboard</h1>
-  <p>Auto-refresh every 5s. JSON endpoints: <code>/api/vms.json</code>, <code>/api/containers.json</code></p>
+<body class="bg-gray-900 text-gray-100 min-h-screen">
+  <div class="max-w-6xl mx-auto px-4 py-8">
+    <header class="mb-8">
+      <h1 class="text-3xl font-bold text-cyan-400 flex items-center gap-3">
+        <span class="text-4xl">📦</span> CloneBox Dashboard
+      </h1>
+      <p class="text-gray-400 mt-2">
+        Auto-refresh every 3s &bull;
+        <code class="bg-gray-800 px-2 py-1 rounded text-sm">/api/vms.json</code>
+        <code class="bg-gray-800 px-2 py-1 rounded text-sm ml-1">/api/containers.json</code>
+      </p>
+    </header>
 
-  <div id="vms" hx-get="/api/vms" hx-trigger="load, every 5s">Loading VMs...</div>
-  <div id="containers" hx-get="/api/containers" hx-trigger="load, every 5s">Loading containers...</div>
+    <div class="grid gap-6">
+      <section class="bg-gray-800 rounded-lg p-6 shadow-lg">
+        <div id="vms" hx-get="/api/vms" hx-trigger="load, every 3s">
+          <div class="animate-pulse text-gray-500">Loading VMs...</div>
+        </div>
+      </section>
+
+      <section class="bg-gray-800 rounded-lg p-6 shadow-lg">
+        <div id="containers" hx-get="/api/containers" hx-trigger="load, every 3s">
+          <div class="animate-pulse text-gray-500">Loading containers...</div>
+        </div>
+      </section>
+    </div>
+
+    <footer class="mt-8 text-center text-gray-500 text-sm">
+      CloneBox v1.1 &bull; <a href="https://github.com/wronai/clonebox" class="text-cyan-400 hover:underline">GitHub</a>
+    </footer>
+  </div>
 </body>
 </html>
 """
@@ -69,7 +103,7 @@ async def api_vms() -> str:
         return f"<pre>Invalid JSON from clonebox list:\n{proc.stdout}</pre>"
 
     if not items:
-        return "<h2>VMs</h2><p><em>No VMs found.</em></p>"
+        return '<h2 class="text-xl font-semibold text-cyan-400 mb-4">🖥️ VMs</h2><p class="text-gray-500 italic">No VMs found.</p>'
 
     rows = [
         [str(i.get("name", "")), str(i.get("state", "")), str(i.get("uuid", ""))] for i in items
@@ -89,7 +123,7 @@ async def api_containers() -> str:
         return f"<pre>Invalid JSON from clonebox container ps:\n{proc.stdout}</pre>"
 
     if not items:
-        return "<h2>Containers</h2><p><em>No containers found.</em></p>"
+        return '<h2 class="text-xl font-semibold text-cyan-400 mb-4">🐳 Containers</h2><p class="text-gray-500 italic">No containers found.</p>'
 
     rows = [
         [

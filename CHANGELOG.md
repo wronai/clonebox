@@ -1,3 +1,29 @@
+## [1.1.1] - 2026-01-31
+
+### Summary
+
+refactor(docs): configuration management system
+
+### Core
+
+- update src/clonebox/cloner.py
+- update src/clonebox/dashboard.py
+
+### Docs
+
+- docs: update README
+
+### Build
+
+- update pyproject.toml
+
+### Other
+
+- update project.functions.toon
+- update project.toon
+- config: update web-stack.yaml
+
+
 ## [0.1.30] - 2026-01-31
 
 ### Summary

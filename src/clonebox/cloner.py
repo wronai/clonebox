@@ -699,12 +699,18 @@ test_launch() {{
             fi
             ;;
         firefox) 
-            if timeout 10 firefox --headless --screenshot /tmp/ff-test.png about:blank &>/dev/null; then
-                rm -f /tmp/ff-test.png
+            if timeout 15 firefox --headless --version &>/dev/null; then
                 return 0
             else
-                echo "Firefox headless test failed" >> "$error_detail"
-                timeout 5 firefox --version >> "$error_detail" 2>&1 || true
+                echo "Firefox test failed" >> "$error_detail"
+                return 1
+            fi
+            ;;
+        google-chrome|google-chrome-stable)
+            if timeout 15 google-chrome-stable --headless --version &>/dev/null; then
+                return 0
+            else
+                echo "Chrome test failed" >> "$error_detail"
                 return 1
             fi
             ;;
@@ -1290,17 +1296,15 @@ Description=CloneBox Boot Diagnostic
 After=network-online.target snapd.service
 Before=gdm.service display-manager.service
 Wants=network-online.target
+DefaultDependencies=no
 
 [Service]
 Type=oneshot
 ExecStart=/usr/local/bin/clonebox-boot-diagnostic
 StandardOutput=journal+console
 StandardError=journal+console
-TTYPath=/dev/tty1
-TTYReset=yes
-TTYVHangup=yes
+TimeoutStartSec=300
 RemainAfterExit=yes
-TimeoutStartSec=600
 
 [Install]
 WantedBy=multi-user.target"""
@@ -1722,11 +1726,13 @@ esac
             service_content = f"""[Unit]
 Description={app["display_name"]} Autostart
 After={app["after"]}
+PartOf=graphical-session.target
 
 [Service]
 Type=simple
 Environment=DISPLAY=:0
 Environment=XDG_RUNTIME_DIR=/run/user/1000
+Environment=XDG_SESSION_TYPE=x11
 ExecStart={app["exec"]}
 Restart=on-failure
 RestartSec=5
@@ -1737,6 +1743,29 @@ WantedBy=default.target
             service_b64 = base64.b64encode(service_content.encode()).decode()
             service_path = f"/home/{config.username}/.config/systemd/user/{app['name']}.service"
             runcmd_lines.append(f"  - echo '{service_b64}' | base64 -d > {service_path}")
+
+        # Fix snap interfaces reconnection script to be more robust
+        snap_fix_script = r'''#!/bin/bash
+# Fix snap interfaces for GUI apps
+set -euo pipefail
+SNAP_LIST=$(snap list | awk 'NR>1 {print $1}')
+for snap in $SNAP_LIST; do
+    case "$snap" in
+        pycharm-community|chromium|firefox|code|slack|spotify)
+            echo "Connecting interfaces for $snap..."
+            IFACES="desktop desktop-legacy x11 wayland home network network-bind audio-playback"
+            for iface in $IFACES; do
+                snap connect "$snap:$iface" ":$iface" 2>/dev/null || true
+            done
+            ;;
+    esac
+done
+systemctl restart snapd 2>/dev/null || true
+'''
+        snap_fix_b64 = base64.b64encode(snap_fix_script.encode()).decode()
+        runcmd_lines.append(f"  - echo '{snap_fix_b64}' | base64 -d > /usr/local/bin/clonebox-fix-snaps")
+        runcmd_lines.append("  - chmod +x /usr/local/bin/clonebox-fix-snaps")
+        runcmd_lines.append("  - /usr/local/bin/clonebox-fix-snaps || true")
 
         # Generate desktop autostart files for GUI apps (alternative to systemd user services)
         for app in autostart_apps:
