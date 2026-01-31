@@ -653,6 +653,7 @@ def interactive_mode():
     summary_table.add_row("Name", vm_name)
     summary_table.add_row("RAM", f"{ram_mb} MB")
     summary_table.add_row("vCPUs", str(vcpus))
+    summary_table.add_row("Disk", f"{20 if enable_gui else 10} GB")
     summary_table.add_row("Services", ", ".join(selected_services) or "None")
     summary_table.add_row(
         "Packages",
@@ -684,6 +685,7 @@ def interactive_mode():
         name=vm_name,
         ram_mb=ram_mb,
         vcpus=vcpus,
+        disk_size_gb=20 if enable_gui else 10,
         gui=enable_gui,
         base_image=base_image if base_image else None,
         paths=paths_mapping,
@@ -732,6 +734,7 @@ def cmd_create(args):
         name=args.name,
         ram_mb=args.ram,
         vcpus=args.vcpus,
+        disk_size_gb=getattr(args, "disk_size_gb", 10),
         gui=not args.no_gui,
         base_image=args.base_image,
         paths=config_data.get("paths", {}),
@@ -1708,6 +1711,7 @@ def generate_clonebox_yaml(
     vm_name: str = None,
     network_mode: str = "auto",
     base_image: Optional[str] = None,
+    disk_size_gb: Optional[int] = None,
 ) -> str:
     """Generate YAML config from system snapshot."""
     sys_info = detector.get_system_info()
@@ -1813,6 +1817,9 @@ def generate_clonebox_yaml(
     ram_mb = min(4096, int(sys_info["memory_available_gb"] * 1024 * 0.5))
     vcpus = max(2, sys_info["cpu_count"] // 2)
 
+    if disk_size_gb is None:
+        disk_size_gb = 20
+
     # Auto-detect packages from running applications and services
     app_packages = detector.suggest_packages_for_apps(snapshot.applications)
     service_packages = detector.suggest_packages_for_services(snapshot.running_services)
@@ -1871,6 +1878,7 @@ def generate_clonebox_yaml(
             "name": vm_name,
             "ram_mb": ram_mb,
             "vcpus": vcpus,
+            "disk_size_gb": disk_size_gb,
             "gui": True,
             "base_image": base_image,
             "network_mode": network_mode,
@@ -2024,6 +2032,7 @@ def create_vm_from_config(
         name=config["vm"]["name"],
         ram_mb=config["vm"].get("ram_mb", 4096),
         vcpus=config["vm"].get("vcpus", 4),
+        disk_size_gb=config["vm"].get("disk_size_gb", 10),
         gui=config["vm"].get("gui", True),
         base_image=config["vm"].get("base_image"),
         paths=all_paths,
@@ -2103,6 +2112,7 @@ def cmd_clone(args):
         vm_name=vm_name,
         network_mode=args.network,
         base_image=getattr(args, "base_image", None),
+        disk_size_gb=getattr(args, "disk_size_gb", None),
     )
 
     profile_name = getattr(args, "profile", None)
@@ -2345,6 +2355,12 @@ def main():
     )
     create_parser.add_argument("--ram", type=int, default=4096, help="RAM in MB")
     create_parser.add_argument("--vcpus", type=int, default=4, help="Number of vCPUs")
+    create_parser.add_argument(
+        "--disk-size-gb",
+        type=int,
+        default=10,
+        help="Root disk size in GB (default: 10)",
+    )
     create_parser.add_argument("--base-image", help="Path to base qcow2 image")
     create_parser.add_argument("--no-gui", action="store_true", help="Disable SPICE graphics")
     create_parser.add_argument("--start", "-s", action="store_true", help="Start VM after creation")
@@ -2550,6 +2566,12 @@ def main():
     clone_parser.add_argument(
         "--base-image",
         help="Path to a bootable qcow2 image to use as a base disk",
+    )
+    clone_parser.add_argument(
+        "--disk-size-gb",
+        type=int,
+        default=None,
+        help="Root disk size in GB (default: 20 for generated configs)",
     )
     clone_parser.add_argument(
         "--profile",

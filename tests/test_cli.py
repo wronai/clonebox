@@ -170,6 +170,24 @@ class TestGenerateCloneboxYaml:
 
         assert config["vm"]["base_image"] == "/images/base.qcow2"
 
+    def test_generate_yaml_includes_disk_size_default(self):
+        snapshot = self.create_mock_snapshot()
+        detector = self.create_mock_detector()
+
+        yaml_str = generate_clonebox_yaml(snapshot, detector)
+        config = yaml.safe_load(yaml_str)
+
+        assert config["vm"]["disk_size_gb"] == 20
+
+    def test_generate_yaml_disk_size_override(self):
+        snapshot = self.create_mock_snapshot()
+        detector = self.create_mock_detector()
+
+        yaml_str = generate_clonebox_yaml(snapshot, detector, disk_size_gb=42)
+        config = yaml.safe_load(yaml_str)
+
+        assert config["vm"]["disk_size_gb"] == 42
+
 
 class TestLoadCloneboxConfig:
     """Test loading .clonebox.yaml configs."""
@@ -334,6 +352,7 @@ class TestCLIIntegration:
             user=True,
             network="auto",
             base_image=None,
+            disk_size_gb=None,
             replace=False,
         )
         cmd_clone(args)
@@ -342,6 +361,35 @@ class TestCLIIntegration:
         config = yaml.safe_load(config_file.read_text())
         assert "vm" in config
         assert "version" in config
+
+    @patch("clonebox.cli.SelectiveVMCloner")
+    def test_create_vm_from_config_propagates_disk_size(self, mock_cloner_class, tmp_path):
+        from clonebox.cli import create_vm_from_config
+
+        mock_cloner = MagicMock()
+        mock_cloner.create_vm.return_value = "uuid-123"
+        mock_cloner.check_prerequisites.return_value = {
+            "images_dir_writable": True,
+            "images_dir": "/tmp",
+            "session_type": "user",
+        }
+        mock_cloner_class.return_value = mock_cloner
+
+        cfg = {
+            "version": "1",
+            "vm": {"name": "test-vm", "disk_size_gb": 50},
+            "paths": {},
+            "packages": [],
+            "snap_packages": [],
+            "services": [],
+            "post_commands": [],
+        }
+
+        create_vm_from_config(cfg, start=False, user_session=True, replace=False)
+
+        assert mock_cloner.create_vm.called
+        passed_vm_config = mock_cloner.create_vm.call_args[0][0]
+        assert getattr(passed_vm_config, "disk_size_gb") == 50
 
 
 class TestCLIParametrized:

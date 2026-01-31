@@ -37,6 +37,22 @@ CloneBox lets you create isolated virtual machines with only the applications, d
 - 🧪 **Configuration testing** - Validate VM settings and functionality
 - 📁 **App data sync** - Include browser profiles, IDE settings, and app configs
 
+## Use Cases
+
+CloneBox excels in scenarios where developers need:
+- Isolated sandbox environments for testing AI agents, edge computing simulations, or integration workflows without risking host system stability
+- Reproducible development setups that can be quickly spun up with identical configurations across different machines
+- Safe experimentation with system-level changes that can be discarded by simply deleting the VM
+- Quick onboarding for new team members who need a fully configured development environment
+
+## What's Next
+
+Project roadmap includes:
+- Container runtime integration (Podman/Docker lightweight mode)
+- Local dashboard for VM and container management
+- Profile system for reusable configuration presets
+- Proxmox export capabilities for production migration
+
 
 
 
@@ -719,6 +735,11 @@ clonebox clone . --network auto
 | `clonebox detect --yaml` | Output as YAML config |
 | `clonebox detect --yaml --dedupe` | YAML with duplicates removed |
 | `clonebox detect --json` | Output as JSON |
+| `clonebox container up .` | Start a dev container for given path |
+| `clonebox container ps` | List containers |
+| `clonebox container stop <name>` | Stop a container |
+| `clonebox container rm <name>` | Remove a container |
+| `clonebox dashboard` | Run local dashboard (VM + containers) |
 | `clonebox status . --user` | Check VM health, cloud-init, IP, and mount status |
 | `clonebox status . --user --health` | Check VM status and run full health check |
 | `clonebox test . --user` | Test VM configuration (basic checks) |
@@ -738,6 +759,47 @@ clonebox clone . --network auto
 - User in `libvirt` group
 
 ## Troubleshooting
+
+### Critical: Insufficient Disk Space
+
+If you install a full desktop environment and large development tools (e.g. `ubuntu-desktop-minimal`, `docker.io`, large snaps like `pycharm-community`/`chromium`), you may hit low disk space warnings inside the VM.
+
+Recommended fix:
+- Set a larger root disk in `.clonebox.yaml`:
+
+```yaml
+vm:
+  disk_size_gb: 30
+```
+
+You can also set it during config generation:
+```bash
+clonebox clone . --user --disk-size-gb 30
+```
+
+Workaround for an existing VM (host-side resize + guest filesystem grow):
+```bash
+clonebox stop . --user
+qemu-img resize ~/.local/share/libvirt/images/<vm-name>/root.qcow2 +10G
+clonebox start . --user
+```
+
+Inside the VM:
+```bash
+sudo growpart /dev/vda 1
+sudo resize2fs /dev/vda1
+df -h /
+```
+
+### Known Issue: IBus Preferences crash
+
+During validation you may occasionally see a crash dialog from **IBus Preferences** in the Ubuntu desktop environment.
+This is an upstream issue related to the input method daemon (`ibus-daemon`) and obsolete system packages (e.g. `libglib2.0`, `libssl3`, `libxml2`, `openssl`).
+It does **not** affect CloneBox functionality and the VM operates normally.
+
+Workaround:
+- Dismiss the crash dialog
+- Or run `sudo apt upgrade` inside the VM to update system packages
 
 ### Network Issues
 

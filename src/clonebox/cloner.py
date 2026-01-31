@@ -680,7 +680,7 @@ fi
 
         # User-data
         # Add desktop environment if GUI is enabled
-        base_packages = ["qemu-guest-agent"]
+        base_packages = ["qemu-guest-agent", "cloud-guest-utils"]
         if config.gui:
             base_packages.extend([
                 "ubuntu-desktop-minimal",
@@ -769,6 +769,13 @@ users:
 ssh_pwauth: true
 chpasswd:
   expire: false
+
+# Make sure root partition + filesystem grows to fill the qcow2 disk size
+growpart:
+  mode: auto
+  devices: ["/"]
+  ignore_growroot_disabled: false
+resize_rootfs: true
 
 # Update package cache and upgrade
 package_update: true
