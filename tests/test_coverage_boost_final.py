@@ -13,24 +13,40 @@ from clonebox.cloner import SelectiveVMCloner, VMConfig
 
 
 class ValidatorResponder:
+    def __init__(self, fail_all=False):
+        self.fail_all = fail_all
+
     def __call__(self, cmd, timeout=10):
+        if self.fail_all:
+            return None
         if "mount | grep 9p" in cmd:
             return "/dev/host on /mnt/guest type 9p (rw)\n/dev/host on /home/ubuntu/.config/google-chrome type 9p (rw)"
         if "test -d" in cmd:
             return "yes"
         if "ls -A" in cmd:
-            return "5"
+            if "wc -l" in cmd:
+                return "5"
+            return "file1 file2"
         if "dpkg -l" in cmd:
+            # Matches '^ii  {package}' | awk '{{print $3}}'
+            if "awk" in cmd:
+                return "1.0-all"
             return "ii  package 1.0 all"
         if "systemctl is-enabled" in cmd:
             return "enabled"
         if "systemctl is-active" in cmd:
             return "active"
         if "systemctl show -p MainPID" in cmd:
+            if "--value" in cmd:
+                return "1234"
             return "MainPID=1234"
         if "snap list" in cmd:
+            if "awk" in cmd:
+                return "1.0"
             return "package 1.0"
         if "snap connections" in cmd:
+            if "awk" in cmd:
+                return "desktop slot\nhome slot\nnetwork slot"
             return "content-interface  package:plug  package:slot"
         if "pgrep" in cmd:
             return "5678"
@@ -43,21 +59,22 @@ class ValidatorResponder:
         # Add responders for more branches in validator.py
         if "snap logs" in cmd:
             return "some snap logs content"
-        if "firefox --headless" in cmd or "chromium --headless" in cmd:
+        if "firefox --headless" in cmd or "chromium --headless" in cmd or "google-chrome --headless" in cmd:
             return "SUCCESS"
         return ""
 
 
 def test_validator_comprehensive_coverage(monkeypatch):
     config = {
+        "vm": {"username": "ubuntu"},
         "paths": {"/host/path": "/mnt/guest"},
-        "packages": ["vim"],
-        "services": ["docker"],
-        "snap_packages": ["chromium"],
+        "packages": ["vim", "firefox"],
+        "services": ["docker", "nginx", "libvirtd"],
+        "snap_packages": ["chromium", "pycharm-community", "firefox", "code"],
         "app_data_paths": {"/host/chrome": "/home/ubuntu/.config/google-chrome"},
         "smoke_test": True,
     }
-    v = VMValidator(config, "test-vm", "qemu:///system", None)
+    v = VMValidator(config, "test-vm", "qemu:///system", None, require_running_apps=True)
     monkeypatch.setattr(v, "_exec_in_vm", ValidatorResponder())
 
     # Run all validation methods to cover branches
@@ -73,10 +90,24 @@ def test_validator_comprehensive_coverage(monkeypatch):
     v.validate_all()
 
     # Test error cases in validator methods by forcing exceptions or empty responses
-    monkeypatch.setattr(v, "_exec_in_vm", lambda c, timeout=10: "")
+    monkeypatch.setattr(v, "_exec_in_vm", lambda c, timeout=10: None)
     v.validate_mounts()
     v.validate_packages()
+    v.validate_snap_packages()
     v.validate_services()
+    v.validate_apps()
+    v.validate_smoke_tests()
+
+    v.require_running_apps = False
+    v.validate_apps()
+
+    # Test pgrep pattern edge cases
+    def mock_pgrep(cmd, timeout=10):
+        if "pgrep" in cmd:
+            return "1234"
+        return "yes"
+
+    monkeypatch.setattr(v, "_exec_in_vm", mock_pgrep)
     v.validate_apps()
 
 
@@ -246,8 +277,11 @@ def test_cloner_cloudinit_generation():
 
         with tempfile.TemporaryDirectory() as tmpdir:
             vm_dir = Path(tmpdir)
-            # Mock Path.exists for the host path in config.paths
-            with patch("pathlib.Path.exists", return_value=True):
+            # Mock Path.exists for the host path in config.paths and subprocess for genisoimage
+            with patch("pathlib.Path.exists", return_value=True), patch(
+                "subprocess.run"
+            ) as mock_run:
+                mock_run.return_value = Mock(returncode=0)
                 iso_path = cloner._create_cloudinit_iso(vm_dir, config)
                 assert iso_path is not None
                 assert (vm_dir / "cloud-init" / "user-data").exists()

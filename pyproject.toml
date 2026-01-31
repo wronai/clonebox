@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "clonebox"
-version = "0.1.29"
+version = "0.1.30"
 description = "Clone your workstation environment to an isolated VM with selective apps, paths and services"
 readme = "README.md"
 license = {text = "Apache-2.0"}
@@ -52,6 +52,8 @@ test = [
     "pytest>=7.0.0",
     "pytest-cov>=4.0.0",
     "pytest-timeout>=2.0.0",
+    "pytest-asyncio",
+    "fastapi>=0.100.0",
 ]
 dashboard = [
     "fastapi>=0.100.0",

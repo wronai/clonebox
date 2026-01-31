@@ -1,3 +1,22 @@
+## [0.1.30] - 2026-01-31
+
+### Summary
+
+feat(build): configuration management system
+
+### Test
+
+- update tests/test_coverage_boost_final.py
+
+### Build
+
+- update pyproject.toml
+
+### Ci
+
+- config: update ci.yml
+
+
 ## [0.1.29] - 2026-01-31
 
 ### Summary

@@ -16,10 +16,10 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install libvirt development libraries
+      - name: Install libvirt development libraries and tools
         run: |
           sudo apt-get update
-          sudo apt-get install -y libvirt-dev pkg-config
+          sudo apt-get install -y libvirt-dev pkg-config genisoimage
 
       - name: Set up Python ${{ matrix.python-version }}
         uses: actions/setup-python@v5
