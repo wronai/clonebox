@@ -18,6 +18,16 @@ try:
 except ImportError:
     libvirt = None
 
+SNAP_INTERFACES = {
+    'pycharm-community': ['desktop', 'desktop-legacy', 'x11', 'wayland', 'home', 'network', 'network-bind', 'cups-control', 'removable-media'],
+    'chromium': ['desktop', 'desktop-legacy', 'x11', 'wayland', 'home', 'network', 'audio-playback', 'camera'],
+    'firefox': ['desktop', 'desktop-legacy', 'x11', 'wayland', 'home', 'network', 'audio-playback', 'removable-media'],
+    'code': ['desktop', 'desktop-legacy', 'x11', 'wayland', 'home', 'network', 'ssh-keys'],
+    'slack': ['desktop', 'desktop-legacy', 'x11', 'wayland', 'home', 'network', 'audio-playback'],
+    'spotify': ['desktop', 'x11', 'wayland', 'home', 'network', 'audio-playback'],
+}
+DEFAULT_SNAP_INTERFACES = ['desktop', 'desktop-legacy', 'x11', 'home', 'network']
+
 
 @dataclass
 class VMConfig:
@@ -719,6 +729,15 @@ fi
             runcmd_lines.append("  - echo 'Installing snap packages...'")
             for snap_pkg in config.snap_packages:
                 runcmd_lines.append(f"  - snap install {snap_pkg} --classic || snap install {snap_pkg} || true")
+            
+            # Connect snap interfaces for GUI apps (not auto-connected via cloud-init)
+            runcmd_lines.append("  - echo 'Connecting snap interfaces...'")
+            for snap_pkg in config.snap_packages:
+                interfaces = SNAP_INTERFACES.get(snap_pkg, DEFAULT_SNAP_INTERFACES)
+                for iface in interfaces:
+                    runcmd_lines.append(f"  - snap connect {snap_pkg}:{iface} :{iface} 2>/dev/null || true")
+
+            runcmd_lines.append("  - systemctl restart snapd || true")
         
         # Add GUI setup if enabled - runs AFTER package installation completes
         if config.gui:
