@@ -826,6 +826,26 @@ class VMValidator:
         self.console.print(table)
         return self.results["smoke"]
 
+    def _check_qga_ready(self) -> bool:
+        """Check if QEMU guest agent is responding."""
+        try:
+            result = subprocess.run(
+                [
+                    "virsh",
+                    "--connect",
+                    self.conn_uri,
+                    "qemu-agent-command",
+                    self.vm_name,
+                    '{"execute":"guest-ping"}',
+                ],
+                capture_output=True,
+                text=True,
+                timeout=5,
+            )
+            return result.returncode == 0
+        except Exception:
+            return False
+
     def validate_all(self) -> Dict:
         """Run all validations and return comprehensive results."""
         self.console.print("[bold cyan]🔍 Running Full Validation...[/]")
@@ -848,6 +868,20 @@ class VMValidator:
         except Exception as e:
             self.console.print(f"[red]❌ Cannot check VM state: {e}[/]")
             self.results["overall"] = "error"
+            return self.results
+
+        # Check QEMU Guest Agent
+        if not self._check_qga_ready():
+            self.console.print("[red]❌ QEMU Guest Agent not responding[/]")
+            self.console.print("\n[bold]🔧 Troubleshooting QGA:[/]")
+            self.console.print("  1. The VM might still be booting. Wait 30-60 seconds.")
+            self.console.print("  2. Ensure the agent is installed and running inside the VM:")
+            self.console.print("     [dim]virsh console " + self.vm_name + "[/]")
+            self.console.print("     [dim]sudo systemctl status qemu-guest-agent[/]")
+            self.console.print("  3. If newly created, cloud-init might still be running.")
+            self.console.print("  4. Check VM logs: [dim]clonebox logs " + self.vm_name + "[/]")
+            self.console.print(f"\n[yellow]⚠️  Skipping deep validation as it requires a working Guest Agent.[/]")
+            self.results["overall"] = "qga_not_ready"
             return self.results
 
         # Run all validations

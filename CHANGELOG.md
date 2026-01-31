@@ -1,3 +1,24 @@
+## [1.1.6] - 2026-01-31
+
+### Summary
+
+feat(config): CLI interface improvements
+
+### Core
+
+- update src/clonebox/cli.py
+- update src/clonebox/models.py
+- update src/clonebox/validator.py
+
+### Test
+
+- update tests/test_models.py
+
+### Build
+
+- update pyproject.toml
+
+
 ## [1.1.5] - 2026-01-31
 
 ### Summary

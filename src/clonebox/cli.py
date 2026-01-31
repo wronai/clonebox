@@ -1852,18 +1852,21 @@ def cmd_test(args):
         all_paths.update(config.get("app_data_paths", {}))
 
         if all_paths:
-            for idx, (host_path, guest_path) in enumerate(all_paths.items()):
-                try:
-                    # Use the same QGA helper as diagnose/status
-                    is_accessible = _qga_exec(
-                        vm_name, conn_uri, f"test -d {guest_path} && echo yes || echo no", timeout=5
-                    )
-                    if is_accessible == "yes":
-                        console.print(f"[green]✅ {guest_path}[/]")
-                    else:
-                        console.print(f"[red]❌ {guest_path} (not accessible)[/]")
-                except Exception:
-                    console.print(f"[yellow]⚠️  {guest_path} (could not check)[/]")
+            if not _qga_ping(vm_name, conn_uri):
+                console.print("[yellow]⚠️  QEMU guest agent not connected - cannot verify mounts[/]")
+            else:
+                for idx, (host_path, guest_path) in enumerate(all_paths.items()):
+                    try:
+                        # Use the same QGA helper as diagnose/status
+                        is_accessible = _qga_exec(
+                            vm_name, conn_uri, f"test -d {guest_path} && echo yes || echo no", timeout=5
+                        )
+                        if is_accessible == "yes":
+                            console.print(f"[green]✅ {guest_path}[/]")
+                        else:
+                            console.print(f"[red]❌ {guest_path} (not accessible)[/]")
+                    except Exception:
+                        console.print(f"[yellow]⚠️  {guest_path} (could not check)[/]")
         else:
             console.print("[dim]No mount points configured[/]")
 
@@ -2100,7 +2103,7 @@ def generate_clonebox_yaml(
             vm_name = f"clone-{sys_info['hostname']}"
 
     # Calculate recommended resources
-    ram_mb = min(4096, int(sys_info["memory_available_gb"] * 1024 * 0.5))
+    ram_mb = min(8192, int(sys_info["memory_available_gb"] * 1024 * 0.5))
     vcpus = max(2, sys_info["cpu_count"] // 2)
 
     if disk_size_gb is None:
@@ -2333,8 +2336,8 @@ def create_vm_from_config(
 
     vm_config = VMConfig(
         name=config["vm"]["name"],
-        ram_mb=config["vm"].get("ram_mb", 4096),
-        vcpus=config["vm"].get("vcpus", 4),
+        ram_mb=config["vm"].get("ram_mb", 8192),
+        vcpus=config["vm"].get("vcpus", 8),
         disk_size_gb=config["vm"].get("disk_size_gb", 10),
         gui=config["vm"].get("gui", True),
         base_image=config["vm"].get("base_image"),

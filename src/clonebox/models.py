@@ -14,8 +14,8 @@ class VMSettings(BaseModel):
     """VM-specific settings."""
 
     name: str = Field(default="clonebox-vm", description="VM name")
-    ram_mb: int = Field(default=4096, ge=512, le=131072, description="RAM in MB")
-    vcpus: int = Field(default=4, ge=1, le=128, description="Number of vCPUs")
+    ram_mb: int = Field(default=8192, ge=512, le=131072, description="RAM in MB")
+    vcpus: int = Field(default=8, ge=1, le=128, description="Number of vCPUs")
     disk_size_gb: int = Field(default=20, ge=1, le=2048, description="Disk size in GB")
     gui: bool = Field(default=True, description="Enable SPICE graphics")
     base_image: Optional[str] = Field(default=None, description="Path to base qcow2 image")

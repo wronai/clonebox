@@ -15,8 +15,8 @@ class TestVMSettings:
     def test_default_values(self):
         settings = VMSettings()
         assert settings.name == "clonebox-vm"
-        assert settings.ram_mb == 4096
-        assert settings.vcpus == 4
+        assert settings.ram_mb == 8192
+        assert settings.vcpus == 8
         assert settings.gui is True
 
     @pytest.mark.parametrize(
@@ -173,7 +173,7 @@ class TestCloneBoxConfigYAML:
     def test_yaml_roundtrip(self, tmp_path):
         original = CloneBoxConfig(
             version="1",
-            vm=VMSettings(name="yaml-vm", ram_mb=4096, network_mode="user"),
+            vm=VMSettings(name="yaml-vm", ram_mb=8192, network_mode="user"),
             paths={"/home/user/code": "/mnt/code"},
             app_data_paths={"/home/user/.config/app": "/home/ubuntu/.config/app"},
             packages=["python3", "nodejs"],
