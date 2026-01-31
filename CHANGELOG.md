@@ -1,3 +1,23 @@
+## [0.1.25] - 2026-01-31
+
+### Summary
+
+feat(docs): CLI interface improvements
+
+### Core
+
+- update src/clonebox/cli.py
+
+### Docs
+
+- docs: update README
+- docs: update QUICK_REFERENCE.md
+
+### Ci
+
+- config: update ci.yml
+
+
 ## [0.1.24] - 2026-01-31
 
 ### Summary

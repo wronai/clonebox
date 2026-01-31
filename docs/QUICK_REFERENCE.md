@@ -202,8 +202,10 @@ ssh ubuntu@<IP_VM> "sudo apt update && sudo apt upgrade"
 clonebox repair . --user --all
 
 # Restart VM
-clonebox reboot . --user     # Soft reboot
-clonebox stop . --user && clonebox start . --user  # Full restart
+clonebox restart . --user  # Easiest - stop and start
+clonebox restart . --user --open  # Restart and open GUI
+clonebox restart . --user --force  # Force stop if stuck
+virsh --connect qemu:///session reboot clone-clonebox  # Direct reboot
 virsh --connect qemu:///session reset clone-clonebox  # Hard reset if frozen
 ```
 

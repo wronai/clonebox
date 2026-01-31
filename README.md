@@ -602,7 +602,9 @@ clonebox list              # List all VMs
 virsh --connect qemu:///session dominfo clone-clonebox
 
 # Restart VM if needed:
-clonebox stop . --user && clonebox start . --user  # Soft reboot
+clonebox restart . --user  # Easiest - stop and start
+clonebox stop . --user && clonebox start . --user  # Manual restart
+clonebox restart . --user --open  # Restart and open GUI
 virsh --connect qemu:///session reboot clone-clonebox  # Direct reboot
 virsh --connect qemu:///session reset clone-clonebox  # Hard reset if frozen
 ```

@@ -1007,6 +1007,39 @@ def cmd_stop(args):
     cloner.stop_vm(name, force=args.force, console=console)
 
 
+def cmd_restart(args):
+    """Restart a VM (stop and start)."""
+    name = args.name
+    
+    # If name is a path, load config
+    if name and (name.startswith(".") or name.startswith("/") or name.startswith("~")):
+        target_path = Path(name).expanduser().resolve()
+        config_file = target_path / ".clonebox.yaml" if target_path.is_dir() else target_path
+        if config_file.exists():
+            config = load_clonebox_config(config_file)
+            name = config["vm"]["name"]
+        else:
+            console.print(f"[red]❌ Config not found: {config_file}[/]")
+            return
+    
+    cloner = SelectiveVMCloner(user_session=getattr(args, "user", False))
+    
+    # Stop the VM
+    console.print("[bold yellow]🔄 Stopping VM...[/]")
+    cloner.stop_vm(name, force=args.force, console=console)
+    
+    # Wait a moment
+    time.sleep(2)
+    
+    # Start the VM
+    console.print("[bold green]🚀 Starting VM...[/]")
+    cloner.start_vm(name, wait_for_agent=True, console=console)
+    
+    console.print("[bold green]✅ VM restarted successfully![/]")
+    if getattr(args, "open", False):
+        cloner.open_gui(name, console=console)
+
+
 def cmd_delete(args):
     """Delete a VM."""
     name = args.name
@@ -2520,6 +2553,28 @@ def main():
         help="Use user session (qemu:///session) - no root required",
     )
     stop_parser.set_defaults(func=cmd_stop)
+
+    # Restart command
+    restart_parser = subparsers.add_parser("restart", help="Restart a VM (stop and start)")
+    restart_parser.add_argument("name", nargs="?", default=None, help="VM name or '.' to use .clonebox.yaml")
+    restart_parser.add_argument(
+        "-f",
+        "--force",
+        action="store_true",
+        help="Force stop if VM is stuck",
+    )
+    restart_parser.add_argument(
+        "-u",
+        "--user",
+        action="store_true",
+        help="Use user session (qemu:///session) - no root required",
+    )
+    restart_parser.add_argument(
+        "--open",
+        action="store_true",
+        help="Open GUI after restart",
+    )
+    restart_parser.set_defaults(func=cmd_restart)
 
     # Delete command
     delete_parser = subparsers.add_parser("delete", help="Delete a VM")
