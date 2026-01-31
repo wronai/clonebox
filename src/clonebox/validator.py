@@ -728,7 +728,20 @@ class VMValidator:
             return None if out is None else out.strip() == "yes"
 
         def _run_test(app: str) -> Optional[bool]:
-            user_env = f"sudo -u {vm_user} env HOME=/home/{vm_user} XDG_RUNTIME_DIR=/run/user/1000"
+            uid_out = self._exec_in_vm(f"id -u {vm_user} 2>/dev/null || true", timeout=10)
+            vm_uid = (uid_out or "").strip()
+            if not vm_uid.isdigit():
+                vm_uid = "1000"
+
+            runtime_dir = f"/run/user/{vm_uid}"
+            self._exec_in_vm(
+                f"mkdir -p {runtime_dir} && chown {vm_uid}:{vm_uid} {runtime_dir} && chmod 700 {runtime_dir}",
+                timeout=10,
+            )
+
+            user_env = (
+                f"sudo -u {vm_user} env HOME=/home/{vm_user} USER={vm_user} LOGNAME={vm_user} XDG_RUNTIME_DIR={runtime_dir}"
+            )
 
             if app == "pycharm-community":
                 out = self._exec_in_vm(

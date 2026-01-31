@@ -92,6 +92,7 @@ def _resolve_vm_name_and_config_file(name: Optional[str]) -> Tuple[str, Optional
 
 def _qga_ping(vm_name: str, conn_uri: str) -> bool:
     import subprocess
+    import json
 
     try:
         result = subprocess.run(
@@ -116,6 +117,7 @@ def _qga_exec(vm_name: str, conn_uri: str, command: str, timeout: int = 10) -> O
     import subprocess
     import base64
     import time
+    import json
 
     try:
         payload = {
