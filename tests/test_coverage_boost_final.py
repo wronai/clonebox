@@ -155,8 +155,15 @@ def test_cloner_additional_branches():
 
         # 2. Download branch (mocked)
         # PolicyEngine.load_effective() calls Path.exists() multiple times.
-        # We need to ensure we return False for the policy file checks and then the expected values.
-        with patch("pathlib.Path.exists", side_effect=lambda self: False if ".clonebox-policy.yml" in str(self) else True), patch(
+        # We need to handle those calls without raising StopIteration.
+        def mock_exists(path_obj):
+            p = str(path_obj)
+            if ".clonebox-policy.yml" in p:
+                return False
+            # Return True for other checks to proceed
+            return True
+
+        with patch("pathlib.Path.exists", side_effect=mock_exists), patch(
             "tempfile.NamedTemporaryFile"
         ) as mock_temp, patch("urllib.request.urlretrieve"), patch("pathlib.Path.replace"):
             mock_temp.return_value.__enter__.return_value.name = "tmpfile"

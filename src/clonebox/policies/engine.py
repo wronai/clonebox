@@ -1,8 +1,9 @@
 from __future__ import annotations
 
+import fnmatch
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Optional
+from typing import List, Optional
 
 import yaml
 
@@ -84,3 +85,28 @@ class PolicyEngine:
 
         if not is_host_allowed(hostname, network.allowlist, network.blocklist):
             raise PolicyViolationError(f"Network access denied by policy: {hostname}")
+
+    @staticmethod
+    def _operation_matches(operation: str, pattern: str) -> bool:
+        operation = (operation or "").strip().lower()
+        pattern = (pattern or "").strip().lower()
+        if not operation or not pattern:
+            return False
+        return fnmatch.fnmatch(operation, pattern)
+
+    def requires_approval(self, operation: str) -> bool:
+        ops = self.policy.policies.operations
+        if ops is None:
+            return False
+
+        if any(self._operation_matches(operation, p) for p in ops.auto_approve or []):
+            return False
+        return any(
+            self._operation_matches(operation, p) for p in ops.require_approval or []
+        )
+
+    def assert_operation_approved(self, operation: str, approved: bool) -> None:
+        if self.requires_approval(operation) and not approved:
+            raise PolicyViolationError(
+                f"Operation requires approval by policy: {operation} (pass --approve)"
+            )

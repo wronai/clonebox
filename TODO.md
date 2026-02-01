@@ -12,6 +12,7 @@
 
 ### Monitoring & Diagnostics
 - [x] Add real-time resource usage monitoring (CPU, RAM, disk) ✅ v1.1.2 (`clonebox monitor`)
+- [x] Implement real-time installation progress monitor (10 phases) ✅ v2.0.0
 - [ ] Implement alert system for failed services/apps
 - [x] Create health check API endpoint ✅ v2.0.0 (`health/`)
 - [ ] Add performance benchmarks for VM operations
@@ -20,7 +21,7 @@
 ## 🔧 Medium Priority
 
 ### Usability
-- [ ] Add progress bars for long operations (clone, export, import)
+- [x] Add detailed progress logging for clone/setup operations ✅ v2.0.0
 - [x] Implement configuration profiles (dev, test, production) ✅ v1.1.0 (`ml-dev`, `web-stack`)
 - [x] Add auto-completion for bash/zsh ✅ v1.1.2 (see `scripts/clonebox-completion.*`)
 - [ ] Create GUI configuration wizard
@@ -50,6 +51,7 @@
 - [ ] Backup/restore automation
 
 ### Performance
+- [x] Disk space optimization (apt clean, journal limit, snap retain) ✅ v2.0.0
 - [ ] Differential disk images to save space
 - [ ] RAM disk for temporary files
 - [ ] Optimized network configuration
@@ -61,22 +63,23 @@
 ### Bugs to Fix
 - [ ] Chromium headless test fails on some systems
 - [ ] Display auto-detection doesn't work for all setups
-- [ ] Mount points sometimes empty after reboot
-- [ ] Snap interfaces need manual reconnection sometimes
-- [ ] Keyring password mismatch on first login
+- [x] Mount points sometimes empty after reboot (fixed with persistence) ✅ v2.0.0
+- [x] Snap interfaces need manual reconnection sometimes (auto-fix added) ✅ v2.0.0
+- [x] Keyring password mismatch on first login (repair utility added) ✅ v2.0.0
 
 ### Improvements
-- [ ] Better error messages for failed operations
+- [x] Better error messages for failed operations (added real-time error detection) ✅ v2.0.0
 - [ ] Retry mechanism for network operations
-- [ ] Graceful handling of missing dependencies
+- [x] Graceful handling of missing dependencies (host check added) ✅ v2.0.0
 - [ ] Validation of configuration before VM creation
-- [ ] Automatic cleanup of temporary files
+- [x] Automatic cleanup of temporary files (import mounts cleanup) ✅ v2.0.0
 
 ## 📚 Documentation
 
 ### User Documentation
 - [ ] Video tutorials for common workflows
 - [ ] Troubleshooting guide with common issues
+- [x] Quick reference guide updated for v2.0 features ✅ v2.0.0
 - [ ] Best practices guide
 - [ ] FAQ section
 - [ ] Migration guide from other solutions
@@ -91,7 +94,7 @@
 ## 🔍 Research & Investigation
 
 ### Technical Debt
-- [ ] Refactor cloud-init script generation
+- [x] Refactor cloud-init script generation (10-phase system) ✅ v2.0.0
 - [ ] Improve test coverage (target: 80%)
 - [ ] Add type hints for all functions
 - [ ] Optimize memory usage
@@ -143,12 +146,17 @@
 - [x] Dependency injection - `di.py` ✅
 - [x] Structured logging - `logging.py` ✅
 - [x] Strong typing - `models.py` ✅
+- [x] 10-phase detailed installation logging ✅
+- [x] Real-time disk usage monitoring and warnings ✅
+- [x] VM space optimizations (journal limit, snap retain, cleanup) ✅
+- [x] Host-side dependency verification ✅
 
 ### Next Release (2.1.0) Goals:
-- [ ] Progress bars for long operations
+- [ ] Progress bars for long operations (internal tasks)
 - [ ] Alert system for failed services
-- [ ] Improved error handling
+- [ ] Improved error handling (automatic repair suggestions)
 - [ ] Performance benchmarks
+- [ ] Automatic port forwarding setup
 
 ### Roadmap
 - **v2.1.0**: Progress bars, alerts, improved errors

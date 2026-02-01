@@ -1713,7 +1713,7 @@ fi
             # Connect snap interfaces for GUI apps (not auto-connected via cloud-init)
             runcmd_lines.append(f"  - echo '  → 🔌 Connecting snap interfaces...'")
             for snap_pkg in config.snap_packages:
-                runcmd_lines.append(f"  - echo '    → Connecting interfaces for {snap_pkg}...'")
+                runcmd_lines.append(f"  - echo '  → Connecting interfaces for {snap_pkg}...'")
                 interfaces = SNAP_INTERFACES.get(snap_pkg, DEFAULT_SNAP_INTERFACES)
                 for iface in interfaces:
                     runcmd_lines.append(
