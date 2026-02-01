@@ -154,7 +154,9 @@ def test_cloner_additional_branches():
             cloner._ensure_default_base_image()
 
         # 2. Download branch (mocked)
-        with patch("pathlib.Path.exists", side_effect=[False, True]), patch(
+        # PolicyEngine.load_effective() calls Path.exists() multiple times.
+        # We need to ensure we return False for the policy file checks and then the expected values.
+        with patch("pathlib.Path.exists", side_effect=lambda self: False if ".clonebox-policy.yml" in str(self) else True), patch(
             "tempfile.NamedTemporaryFile"
         ) as mock_temp, patch("urllib.request.urlretrieve"), patch("pathlib.Path.replace"):
             mock_temp.return_value.__enter__.return_value.name = "tmpfile"

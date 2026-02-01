@@ -1808,14 +1808,13 @@ Comment=CloneBox autostart
 
         # Generate health check script
         health_script = self._generate_health_check_script(config)
-        # Phase 9: Health checks and finalization
+        # Phase 10: Health checks and finalization
         runcmd_lines.append("  - echo '[10/10] 🏥 Running health checks and final cleanup...'")
         runcmd_lines.append("  - echo '  → Vacuuming system logs'")
         runcmd_lines.append("  - journalctl --vacuum-size=50M >/dev/null 2>&1 || true")
         runcmd_lines.append("  - echo '  → Checking final disk usage'")
         runcmd_lines.append("  - df -h / | sed 's/^/    /'")
         
-        health_script = self._generate_health_check_script(config)
         runcmd_lines.append(
             f"  - echo '{health_script}' | base64 -d > /usr/local/bin/clonebox-health"
         )

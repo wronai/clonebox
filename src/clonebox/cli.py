@@ -37,6 +37,7 @@ from clonebox.health import HealthCheckManager, ProbeConfig, ProbeType
 from clonebox.audit import get_audit_logger, AuditQuery, AuditEventType, AuditOutcome
 from clonebox.orchestrator import Orchestrator, OrchestrationResult
 from clonebox.plugins import get_plugin_manager, PluginHook, PluginContext
+from clonebox.policies import PolicyEngine, PolicyValidationError
 from clonebox.remote import RemoteCloner, RemoteConnection
 
 # Custom questionary style
@@ -3408,6 +3409,46 @@ def cmd_list_remote(args) -> None:
         console.print("[yellow]No VMs found on remote host.[/]")
 
 
+def cmd_policy_validate(args) -> None:
+    """Validate a policy file."""
+    try:
+        file_arg = getattr(args, "file", None)
+        if file_arg:
+            policy_path = Path(file_arg).expanduser().resolve()
+        else:
+            policy_path = PolicyEngine.find_policy_file()
+
+        if not policy_path:
+            console.print("[red]❌ Policy file not found[/]")
+            sys.exit(1)
+
+        PolicyEngine.load(policy_path)
+        console.print(f"[green]✅ Policy valid: {policy_path}[/]")
+    except (PolicyValidationError, FileNotFoundError) as e:
+        console.print(f"[red]❌ Policy invalid: {e}[/]")
+        sys.exit(1)
+
+
+def cmd_policy_apply(args) -> None:
+    """Apply a policy file as project or global policy."""
+    try:
+        src = Path(args.file).expanduser().resolve()
+        PolicyEngine.load(src)
+
+        scope = getattr(args, "scope", "project")
+        if scope == "global":
+            dest = Path.home() / ".clonebox.d" / "policy.yaml"
+            dest.parent.mkdir(parents=True, exist_ok=True)
+        else:
+            dest = Path.cwd() / ".clonebox-policy.yaml"
+
+        dest.write_text(src.read_text())
+        console.print(f"[green]✅ Policy applied: {dest}[/]")
+    except (PolicyValidationError, FileNotFoundError) as e:
+        console.print(f"[red]❌ Failed to apply policy: {e}[/]")
+        sys.exit(1)
+
+
 # === Audit Commands ===
 
 
@@ -4743,6 +4784,28 @@ def main():
     plugin_uninstall = plugin_sub.add_parser("uninstall", aliases=["remove"], help="Uninstall a plugin")
     plugin_uninstall.add_argument("name", help="Plugin name")
     plugin_uninstall.set_defaults(func=cmd_plugin_uninstall)
+
+    policy_parser = subparsers.add_parser("policy", help="Manage security policies")
+    policy_parser.set_defaults(func=lambda args, p=policy_parser: p.print_help())
+    policy_sub = policy_parser.add_subparsers(dest="policy_command", help="Policy commands")
+
+    policy_validate = policy_sub.add_parser("validate", help="Validate policy file")
+    policy_validate.add_argument(
+        "--file",
+        "-f",
+        help="Policy file (default: auto-detect .clonebox-policy.yaml/.yml or ~/.clonebox.d/policy.yaml)",
+    )
+    policy_validate.set_defaults(func=cmd_policy_validate)
+
+    policy_apply = policy_sub.add_parser("apply", help="Apply policy file")
+    policy_apply.add_argument("--file", "-f", required=True, help="Policy file to apply")
+    policy_apply.add_argument(
+        "--scope",
+        choices=["project", "global"],
+        default="project",
+        help="Apply scope: project writes .clonebox-policy.yaml in CWD, global writes ~/.clonebox.d/policy.yaml",
+    )
+    policy_apply.set_defaults(func=cmd_policy_apply)
 
     # === Remote Management Commands ===
     remote_parser = subparsers.add_parser("remote", help="Manage VMs on remote hosts")
