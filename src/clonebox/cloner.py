@@ -1124,7 +1124,7 @@ fi
             mount_checks.append(f'check_mount "{guest_path}" "mount{idx}"')
         
         # Add copied paths checks
-        copy_paths = config.copy_paths or config.app_data_paths
+        copy_paths = config.copy_paths or getattr(config, "app_data_paths", {})
         if copy_paths:
             for idx, (host_path, guest_path) in enumerate(copy_paths.items()):
                 mount_checks.append(f'check_copy_path "{guest_path}"')
@@ -1159,6 +1159,27 @@ NC='\\033[0m'
 
 log() {{
     echo "[$(date '+%Y-%m-%d %H:%M:%S')] $1" | tee -a "$REPORT_FILE"
+}}
+
+check_disk_space() {{
+    local usage
+    usage=$(df / --output=pcent | tail -n 1 | tr -dc '0-9')
+    local avail
+    avail=$(df -h / --output=avail | tail -n 1 | tr -d ' ')
+    
+    if [ "$usage" -gt 95 ]; then
+        log "[FAIL] Disk space nearly full: ${{usage}}% used ($avail available)"
+        ((FAILED++))
+        return 1
+    elif [ "$usage" -gt 85 ]; then
+        log "[WARN] Disk usage high: ${{usage}}% used ($avail available)"
+        ((WARNINGS++))
+        return 0
+    else
+        log "[PASS] Disk space OK: ${{usage}}% used ($avail available)"
+        ((PASSED++))
+        return 0
+    fi
 }}
 
 check_apt_package() {{
@@ -1234,9 +1255,9 @@ check_mount() {{
         log "[INFO] Mount point '$path' does not exist yet"
         return 0
     fi
-}
+}}
 
-check_copy_path() {
+check_copy_path() {{
     local path="$1"
     if [ -d "$path" ]; then
         if [ "$(ls -A "$path" 2>/dev/null | wc -l)" -gt 0 ]; then
@@ -1282,6 +1303,11 @@ log "CloneBox Health Check Report"
 log "VM Name: {config.name}"
 log "Date: $(date)"
 log "=========================================="
+
+log ""
+log "--- System Health ---"
+check_disk_space
+check_gui
 
 log ""
 log "--- APT Packages ---"
@@ -1507,7 +1533,8 @@ fi
             for i, pkg in enumerate(all_packages, 1):
                 runcmd_lines.append(f"  - echo '  → [{i}/{len(all_packages)}] Installing {pkg}...'")
                 runcmd_lines.append(f"  - apt-get install -y {pkg} || echo '    ⚠️  Failed to install {pkg}'")
-            runcmd_lines.append("  - echo '  ✓ APT packages installed'")
+            runcmd_lines.append("  - apt-get clean")
+            runcmd_lines.append("  - echo '  ✓ APT packages installed and cache cleaned'")
             runcmd_lines.append("  - echo ''")
         else:
             runcmd_lines.append("  - echo '[1/9] 📦 No APT packages to install'")
@@ -2454,25 +2481,21 @@ if __name__ == "__main__":
         # Note: The bash monitor is already installed above, no need to install Python monitor
 
         # Create logs disk for host access
-        # Use different paths based on session type
-        if user_session:
-            logs_disk_path = str(Path.home() / ".local/share/libvirt/images/clonebox-logs.qcow2")
-        else:
-            logs_disk_path = "/var/lib/libvirt/images/clonebox-logs.qcow2"
+        # Inside the VM, we use a fixed path for the image file
+        vm_logs_img_path = "/var/lib/clonebox/logs.img"
         
         runcmd_lines.extend(
             [
-                "  - mkdir -p /mnt/logs",
-                f"  - truncate -s 1G {logs_disk_path}",
-                f"  - mkfs.ext4 -F {logs_disk_path}",
-                f"  - echo '{logs_disk_path} /mnt/logs ext4 loop,defaults 0 0' >> /etc/fstab",
+                "  - mkdir -p /var/lib/clonebox /mnt/logs",
+                f"  - truncate -s 1G {vm_logs_img_path}",
+                f"  - mkfs.ext4 -F {vm_logs_img_path}",
+                f"  - echo '{vm_logs_img_path} /mnt/logs ext4 loop,defaults 0 0' >> /etc/fstab",
                 "  - mount -a",
                 "  - mkdir -p /mnt/logs/var/log",
                 "  - mkdir -p /mnt/logs/tmp",
                 "  - cp -r /var/log/clonebox*.log /mnt/logs/var/log/ 2>/dev/null || true",
                 "  - cp -r /tmp/*-error.log /mnt/logs/tmp/ 2>/dev/null || true",
-                f"  - echo 'Logs disk mounted at /mnt/logs - accessible from host as {logs_disk_path}'",
-                f"  - \"echo 'To view logs on host: sudo mount -o loop {logs_disk_path} /mnt/clonebox-logs'\"",
+                f"  - echo 'Logs disk mounted at /mnt/logs - backing file: {vm_logs_img_path}'",
             ]
         )
 

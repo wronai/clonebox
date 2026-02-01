@@ -2498,6 +2498,18 @@ def monitor_cloud_init_status(vm_name: str, user_session: bool = False, timeout:
                     "grep -E '\\[[0-9]/[0-9]\\]|→' /var/log/cloud-init-output.log 2>/dev/null | tail -n 5"
                 )
                 
+                # Check disk space in real-time
+                disk_info = _exec_in_vm_qga(
+                    vm_name,
+                    conn_uri,
+                    "df / --output=pcent | tail -n 1 | tr -dc '0-9'"
+                )
+                if disk_info and disk_info.isdigit():
+                    usage = int(disk_info)
+                    if usage > 90:
+                        console.print(f"[bold red]⚠️  WARNING: VM Disk is nearly full ({usage}%)![/]")
+                        console.print("[red]   Installation may fail. Consider increasing --disk-size-gb.[/]")
+                
                 if raw_info:
                     lines = [l.strip() for l in raw_info.strip().split('\n') if l.strip()]
                     for line in lines:
