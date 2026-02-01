@@ -400,7 +400,7 @@ class VMValidator:
         svc_table.add_column("PID", justify="right", style="dim")
         svc_table.add_column("Note", style="dim")
 
-        # Define setup_in_progress once before the loop to avoid NameError
+        # Define here once to avoid NameError in the loop
         setup_in_progress = self._setup_in_progress() is True
 
         for service in services:
@@ -448,7 +448,9 @@ class VMValidator:
 
             if is_enabled and is_running:
                 self.results["services"]["passed"] += 1
-            elif not setup_in_progress:
+            elif setup_in_progress:
+                self.results["services"]["skipped"] += 1
+            else:
                 self.results["services"]["failed"] += 1
 
             self.results["services"]["details"].append(
@@ -1003,10 +1005,10 @@ class VMValidator:
                 "total": total
             }
 
-            if usage_pct > 95:
+            if usage_pct > 90:
                 self.console.print(f"[red]❌ Disk nearly full: {usage_pct}% used ({avail} available of {total})[/]")
                 status = "fail"
-            elif usage_pct > 80:
+            elif usage_pct > 85:
                 self.console.print(f"[yellow]⚠️  Disk usage high: {usage_pct}% used ({avail} available of {total})[/]")
                 status = "warning"
             else:
@@ -1243,13 +1245,13 @@ class VMValidator:
         disk_total = self.results.get("disk", {}).get("total", "?")
         
         # Calculate used space if possible
-        disk_passed = "✅" if disk_usage_pct <= 90 else "—"
-        disk_failed = "—" if disk_usage_pct <= 90 else f"{disk_usage_pct}%"
+        disk_status_passed = "[green]OK[/]" if disk_usage_pct <= 90 else "—"
+        disk_status_failed = "—" if disk_usage_pct <= 90 else f"[red]FULL ({disk_usage_pct}%)[/]"
 
         summary_table.add_row(
             "Disk Space",
-            disk_passed,
-            disk_failed,
+            disk_status_passed,
+            disk_status_failed,
             "—",
             f"{disk_usage_pct}% of {disk_total} ({disk_avail} free)",
         )
