@@ -272,6 +272,40 @@ class TestVMXMLGeneration:
         assert "filesystem" in xml
         assert "mount" in xml
 
+    @patch("clonebox.cloner.libvirt")
+    def test_generate_vm_xml_tuning_exclusion(self, mock_libvirt):
+        """Test that resource tuning elements are excluded in user session mode."""
+        mock_libvirt.open.return_value = MagicMock()
+        mock_libvirt.openAuth.return_value = MagicMock()
+
+        # 1. Test User Session (Should exclude tuning)
+        cloner_user = SelectiveVMCloner(user_session=True)
+        config = VMConfig(
+            name="test-vm",
+            ram_mb=2048,
+            vcpus=2,
+            resources={
+                "cpu": {"shares": 1024, "quota": 10000},
+                "memory": {"soft_limit": "1G"},
+                "disk": {"read_bps": "10M"},
+            }
+        )
+        
+        xml_user = cloner_user._generate_vm_xml(config, Path("/tmp/root.qcow2"), None)
+        
+        assert "cputune" not in xml_user
+        assert "memtune" not in xml_user
+        assert "iotune" not in xml_user
+
+        # 2. Test System Session (Should include tuning)
+        cloner_system = SelectiveVMCloner(user_session=False)
+        
+        xml_system = cloner_system._generate_vm_xml(config, Path("/tmp/root.qcow2"), None)
+        
+        assert "cputune" in xml_system
+        assert "memtune" in xml_system
+        assert "iotune" in xml_system
+
 
 class TestVMCreation:
     """Test VM creation (with mocked libvirt)."""
