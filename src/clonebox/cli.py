@@ -2643,6 +2643,11 @@ def create_vm_from_config(
         console.print("[yellow]   Required to create cloud-init configuration. Install with: sudo apt install genisoimage[/]")
         return None
 
+    if not checks.get("qemu_img_installed"):
+        console.print("[red]❌ Error: 'qemu-img' is not installed on host.[/]")
+        console.print("[yellow]   Required to create VM disks. Install with: sudo apt install qemu-utils[/]")
+        return None
+
     if vm_config.gui and not checks.get("virt_viewer_installed"):
         console.print("[yellow]⚠️  Warning: 'virt-viewer' is not installed on host.[/]")
         console.print("[dim]   You won't be able to see the VM console. Install with: sudo apt install virt-viewer[/]")

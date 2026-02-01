@@ -312,6 +312,7 @@ class SelectiveVMCloner:
             "session_type": "user" if self.user_session else "system",
             "genisoimage_installed": False,
             "virt_viewer_installed": False,
+            "qemu_img_installed": False,
         }
 
         # Check for genisoimage
@@ -319,6 +320,9 @@ class SelectiveVMCloner:
         
         # Check for virt-viewer
         checks["virt_viewer_installed"] = shutil.which("virt-viewer") is not None
+
+        # Check for qemu-img
+        checks["qemu_img_installed"] = shutil.which("qemu-img") is not None
 
         # Check libvirt connection
         if self.conn and self.conn.isAlive():
@@ -1570,7 +1574,7 @@ fi
             runcmd_lines.append(f"  - echo '[2/10] 📦 Installing APT packages ({len(all_packages)} total)...'")
             runcmd_lines.append("  - export DEBIAN_FRONTEND=noninteractive")
             # Check space before starting
-            runcmd_lines.append("  - if [ $(df / --output=avail | tail -n 1) -lt 524288 ]; then echo '    ⚠️  WARNING: Low disk space (<512MB) before APT install'; fi")
+            runcmd_lines.append("  - if [ $(df / --output=avail | tail -n 1) -lt 524288 ]; then echo '  → ⚠️  WARNING: Low disk space (<512MB) before APT install'; fi")
             runcmd_lines.append("  - echo '  → Updating package repositories...'")
             runcmd_lines.append("  - apt-get update")
             for i, pkg in enumerate(all_packages, 1):
@@ -1636,7 +1640,7 @@ fi
         if existing_copy_paths:
             runcmd_lines.append(f"  - echo '[6/10] 📥 Importing data ({len(existing_copy_paths)} paths)...'")
             # Check space before starting large import
-            runcmd_lines.append("  - if [ $(df / --output=avail | tail -n 1) -lt 1048576 ]; then echo '    ⚠️  WARNING: Low disk space (<1GB) before data import'; fi")
+            runcmd_lines.append("  - if [ $(df / --output=avail | tail -n 1) -lt 1048576 ]; then echo '  → ⚠️  WARNING: Low disk space (<1GB) before data import'; fi")
             # Add import commands with progress
             import_count = 0
             for cmd in import_mount_commands:
@@ -1656,13 +1660,20 @@ fi
             runcmd_lines.append("  - echo '[7/10] 🖥️  Setting up GUI environment...'")
             runcmd_lines.append("  - echo '  → Creating user directories'")
             # Create directories that GNOME services need
+            for d in [
+                f"/home/{config.username}/.config/pulse",
+                f"/home/{config.username}/.cache/ibus",
+                f"/home/{config.username}/.local/share",
+                f"/home/{config.username}/.config/dconf",
+                f"/home/{config.username}/.cache/tracker3",
+                f"/home/{config.username}/.config/autostart",
+            ]:
+                runcmd_lines.append(f"  - mkdir -p {d} && echo '    → Created {d}'")
+            
             runcmd_lines.extend(
                 [
-                    "  - mkdir -p /home/ubuntu/.config/pulse /home/ubuntu/.cache/ibus /home/ubuntu/.local/share",
-                    "  - mkdir -p /home/ubuntu/.config/dconf /home/ubuntu/.cache/tracker3",
-                    "  - mkdir -p /home/ubuntu/.config/autostart",
-                    "  - chown -R 1000:1000 /home/ubuntu/.config /home/ubuntu/.cache /home/ubuntu/.local",
-                    "  - chmod 700 /home/ubuntu/.config /home/ubuntu/.cache",
+                    f"  - chown -R 1000:1000 /home/{config.username}/.config /home/{config.username}/.cache /home/{config.username}/.local",
+                    f"  - chmod 700 /home/{config.username}/.config /home/{config.username}/.cache",
                     "  - systemctl set-default graphical.target",
                     "  - echo '  → Starting display manager'",
                 ]
@@ -1675,14 +1686,14 @@ fi
             runcmd_lines.append("  - echo '[7/10] 🖥️  No GUI requested'")
             runcmd_lines.append("  - echo ''")
 
-        runcmd_lines.append("  - chown -R 1000:1000 /home/ubuntu || true")
-        runcmd_lines.append("  - chown -R 1000:1000 /home/ubuntu/snap || true")
+        runcmd_lines.append(f"  - chown -R 1000:1000 /home/{config.username} || true")
+        runcmd_lines.append(f"  - chown -R 1000:1000 /home/{config.username}/snap || true")
 
         # Phase 7: Snap packages
         if config.snap_packages:
             runcmd_lines.append(f"  - echo '[8/10] 📦 Installing snap packages ({len(config.snap_packages)} packages)...'")
             # Check space before starting snap installation
-            runcmd_lines.append("  - if [ $(df / --output=avail | tail -n 1) -lt 2097152 ]; then echo '    ⚠️  WARNING: Low disk space (<2GB) before Snap install'; fi")
+            runcmd_lines.append("  - if [ $(df / --output=avail | tail -n 1) -lt 2097152 ]; then echo '  → ⚠️  WARNING: Low disk space (<2GB) before Snap install'; fi")
             for i, snap_pkg in enumerate(config.snap_packages, 1):
                 runcmd_lines.append(f"  - echo '  → [{i}/{len(config.snap_packages)}] {snap_pkg}'")
                 # Try classic first, then strict, with retries
@@ -1798,9 +1809,13 @@ Comment=CloneBox autostart
         # Generate health check script
         health_script = self._generate_health_check_script(config)
         # Phase 9: Health checks and finalization
-        runcmd_lines.append("  - echo '  🧹 Vacuuming system logs to save space...'")
-        runcmd_lines.append("  - journalctl --vacuum-size=50M")
-        runcmd_lines.append("  - echo '[10/10] 🏥 Running health checks...'")
+        runcmd_lines.append("  - echo '[10/10] 🏥 Running health checks and final cleanup...'")
+        runcmd_lines.append("  - echo '  → Vacuuming system logs'")
+        runcmd_lines.append("  - journalctl --vacuum-size=50M >/dev/null 2>&1 || true")
+        runcmd_lines.append("  - echo '  → Checking final disk usage'")
+        runcmd_lines.append("  - df -h / | sed 's/^/    /'")
+        
+        health_script = self._generate_health_check_script(config)
         runcmd_lines.append(
             f"  - echo '{health_script}' | base64 -d > /usr/local/bin/clonebox-health"
         )
