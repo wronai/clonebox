@@ -32,6 +32,7 @@ from clonebox.interfaces.disk import DiskManager
 from clonebox.interfaces.hypervisor import HypervisorBackend
 from clonebox.interfaces.network import NetworkManager
 from clonebox.logging import get_logger, log_operation
+from clonebox.policies import PolicyEngine, PolicyViolationError
 from clonebox.resources import ResourceLimits
 from clonebox.rollback import vm_creation_transaction
 from clonebox.secrets import SecretsManager, SSHKeyPair
@@ -231,6 +232,13 @@ class SelectiveVMCloner:
                 url=self.DEFAULT_BASE_IMAGE_URL,
             )
 
+            policy = PolicyEngine.load_effective()
+            if policy is not None:
+                try:
+                    policy.assert_url_allowed(self.DEFAULT_BASE_IMAGE_URL)
+                except PolicyViolationError as e:
+                    raise RuntimeError(str(e)) from e
+
             try:
                 import urllib.request
 
@@ -302,7 +310,15 @@ class SelectiveVMCloner:
             "images_dir_writable": False,
             "images_dir": str(images_dir),
             "session_type": "user" if self.user_session else "system",
+            "genisoimage_installed": False,
+            "virt_viewer_installed": False,
         }
+
+        # Check for genisoimage
+        checks["genisoimage_installed"] = shutil.which("genisoimage") is not None
+        
+        # Check for virt-viewer
+        checks["virt_viewer_installed"] = shutil.which("virt-viewer") is not None
 
         # Check libvirt connection
         if self.conn and self.conn.isAlive():

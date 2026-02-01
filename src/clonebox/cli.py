@@ -2638,6 +2638,15 @@ def create_vm_from_config(
             console.print(f"[red]{checks['images_dir_error']}[/]")
             raise PermissionError(checks["images_dir_error"])
 
+    if not checks.get("genisoimage_installed"):
+        console.print("[red]❌ Error: 'genisoimage' is not installed on host.[/]")
+        console.print("[yellow]   Required to create cloud-init configuration. Install with: sudo apt install genisoimage[/]")
+        return None
+
+    if vm_config.gui and not checks.get("virt_viewer_installed"):
+        console.print("[yellow]⚠️  Warning: 'virt-viewer' is not installed on host.[/]")
+        console.print("[dim]   You won't be able to see the VM console. Install with: sudo apt install virt-viewer[/]")
+
     console.print(f"[dim]Session: {checks['session_type']}, Storage: {checks['images_dir']}[/]")
 
     vm_uuid = cloner.create_vm(vm_config, console=console, replace=replace)
@@ -2687,6 +2696,24 @@ def cmd_clone(args):
 
     # Generate config
     vm_name = args.name or f"clone-{target_path.name}"
+    
+    # Calculate estimated project size
+    total_project_mb = sum(p.size_mb for p in snapshot.paths if p.type == "project")
+    total_app_data_mb = sum(p.size_mb for p in snapshot.paths if p.type == "data")
+    total_mb = total_project_mb + total_app_data_mb
+    total_gb = total_mb / 1024
+    
+    # Base OS and GUI overhead estimate (Ubuntu + GNOME + standard packages)
+    os_overhead_gb = 15 if args.profile != "minimal" else 5
+    estimated_needed_gb = total_gb + os_overhead_gb + 5 # +5GB buffer
+    
+    requested_gb = getattr(args, "disk_size_gb", None) or 30
+    if requested_gb < estimated_needed_gb:
+        console.print(f"[bold yellow]⚠️  WARNING: Project data size is {total_gb:.1f} GB.[/]")
+        console.print(f"[yellow]   Base OS + GUI needs ~{os_overhead_gb} GB. Total estimated: {estimated_needed_gb:.1f} GB.[/]")
+        console.print(f"[yellow]   Requested disk size ({requested_gb} GB) might be too small![/]")
+        console.print(f"[yellow]   Consider using --disk-size-gb {int(estimated_needed_gb + 10)} for safety.[/]\n")
+
     yaml_content = generate_clonebox_yaml(
         snapshot,
         detector,
