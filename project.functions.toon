@@ -1,6 +1,6 @@
 project: clonebox
-generated: "2026-02-01T19:37:25.370992"
-modules[64]{path,lang,items}:
+generated: "2026-02-01T20:45:25.973157"
+modules[65]{path,lang,items}:
   tests/test_orchestrator.py,python,19
   tests/conftest.py,python,17
   tests/test_profiles.py,python,5
@@ -12,7 +12,7 @@ modules[64]{path,lang,items}:
   tests/test_validator.py,python,20
   tests/test_container.py,python,12
   tests/test_coverage_boost_final.py,python,13
-  tests/test_cli_new_commands.py,python,23
+  tests/test_cli_new_commands.py,python,27
   tests/test_dashboard_coverage.py,python,3
   tests/test_models.py,python,22
   tests/test_network.py,python,14
@@ -23,14 +23,15 @@ modules[64]{path,lang,items}:
   scripts/fetch-logs.py,python,2
   tests/e2e/test_p2p_workflow.py,python,29
   tests/e2e/test_full_workflow.py,python,10
+  tests/e2e/test_v2_features.py,python,36
   tests/e2e/__init__.py,python,0
   tests/e2e/test_container_workflow.py,python,1
   src/clonebox/resources.py,python,15
   src/clonebox/resource_monitor.py,python,5
   src/clonebox/dashboard.py,python,8
-  src/clonebox/validator.py,python,10
+  src/clonebox/validator.py,python,11
   src/clonebox/p2p.py,python,8
-  src/clonebox/cli.py,python,75
+  src/clonebox/cli.py,python,76
   src/clonebox/importer.py,python,11
   src/clonebox/detector.py,python,13
   src/clonebox/exporter.py,python,11
@@ -249,7 +250,7 @@ function_details:
       ValidatorResponder.__init__,method,(fail_all=False) -> None,31-32,false,2,1,creates
       ValidatorResponder.__call__,method,"(cmd, timeout=10) -> None",34-83,false,50,24,call
   tests/test_cli_new_commands.py:
-    functions[23]{name,kind,sig,loc,async,lines,cc,does}:
+    functions[27]{name,kind,sig,loc,async,lines,cc,does}:
       TestAuditCommands.test_cmd_audit_list,method,(mock_query_cls) -> None,14-29,false,16,1,Test audit list command.
       TestAuditCommands.test_cmd_audit_list_with_events,method,(mock_query_cls) -> None,32-55,false,24,1,Test audit list with events.
       TestAuditCommands.test_cmd_audit_failures,method,(mock_query_cls) -> None,58-69,false,12,1,Test audit failures command.
@@ -273,6 +274,10 @@ function_details:
       TestRemoteCommands.test_cmd_remote_exec,method,(mock_remote_cls) -> None,356-373,false,18,1,Test remote exec command.
       TestRemoteCommands.test_cmd_remote_health,method,(mock_remote_cls) -> None,376-391,false,16,1,Test remote health command.
       TestRemoteCommands.test_cmd_remote_connection_error,method,(mock_remote_cls) -> None,394-403,false,10,1,Test remote command with connection error.
+      TestLogsCommands.test_cmd_logs,method,(mock_run) -> None,410-425,false,16,1,Test logs command.
+      TestLogsCommands.test_cmd_logs_with_all_flag,method,(mock_run) -> None,428-445,false,18,1,Test logs command with --all flag.
+      TestSetPasswordCommands.test_cmd_set_password,method,(mock_run) -> None,452-466,false,15,1,Test set-password command.
+      TestSetPasswordCommands.test_cmd_set_password_user_session,method,(mock_run) -> None,469-484,false,16,1,Test set-password command with user session.
   tests/test_dashboard_coverage.py:
     functions[3]{name,kind,sig,loc,async,lines,cc,does}:
       test_dashboard_import_and_functions,function,() -> None,12-41,false,30,7,Test dashboard module import and basic function existence.
@@ -456,6 +461,44 @@ function_details:
       TestConfigValidation.test_invalid_yaml_rejected,method,(tmp_path) -> None,258-271,false,14,3,Test that invalid YAML is rejected.
       TestConfigValidation.test_missing_vm_name_rejected,method,(tmp_path) -> None,273-289,false,17,3,Test that config without VM name is rejected.
       TestExportImport.test_export_requires_existing_vm,method,(tmp_path) -> None,300-323,false,24,3,Test that export fails gracefully for non-existent VM.
+  tests/e2e/test_v2_features.py:
+    functions[36]{name,kind,sig,loc,async,lines,cc,does}:
+      TestSnapshotManagement.test_snapshot_manager_import,method,() -> None,32-39,false,8,1,Test that snapshot manager can be imported.
+      TestSnapshotManagement.test_snapshot_model_creation,method,() -> None,41-58,false,18,1,Test creating a snapshot model.
+      TestSnapshotManagement.test_snapshot_manager_initialization,method,() -> None,60-69,false,10,1,Test snapshot manager initialization with mocked libvirt.
+      TestSnapshotManagement.test_snapshot_cli_commands_exist,method,() -> None,71-86,false,16,1,Test that snapshot CLI commands are registered.
+      TestOrchestration.compose_file,method,(tmp_path) -> None,97-129,false,33,1,Create a test compose file.
+      TestOrchestration.test_orchestrator_import,method,() -> None,131-136,false,6,1,Test that orchestrator can be imported.
+      TestOrchestration.test_load_compose_file,method,(compose_file) -> None,138-145,false,8,1,Test loading a compose file.
+      TestOrchestration.test_orchestrator_from_file,method,(compose_file) -> None,147-157,false,11,1,Test creating orchestrator from compose file.
+      TestOrchestration.test_compose_cli_commands_exist,method,() -> None,159-173,false,15,1,Test that compose CLI commands are registered.
+      TestPluginSystem.test_plugin_imports,method,() -> None,183-191,false,9,1,Test that plugin system can be imported.
+      TestPluginSystem.test_plugin_manager_initialization,method,() -> None,193-204,false,12,1,Test plugin manager initialization.
+      TestPluginSystem.test_plugin_hooks_defined,method,() -> None,206-213,false,8,1,Test that plugin hooks are defined.
+      TestPluginSystem.test_plugin_cli_commands_exist,method,() -> None,215-230,false,16,1,Test that plugin CLI commands are registered.
+      TestRemoteManagement.test_remote_imports,method,() -> None,240-246,false,7,1,Test that remote module can be imported.
+      TestRemoteManagement.test_remote_connection_parsing,method,() -> None,248-270,false,23,1,Test parsing remote connection strings.
+      TestRemoteManagement.test_remote_cloner_initialization,method,() -> None,272-278,false,7,1,Test remote cloner initialization.
+      TestRemoteManagement.test_remote_cli_commands_exist,method,() -> None,280-296,false,17,1,Test that remote CLI commands are registered.
+      TestAuditLogging.test_audit_imports,method,() -> None,306-312,false,7,1,Test that audit module can be imported.
+      TestAuditLogging.test_audit_event_creation,method,() -> None,314-334,false,21,1,Test creating audit events.
+      TestAuditLogging.test_audit_logger_initialization,method,(tmp_path) -> None,336-343,false,8,1,Test audit logger initialization.
+      TestAuditLogging.test_audit_context_manager,method,(tmp_path) -> None,345-357,false,13,1,Test audit logger context manager.
+      TestAuditLogging.test_audit_cli_commands_exist,method,() -> None,359-373,false,15,1,Test that audit CLI commands are registered.
+      TestHealthChecks.test_health_imports,method,() -> None,383-392,false,10,1,Test that health module can be imported.
+      TestHealthChecks.test_health_check_model,method,() -> None,394-407,false,14,1,Test health check model creation.
+      TestHealthChecks.test_health_status_enum,method,() -> None,409-416,false,8,1,Test health status enum values.
+      TestHealthChecks.test_probe_types,method,() -> None,418-425,false,8,1,Test probe type classes exist.
+      TestSecretsManagement.test_secrets_imports,method,() -> None,435-440,false,6,1,Test that secrets module can be imported.
+      TestSecretsManagement.test_secrets_manager_initialization,method,() -> None,442-447,false,6,1,Test secrets manager initialization.
+      TestSecretsManagement.test_generate_ssh_keypair,method,(tmp_path) -> None,449-456,false,8,1,Test SSH keypair generation.
+      TestSecretsManagement.test_generate_one_time_password,method,() -> None,458-465,false,8,1,Test one-time password generation.
+      TestRollbackSystem.test_rollback_imports,method,() -> None,475-480,false,6,1,Test that rollback module can be imported.
+      TestRollbackSystem.test_rollback_context_creation,method,() -> None,482-492,false,11,1,Test rollback context creation.
+      TestRollbackSystem.test_rollback_context_as_context_manager,method,(tmp_path) -> None,494-506,false,13,1,Test rollback context as context manager.
+      TestRollbackSystem.test_rollback_on_exception,method,(tmp_path) -> None,508-523,false,16,2,Test rollback happens on exception.
+      TestV2ConfigFormat.test_v2_config_with_auth_section,method,(tmp_path) -> None,533-563,false,31,1,Test v2 config format with nested auth section.
+      TestV2ConfigFormat.test_v1_config_backward_compatibility,method,(tmp_path) -> None,565-581,false,17,1,Test v1 config format still works.
   tests/e2e/test_container_workflow.py:
     functions[1]{name,kind,sig,loc,async,lines,cc,does}:
       test_container_full_workflow,function,(tmp_path) -> None,12-72,false,61,6,"E2E: clonebox container up → ps → stop → rm."
@@ -494,17 +537,18 @@ function_details:
       api_containers_json,function,() -> JSONResponse,153-161,true,9,4,api containers json
       run_dashboard,function,"(port:int=8080) -> None",164-167,false,4,1,starts dashboard
   src/clonebox/validator.py:
-    functions[10]{name,kind,sig,loc,async,lines,cc,does}:
-      VMValidator.__init__,method,"(config:dict, vm_name:str, conn_uri:str, console:Console=None, require_running_apps:bool=False, smoke_test:bool=False) -> None",19-42,false,24,2,creates
-      VMValidator._exec_in_vm,method,"(command:str, timeout:int=10) -> Optional[str]",44-106,false,63,9,Execute command in VM using QEMU guest agent.
-      VMValidator.validate_mounts,method,() -> Dict,108-216,false,109,20,Validate all mount points and copied data paths.
-      VMValidator.validate_packages,method,() -> Dict,218-257,false,40,4,Validate APT packages are installed.
-      VMValidator.validate_snap_packages,method,() -> Dict,259-298,false,40,4,Validate snap packages are installed.
-      VMValidator.validate_services,method,() -> Dict,325-408,false,84,14,Validate services are enabled and running.
-      VMValidator.validate_apps,method,() -> Dict,410-701,false,292,45,validates apps
-      VMValidator.validate_smoke_tests,method,() -> Dict,703-871,false,169,21,validates smoke tests
-      VMValidator._check_qga_ready,method,() -> bool,873-891,false,19,2,Check if QEMU guest agent is responding.
-      VMValidator.validate_all,method,() -> Dict,893-1066,false,174,17,Run all validations and return comprehensive results.
+    functions[11]{name,kind,sig,loc,async,lines,cc,does}:
+      VMValidator.__init__,method,"(config:dict, vm_name:str, conn_uri:str, console:Console=None, require_running_apps:bool=False, smoke_test:bool=False) -> None",19-50,false,32,2,creates
+      VMValidator._exec_in_vm,method,"(command:str, timeout:int=10) -> Optional[str]",52-114,false,63,9,Execute command in VM using QEMU guest agent.
+      VMValidator._setup_in_progress,method,"() -> Optional[bool]",116-129,false,14,3,initializes in progress
+      VMValidator.validate_mounts,method,() -> Dict,131-242,false,112,22,Validate all mount points and copied data paths.
+      VMValidator.validate_packages,method,() -> Dict,244-283,false,40,4,Validate APT packages are installed.
+      VMValidator.validate_snap_packages,method,() -> Dict,285-339,false,55,6,Validate snap packages are installed.
+      VMValidator.validate_services,method,() -> Dict,366-449,false,84,14,Validate services are enabled and running.
+      VMValidator.validate_apps,method,() -> Dict,451-751,false,301,53,validates apps
+      VMValidator.validate_smoke_tests,method,() -> Dict,753-936,false,184,30,validates smoke tests
+      VMValidator._check_qga_ready,method,() -> bool,938-956,false,19,2,Check if QEMU guest agent is responding.
+      VMValidator.validate_all,method,() -> Dict,958-1138,false,181,24,Run all validations and return comprehensive results.
   src/clonebox/p2p.py:
     functions[8]{name,kind,sig,loc,async,lines,cc,does}:
       P2PManager.__init__,method,"(ssh_options:Optional[list]=None) -> None",15-21,false,7,2,creates
@@ -516,7 +560,7 @@ function_details:
       P2PManager.list_remote_vms,method,"(host:str) -> list",167-181,false,15,4,List VMs on remote host.
       P2PManager.check_clonebox_installed,method,"(host:str) -> bool",183-186,false,4,1,Check if clonebox is installed on remote host.
   src/clonebox/cli.py:
-    functions[75]{name,kind,sig,loc,async,lines,cc,does}:
+    functions[76]{name,kind,sig,loc,async,lines,cc,does}:
       print_banner,function,() -> None,59-73,false,15,1,Print the CloneBox banner.
       _resolve_vm_name_and_config_file,function,"(name:Optional[str]) -> Tuple[str, Optional[Path]]",76-94,false,19,9,resolve vm name and config file
       _qga_ping,function,"(vm_name:str, conn_uri:str) -> bool",97-125,false,29,5,qga ping
@@ -551,47 +595,48 @@ function_details:
       deduplicate_list,function,"(items:list, key=None) -> list",2085-2094,false,10,4,"Remove duplicates from list, preserving order."
       generate_clonebox_yaml,function,"(snapshot, detector, deduplicate:bool=True, target_path:str=None, vm_name:str=None, network_mode:str='auto', base_image:Optional[str]=None, disk_size_gb:Optional[int]=None) -> str",2097-2319,false,223,47,Generate YAML config from system snapshot.
       load_clonebox_config,function,"(path:Path) -> dict",2322-2349,false,28,4,Load .clonebox.yaml config file and expand environment variables from .env.
-      monitor_cloud_init_status,function,"(vm_name:str, user_session:bool=False, timeout:int=900) -> None",2352-2448,false,97,19,Monitor cloud-init status in VM and show progress.
-      create_vm_from_config,function,"(config:dict, start:bool=False, user_session:bool=False, replace:bool=False) -> str",2451-2515,false,65,9,Create VM from YAML config dict.
-      cmd_clone,function,(args) -> None,2518-2695,false,178,27,Generate clone config from path and optionally create VM.
-      cmd_detect,function,(args) -> None,2698-2782,false,85,18,Detect and show system state.
-      cmd_monitor,function,(args) -> None,2785-2876,false,92,17,Real-time resource monitoring for VMs and containers.
-      cmd_exec,function,(args) -> None,2879-2962,false,84,23,Execute command in VM via QEMU Guest Agent.
-      cmd_snapshot_create,function,(args) -> None,2965-2987,false,23,4,Create VM snapshot.
-      cmd_snapshot_list,function,(args) -> None,2990-3021,false,32,6,List VM snapshots.
-      cmd_snapshot_restore,function,(args) -> None,3024-3038,false,15,3,Restore VM to snapshot.
-      cmd_snapshot_delete,function,(args) -> None,3041-3055,false,15,3,Delete VM snapshot.
-      cmd_health,function,(args) -> None,3058-3110,false,53,11,Run health checks for VM.
-      cmd_keygen,function,(args) -> None,3113-3117,false,5,1,Generate encryption key for secure P2P transfers.
-      cmd_export_encrypted,function,(args) -> None,3120-3141,false,22,4,Export VM with AES-256 encryption.
-      cmd_import_encrypted,function,(args) -> None,3144-3163,false,20,3,Import VM with AES-256 decryption.
-      cmd_export_remote,function,(args) -> None,3166-3184,false,19,2,Export VM from remote host.
-      cmd_import_remote,function,(args) -> None,3187-3204,false,18,2,Import VM to remote host.
-      cmd_sync_key,function,(args) -> None,3207-3217,false,11,2,Sync encryption key to remote host.
-      cmd_list_remote,function,(args) -> None,3220-3231,false,12,3,List VMs on remote host.
-      cmd_audit_list,function,(args) -> None,3237-3301,false,65,12,List audit events.
-      cmd_audit_show,function,(args) -> None,3304-3314,false,11,3,Show audit event details.
-      cmd_audit_failures,function,(args) -> None,3317-3340,false,24,5,Show recent failures.
-      cmd_audit_search,function,(args) -> None,3343-3398,false,56,16,Search audit events.
-      cmd_audit_export,function,(args) -> None,3401-3438,false,38,8,Export audit events to file.
-      cmd_compose_up,function,(args) -> None,3444-3471,false,28,9,Start VMs from compose file.
-      cmd_compose_down,function,(args) -> None,3474-3500,false,27,9,Stop VMs from compose file.
-      cmd_compose_status,function,(args) -> None,3503-3553,false,51,9,Show status of VMs from compose file.
-      cmd_compose_logs,function,(args) -> None,3556-3589,false,34,9,Show aggregated logs from VMs.
-      cmd_plugin_list,function,(args) -> None,3595-3627,false,33,7,List installed plugins.
-      cmd_plugin_enable,function,(args) -> None,3630-3638,false,9,2,Enable a plugin.
-      cmd_plugin_disable,function,(args) -> None,3641-3649,false,9,2,Disable a plugin.
-      cmd_plugin_discover,function,(args) -> None,3652-3666,false,15,4,Discover available plugins.
-      cmd_plugin_install,function,(args) -> None,3669-3680,false,12,2,Install a plugin.
-      cmd_plugin_uninstall,function,(args) -> None,3683-3693,false,11,2,Uninstall a plugin.
-      cmd_remote_list,function,(args) -> None,3699-3733,false,35,6,List VMs on remote host.
-      cmd_remote_status,function,(args) -> None,3736-3755,false,20,4,Get VM status on remote host.
-      cmd_remote_start,function,(args) -> None,3758-3772,false,15,2,Start VM on remote host.
-      cmd_remote_stop,function,(args) -> None,3775-3790,false,16,2,Stop VM on remote host.
-      cmd_remote_delete,function,(args) -> None,3793-3818,false,26,4,Delete VM on remote host.
-      cmd_remote_exec,function,(args) -> None,3821-3835,false,15,3,Execute command in VM on remote host.
-      cmd_remote_health,function,(args) -> None,3838-3859,false,22,4,Run health check on remote VM.
-      main,function,() -> None,3862-4633,false,772,4,Main entry point.
+      _exec_in_vm_qga,function,"(vm_name:str, conn_uri:str, command:str) -> Optional[str]",2352-2411,false,60,8,Internal helper to execute command via QGA and get output.
+      monitor_cloud_init_status,function,"(vm_name:str, user_session:bool=False, timeout:int=900) -> None",2414-2530,false,117,22,Monitor cloud-init status in VM and show progress.
+      create_vm_from_config,function,"(config:dict, start:bool=False, user_session:bool=False, replace:bool=False) -> str",2533-2619,false,87,19,Create VM from YAML config dict.
+      cmd_clone,function,(args) -> None,2622-2799,false,178,27,Generate clone config from path and optionally create VM.
+      cmd_detect,function,(args) -> None,2802-2886,false,85,18,Detect and show system state.
+      cmd_monitor,function,(args) -> None,2889-2980,false,92,17,Real-time resource monitoring for VMs and containers.
+      cmd_exec,function,(args) -> None,2983-3066,false,84,23,Execute command in VM via QEMU Guest Agent.
+      cmd_snapshot_create,function,(args) -> None,3069-3091,false,23,4,Create VM snapshot.
+      cmd_snapshot_list,function,(args) -> None,3094-3125,false,32,6,List VM snapshots.
+      cmd_snapshot_restore,function,(args) -> None,3128-3142,false,15,3,Restore VM to snapshot.
+      cmd_snapshot_delete,function,(args) -> None,3145-3159,false,15,3,Delete VM snapshot.
+      cmd_health,function,(args) -> None,3162-3214,false,53,11,Run health checks for VM.
+      cmd_keygen,function,(args) -> None,3217-3221,false,5,1,Generate encryption key for secure P2P transfers.
+      cmd_export_encrypted,function,(args) -> None,3224-3245,false,22,4,Export VM with AES-256 encryption.
+      cmd_import_encrypted,function,(args) -> None,3248-3267,false,20,3,Import VM with AES-256 decryption.
+      cmd_export_remote,function,(args) -> None,3270-3288,false,19,2,Export VM from remote host.
+      cmd_import_remote,function,(args) -> None,3291-3308,false,18,2,Import VM to remote host.
+      cmd_sync_key,function,(args) -> None,3311-3321,false,11,2,Sync encryption key to remote host.
+      cmd_list_remote,function,(args) -> None,3324-3335,false,12,3,List VMs on remote host.
+      cmd_audit_list,function,(args) -> None,3341-3405,false,65,12,List audit events.
+      cmd_audit_show,function,(args) -> None,3408-3418,false,11,3,Show audit event details.
+      cmd_audit_failures,function,(args) -> None,3421-3444,false,24,5,Show recent failures.
+      cmd_audit_search,function,(args) -> None,3447-3502,false,56,16,Search audit events.
+      cmd_audit_export,function,(args) -> None,3505-3542,false,38,8,Export audit events to file.
+      cmd_compose_up,function,(args) -> None,3548-3575,false,28,9,Start VMs from compose file.
+      cmd_compose_down,function,(args) -> None,3578-3604,false,27,9,Stop VMs from compose file.
+      cmd_compose_status,function,(args) -> None,3607-3657,false,51,9,Show status of VMs from compose file.
+      cmd_compose_logs,function,(args) -> None,3660-3693,false,34,9,Show aggregated logs from VMs.
+      cmd_plugin_list,function,(args) -> None,3699-3731,false,33,7,List installed plugins.
+      cmd_plugin_enable,function,(args) -> None,3734-3742,false,9,2,Enable a plugin.
+      cmd_plugin_disable,function,(args) -> None,3745-3753,false,9,2,Disable a plugin.
+      cmd_plugin_discover,function,(args) -> None,3756-3770,false,15,4,Discover available plugins.
+      cmd_plugin_install,function,(args) -> None,3773-3784,false,12,2,Install a plugin.
+      cmd_plugin_uninstall,function,(args) -> None,3787-3797,false,11,2,Uninstall a plugin.
+      cmd_remote_list,function,(args) -> None,3803-3837,false,35,6,List VMs on remote host.
+      cmd_remote_status,function,(args) -> None,3840-3859,false,20,4,Get VM status on remote host.
+      cmd_remote_start,function,(args) -> None,3862-3876,false,15,2,Start VM on remote host.
+      cmd_remote_stop,function,(args) -> None,3879-3894,false,16,2,Stop VM on remote host.
+      cmd_remote_delete,function,(args) -> None,3897-3922,false,26,4,Delete VM on remote host.
+      cmd_remote_exec,function,(args) -> None,3925-3939,false,15,3,Execute command in VM on remote host.
+      cmd_remote_health,function,(args) -> None,3942-3963,false,22,4,Run health check on remote VM.
+      main,function,() -> None,3966-4737,false,772,4,Main entry point.
   src/clonebox/importer.py:
     functions[11]{name,kind,sig,loc,async,lines,cc,does}:
       VMImporter.__init__,method,"(conn_uri:str='qemu:///system') -> None",27-29,false,3,1,creates
@@ -725,16 +770,16 @@ function_details:
       SelectiveVMCloner.check_prerequisites,method,() -> dict,294-356,false,63,10,Check system prerequisites for VM creation.
       SelectiveVMCloner.create_vm,method,"(config:VMConfig, console=None, replace:bool=False) -> str",358-493,false,136,20,Create a VM with only selected applications/paths.
       SelectiveVMCloner._generate_vm_xml,method,"(config:VMConfig=None, root_disk:Path=None, cloudinit_iso:Optional[Path]=None) -> str",495-689,false,195,37,Generate libvirt XML for the VM.
-      SelectiveVMCloner._generate_boot_diagnostic_script,method,"(config:VMConfig) -> str",691-1069,false,379,17,Generate boot diagnostic script with self-healing capabilities.
-      SelectiveVMCloner._generate_health_check_script,method,"(config:VMConfig) -> str",1071-1274,false,204,9,Generate a health check script that validates all installed components.
-      SelectiveVMCloner._create_cloudinit_iso,method,"(vm_dir:Path, config:VMConfig, user_session:bool=False) -> Path",1276-2400,false,1125,73,Create cloud-init ISO with secure credential handling.
-      SelectiveVMCloner.start_vm,method,"(vm_name:str, open_viewer:bool=True, console=None) -> bool",2402-2432,false,31,4,Start a VM and optionally open virt-viewer.
-      SelectiveVMCloner.stop_vm,method,"(vm_name:str, force:bool=False, console=None) -> bool",2434-2485,false,52,9,Stop a VM.
-      SelectiveVMCloner.delete_vm,method,"(vm_name:str, delete_storage:bool=True, console=None, ignore_not_found:bool=False) -> bool",2487-2525,false,39,5,Delete a VM and optionally its storage.
-      SelectiveVMCloner.list_vms,method,() -> list,2527-2538,false,12,3,List all VMs.
-      SelectiveVMCloner.close,method,() -> None,2540-2543,false,4,2,Close libvirt connection.
-      SelectiveVMCloner._get_base_image_info,method,"(image_path:str) -> dict",2546-2551,false,6,2,Get base image information - backward compatibility shim.
-      SelectiveVMCloner.get_vm_info,method,"(vm_name:str) -> dict",2553-2566,false,14,4,Get VM information - backward compatibility shim.
+      SelectiveVMCloner._generate_boot_diagnostic_script,method,"(config:VMConfig) -> str",691-1103,false,413,21,Generate boot diagnostic script with self-healing capabilities.
+      SelectiveVMCloner._generate_health_check_script,method,"(config:VMConfig) -> str",1105-1308,false,204,9,Generate a health check script that validates all installed components.
+      SelectiveVMCloner._create_cloudinit_iso,method,"(vm_dir:Path, config:VMConfig, user_session:bool=False) -> Path",1310-2496,false,1187,77,Create cloud-init ISO with secure credential handling.
+      SelectiveVMCloner.start_vm,method,"(vm_name:str, open_viewer:bool=True, console=None) -> bool",2498-2528,false,31,4,Start a VM and optionally open virt-viewer.
+      SelectiveVMCloner.stop_vm,method,"(vm_name:str, force:bool=False, console=None) -> bool",2530-2581,false,52,9,Stop a VM.
+      SelectiveVMCloner.delete_vm,method,"(vm_name:str, delete_storage:bool=True, console=None, ignore_not_found:bool=False) -> bool",2583-2621,false,39,5,Delete a VM and optionally its storage.
+      SelectiveVMCloner.list_vms,method,() -> list,2623-2634,false,12,3,List all VMs.
+      SelectiveVMCloner.close,method,() -> None,2636-2639,false,4,2,Close libvirt connection.
+      SelectiveVMCloner._get_base_image_info,method,"(image_path:str) -> dict",2642-2647,false,6,2,Get base image information - backward compatibility shim.
+      SelectiveVMCloner.get_vm_info,method,"(vm_name:str) -> dict",2649-2662,false,14,4,Get VM information - backward compatibility shim.
   src/clonebox/rollback.py:
     functions[9]{name,kind,sig,loc,async,lines,cc,does}:
       vm_creation_transaction,function,"(cloner:Any, config:Any, console:Optional[Any]=None) -> None",147-172,false,26,3,Context manager for VM creation with automatic rollback.

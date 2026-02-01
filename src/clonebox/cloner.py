@@ -1461,24 +1461,59 @@ fi
         # Build runcmd - services, mounts, snaps, post_commands
         runcmd_lines = []
 
+        # Add detailed logging header
+        runcmd_lines.append("  - echo '═══════════════════════════════════════════════════════════'")
+        runcmd_lines.append("  - echo '           CloneBox VM Installation Progress'")
+        runcmd_lines.append("  - echo '═══════════════════════════════════════════════════════════'")
+        runcmd_lines.append("  - echo ''")
+        
+        # Phase 0: APT Packages
+        if all_packages:
+            runcmd_lines.append(f"  - echo '[0/7] 📦 Installing APT packages ({len(all_packages)} total)...'")
+            runcmd_lines.append("  - export DEBIAN_FRONTEND=noninteractive")
+            runcmd_lines.append("  - apt-get update")
+            for pkg in all_packages:
+                runcmd_lines.append(f"  - echo '  → Installing {pkg}...'")
+                runcmd_lines.append(f"  - apt-get install -y {pkg} || echo '    ⚠️  Failed to install {pkg}'")
+            runcmd_lines.append("  - echo '  ✓ APT packages installed'")
+            runcmd_lines.append("  - echo ''")
+        else:
+            runcmd_lines.append("  - echo '[0/7] 📦 No APT packages to install'")
+            runcmd_lines.append("  - echo ''")
+
+        # Phase 1: Core services
+        runcmd_lines.append("  - echo '  → qemu-guest-agent'")
         runcmd_lines.append("  - systemctl enable --now qemu-guest-agent || true")
+        runcmd_lines.append("  - echo '  → snapd'")
         runcmd_lines.append("  - systemctl enable --now snapd || true")
+        runcmd_lines.append("  - echo '  → Waiting for snap system seed...'")
         runcmd_lines.append("  - timeout 300 snap wait system seed.loaded || true")
+        runcmd_lines.append("  - echo '  ✓ Core services enabled'")
+        runcmd_lines.append("  - echo ''")
 
-        # Add service enablement
+        # Phase 2: User services
+        runcmd_lines.append(f"  - echo '[2/7] 🔧 Enabling user services ({len(config.services)} total)...'")
         for svc in config.services:
+            runcmd_lines.append(f"  - echo '  → {svc}'")
             runcmd_lines.append(f"  - systemctl enable --now {svc} || true")
+        runcmd_lines.append("  - echo '  ✓ User services enabled'")
+        runcmd_lines.append("  - echo ''")
 
-        # Add fstab entries for persistent mounts after reboot
+        # Phase 3: Filesystem mounts
+        runcmd_lines.append(f"  - echo '[3/7] 📁 Mounting shared directories ({len(fstab_entries)} mounts)...'")
         if fstab_entries:
             runcmd_lines.append(
                 "  - grep -q '^# CloneBox 9p mounts' /etc/fstab || echo '# CloneBox 9p mounts' >> /etc/fstab"
             )
             for entry in fstab_entries:
+                mount_point = entry.split()[1] if len(entry.split()) > 1 else entry
+                runcmd_lines.append(f"  - echo '  → {mount_point}'")
                 runcmd_lines.append(
                     f"  - grep -qF \"{entry}\" /etc/fstab || echo '{entry}' >> /etc/fstab"
                 )
             runcmd_lines.append("  - mount -a || true")
+        runcmd_lines.append("  - echo '  ✓ Mounts configured'")
+        runcmd_lines.append("  - echo ''")
 
         # Add mounts (immediate, before reboot)
         for cmd in mount_commands:
@@ -1503,30 +1538,39 @@ fi
         runcmd_lines.append("  - chown -R 1000:1000 /home/ubuntu || true")
         runcmd_lines.append("  - chown -R 1000:1000 /home/ubuntu/snap || true")
 
-        # Install snap packages (with retry logic)
+        # Phase 4: Snap packages
         if config.snap_packages:
-            runcmd_lines.append("  - echo 'Installing snap packages...'")
-            for snap_pkg in config.snap_packages:
+            runcmd_lines.append(f"  - echo '[4/7] 📦 Installing snap packages ({len(config.snap_packages)} packages)...'")
+            for i, snap_pkg in enumerate(config.snap_packages, 1):
+                runcmd_lines.append(f"  - echo '  → [{i}/{len(config.snap_packages)}] {snap_pkg}'")
                 # Try classic first, then strict, with retries
                 cmd = (
                     f"for i in 1 2 3; do "
-                    f"snap install {snap_pkg} --classic && break || "
-                    f"snap install {snap_pkg} && break || "
-                    f"sleep 10; "
+                    f"snap install {snap_pkg} --classic && echo '    ✓ {snap_pkg} installed (classic)' && break || "
+                    f"snap install {snap_pkg} && echo '    ✓ {snap_pkg} installed' && break || "
+                    f"echo '    ⟳ Retry $i/3...' && sleep 10; "
                     f"done"
                 )
                 runcmd_lines.append(f"  - {cmd}")
+            runcmd_lines.append("  - echo '  ✓ Snap packages installed'")
+            runcmd_lines.append("  - echo ''")
 
             # Connect snap interfaces for GUI apps (not auto-connected via cloud-init)
-            runcmd_lines.append("  - echo 'Connecting snap interfaces...'")
+            runcmd_lines.append(f"  - echo '[5/7] 🔌 Connecting snap interfaces...'")
             for snap_pkg in config.snap_packages:
+                runcmd_lines.append(f"  - echo '  → {snap_pkg}'")
                 interfaces = SNAP_INTERFACES.get(snap_pkg, DEFAULT_SNAP_INTERFACES)
                 for iface in interfaces:
                     runcmd_lines.append(
                         f"  - snap connect {snap_pkg}:{iface} :{iface} 2>/dev/null || true"
                     )
-
+            runcmd_lines.append("  - echo '  ✓ Snap interfaces connected'")
             runcmd_lines.append("  - systemctl restart snapd || true")
+            runcmd_lines.append("  - echo ''")
+        else:
+            runcmd_lines.append("  - echo '[4/7] 📦 No snap packages to install'")
+            runcmd_lines.append("  - echo '[5/7] 🔌 No snap interfaces to connect'")
+            runcmd_lines.append("  - echo ''")
 
         # Add remaining GUI setup if enabled
         if config.gui:
@@ -1582,14 +1626,25 @@ Comment=CloneBox autostart
             # Fix ownership of autostart directory
             runcmd_lines.append("  - chown -R 1000:1000 /home/ubuntu/.config/autostart")
 
-        # Run user-defined post commands
+        # Phase 6: Post commands
         if config.post_commands:
-            runcmd_lines.append("  - echo 'Running post-setup commands...'")
-            for cmd in config.post_commands:
+            runcmd_lines.append(f"  - echo '[6/7] ⚙️  Running post-setup commands ({len(config.post_commands)} commands)...'")
+            for i, cmd in enumerate(config.post_commands, 1):
+                # Truncate long commands for display
+                display_cmd = cmd[:60] + '...' if len(cmd) > 60 else cmd
+                runcmd_lines.append(f"  - echo '  → [{i}/{len(config.post_commands)}] {display_cmd}'")
                 runcmd_lines.append(f"  - {cmd}")
+                runcmd_lines.append(f"  - echo '    ✓ Command {i} completed'")
+            runcmd_lines.append("  - echo '  ✓ Post-setup commands completed'")
+            runcmd_lines.append("  - echo ''")
+        else:
+            runcmd_lines.append("  - echo '[6/7] ⚙️  No post-setup commands'")
+            runcmd_lines.append("  - echo ''")
 
         # Generate health check script
         health_script = self._generate_health_check_script(config)
+        # Phase 7: Health checks and finalization
+        runcmd_lines.append("  - echo '[7/7] 🏥 Running health checks...'")
         runcmd_lines.append(
             f"  - echo '{health_script}' | base64 -d > /usr/local/bin/clonebox-health"
         )
@@ -1598,6 +1653,13 @@ Comment=CloneBox autostart
             "  - /usr/local/bin/clonebox-health >> /var/log/clonebox-health.log 2>&1 || true"
         )
         runcmd_lines.append("  - echo 'CloneBox VM ready!' > /var/log/clonebox-ready")
+        
+        # Final status
+        runcmd_lines.append("  - echo ''")
+        runcmd_lines.append("  - echo '═══════════════════════════════════════════════════════════'")
+        runcmd_lines.append("  - echo '           ✅ CloneBox VM Installation Complete!'")
+        runcmd_lines.append("  - echo '═══════════════════════════════════════════════════════════'")
+        runcmd_lines.append("  - echo ''")
 
         # Generate boot diagnostic script (self-healing)
         boot_diag_script = self._generate_boot_diagnostic_script(config)
@@ -2353,7 +2415,8 @@ if __name__ == "__main__":
 
         # Add reboot command at the end if GUI is enabled
         if config.gui:
-            runcmd_lines.append("  - echo 'Rebooting in 10 seconds to start GUI...'")
+            runcmd_lines.append("  - echo '🔄 Rebooting in 10 seconds to start GUI...'")
+            runcmd_lines.append("  - echo '   (After reboot, GUI will auto-start)'")
             runcmd_lines.append("  - sleep 10 && reboot")
 
         runcmd_yaml = "\n".join(runcmd_lines) if runcmd_lines else ""
@@ -2401,9 +2464,8 @@ package_update: true
 package_upgrade: false
 {bootcmd_block}
 
-# Install packages (cloud-init waits for completion before runcmd)
-packages:
-{packages_yaml}
+# Install packages moved to runcmd for better logging
+packages: []
 
 # Run after packages are installed
 runcmd:

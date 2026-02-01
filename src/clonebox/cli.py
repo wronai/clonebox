@@ -2349,6 +2349,68 @@ def load_clonebox_config(path: Path) -> dict:
     return config
 
 
+def _exec_in_vm_qga(vm_name: str, conn_uri: str, command: str) -> Optional[str]:
+    """Internal helper to execute command via QGA and get output."""
+    import subprocess
+    import json
+    import base64
+    import time
+    
+    try:
+        # 1. Start execution
+        cmd_json = {
+            "execute": "guest-exec",
+            "arguments": {
+                "path": "/bin/sh",
+                "arg": ["-c", command],
+                "capture-output": True
+            }
+        }
+        
+        result = subprocess.run(
+            ["virsh", "--connect", conn_uri, "qemu-agent-command", vm_name, json.dumps(cmd_json)],
+            capture_output=True,
+            text=True,
+            timeout=5
+        )
+        
+        if result.returncode != 0:
+            return None
+            
+        resp = json.loads(result.stdout)
+        pid = resp.get("return", {}).get("pid")
+        if not pid:
+            return None
+            
+        # 2. Wait and get status (quick check)
+        status_json = {"execute": "guest-exec-status", "arguments": {"pid": pid}}
+        
+        for _ in range(3): # Try a few times
+            status_result = subprocess.run(
+                ["virsh", "--connect", conn_uri, "qemu-agent-command", vm_name, json.dumps(status_json)],
+                capture_output=True,
+                text=True,
+                timeout=5
+            )
+            
+            if status_result.returncode != 0:
+                continue
+                
+            status_resp = json.loads(status_result.stdout)
+            ret = status_resp.get("return", {})
+            
+            if ret.get("exited"):
+                if "out-data" in ret:
+                    return base64.b64decode(ret["out-data"]).decode().strip()
+                return ""
+            
+            time.sleep(0.5)
+            
+        return None
+    except Exception:
+        return None
+
+
 def monitor_cloud_init_status(vm_name: str, user_session: bool = False, timeout: int = 900):
     """Monitor cloud-init status in VM and show progress."""
     import subprocess
@@ -2358,6 +2420,7 @@ def monitor_cloud_init_status(vm_name: str, user_session: bool = False, timeout:
     start_time = time.time()
     shutdown_count = 0  # Count consecutive shutdown detections
     restart_detected = False
+    last_phase = ""
 
     with Progress(
         SpinnerColumn(),
@@ -2420,10 +2483,29 @@ def monitor_cloud_init_status(vm_name: str, user_session: bool = False, timeout:
                 else:
                     remaining = "almost done"
 
+                # Try to get real-time progress via QGA
+                phase_info = _exec_in_vm_qga(
+                    vm_name, 
+                    conn_uri, 
+                    "grep -E '\\[[0-9]/7\\]|→' /var/log/cloud-init-output.log | tail -n 1"
+                )
+                
+                if phase_info:
+                    # Clean up the line (remove possible terminal codes or extra spaces)
+                    clean_phase = phase_info.strip().split('\n')[-1].strip()
+                    if clean_phase:
+                        last_phase = clean_phase
+
                 if restart_detected:
                     progress.update(
                         task,
                         description=f"[cyan]Starting GUI... ({minutes}m {seconds}s, {remaining})",
+                    )
+                elif last_phase:
+                    # Show the actual phase from logs
+                    progress.update(
+                        task,
+                        description=f"[cyan]{last_phase} ({minutes}m {seconds}s, {remaining})",
                     )
                 else:
                     progress.update(

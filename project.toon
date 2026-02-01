@@ -1,6 +1,6 @@
-# clonebox | 64f 22250L | python:64
+# clonebox | 65f 23185L | python:65
 # Keys: M=modules, D=details, i=imports, c=classes, f=functions, m=methods
-M[64]:
+M[65]:
   tests/test_orchestrator.py,228
   tests/conftest.py,345
   tests/test_profiles.py,39
@@ -12,7 +12,7 @@ M[64]:
   tests/test_validator.py,442
   tests/test_container.py,168
   tests/test_coverage_boost_final.py,328
-  tests/test_cli_new_commands.py,298
+  tests/test_cli_new_commands.py,359
   tests/test_dashboard_coverage.py,90
   tests/test_models.py,260
   tests/test_network.py,146
@@ -23,14 +23,15 @@ M[64]:
   scripts/fetch-logs.py,81
   tests/e2e/test_p2p_workflow.py,286
   tests/e2e/test_full_workflow.py,243
+  tests/e2e/test_v2_features.py,419
   tests/e2e/__init__.py,1
   tests/e2e/test_container_workflow.py,61
   src/clonebox/resources.py,167
   src/clonebox/resource_monitor.py,124
   src/clonebox/dashboard.py,136
-  src/clonebox/validator.py,893
+  src/clonebox/validator.py,954
   src/clonebox/p2p.py,140
-  src/clonebox/cli.py,3713
+  src/clonebox/cli.py,3790
   src/clonebox/importer.py,167
   src/clonebox/detector.py,589
   src/clonebox/exporter.py,145
@@ -41,7 +42,7 @@ M[64]:
   src/clonebox/container.py,154
   src/clonebox/logging.py,99
   src/clonebox/orchestrator.py,444
-  src/clonebox/cloner.py,2067
+  src/clonebox/cloner.py,2148
   src/clonebox/rollback.py,137
   src/clonebox/monitor.py,218
   src/clonebox/models.py,180
@@ -153,11 +154,12 @@ D:
     test_cloner_cloudinit_generation()->None
   tests/test_cli_new_commands.py:
     i: argparse,json,pytest,pathlib.Path,unittest.mock.{MagicMock,PropertyMock,patch}
-    e: TestAuditCommands,TestComposeCommands,TestPluginCommands,TestRemoteCommands
+    e: TestAuditCommands,TestComposeCommands,TestPluginCommands,TestRemoteCommands,TestLogsCommands,TestSetPasswordCommands
     TestAuditCommands: test_cmd_audit_list(1),test_cmd_audit_list_with_events(1),test_cmd_audit_failures(1),test_cmd_audit_search(1),test_cmd_audit_export_json(1)  # Test audit CLI commands.
     TestComposeCommands: test_cmd_compose_up_no_file(1),test_cmd_compose_down_no_file(1),test_cmd_compose_status_no_file(1),test_cmd_compose_logs_no_file(1),test_cmd_compose_up_with_file(2)  # Test compose/orchestration CLI commands.
     TestPluginCommands: test_cmd_plugin_list_empty(1),test_cmd_plugin_list_with_plugins(1),test_cmd_plugin_enable(1),test_cmd_plugin_disable(1),test_cmd_plugin_discover(1)  # Test plugin CLI commands.
     TestRemoteCommands: test_cmd_remote_list(1),test_cmd_remote_list_not_installed(1),test_cmd_remote_status(1),test_cmd_remote_start(1),test_cmd_remote_stop(1)  # Test remote management CLI commands.
+    TestLogsCommands: test_cmd_logs(1),test_cmd_logs_with_all_flag(1)  # Test logs CLI commands.
   tests/test_dashboard_coverage.py:
     i: pytest,sys,os,unittest.mock.{MagicMock,Mock,patch}
     e: test_dashboard_import_and_functions,test_dashboard_with_mocked_dependencies,test_dashboard_constant_values
@@ -225,6 +227,14 @@ D:
     TestVMLifecycle: lifecycle_config_dir(0),test_full_vm_lifecycle(1)  # Test VM lifecycle operations (require...
     TestConfigValidation: test_invalid_yaml_rejected(1),test_missing_vm_name_rejected(1)  # Test configuration validation.
     TestExportImport: test_export_requires_existing_vm(1)  # Test export/import functionality.
+  tests/e2e/test_v2_features.py:
+    i: json,os,tempfile,pytest,yaml,pathlib.Path,unittest.mock.{MagicMock,Mock,patch}
+    e: TestSnapshotManagement,TestOrchestration,TestPluginSystem,TestRemoteManagement,TestAuditLogging,TestHealthChecks,TestSecretsManagement,TestRollbackSystem
+    TestSnapshotManagement: test_snapshot_manager_import(0),test_snapshot_model_creation(0),test_snapshot_manager_initialization(0),test_snapshot_cli_commands_exist(0)  # Test snapshot create/list/restore/del...
+    TestOrchestration: compose_file(1),test_orchestrator_import(0),test_load_compose_file(1),test_orchestrator_from_file(1),test_compose_cli_commands_exist(0)  # Test compose up/down/status workflow.
+    TestPluginSystem: test_plugin_imports(0),test_plugin_manager_initialization(0),test_plugin_hooks_defined(0),test_plugin_cli_commands_exist(0)  # Test plugin list/enable/disable/insta...
+    TestRemoteManagement: test_remote_imports(0),test_remote_connection_parsing(0),test_remote_cloner_initialization(0),test_remote_cli_commands_exist(0)  # Test remote VM management workflow.
+    TestAuditLogging: test_audit_imports(0),test_audit_event_creation(0),test_audit_logger_initialization(1),test_audit_context_manager(1),test_audit_cli_commands_exist(0)  # Test audit logging workflow.
   tests/e2e/test_container_workflow.py:
     i: json,shutil,subprocess,sys,pytest,uuid.uuid4
     e: test_container_full_workflow
@@ -258,7 +268,7 @@ D:
   src/clonebox/validator.py:
     i: subprocess,json,base64,time,pathlib.Path,rich.console.Console,typing.{Dict,List,Optional,Tuple}
     e: VMValidator
-    VMValidator: __init__(6),_exec_in_vm(2),validate_mounts(0),validate_packages(0),validate_snap_packages(0)  # Validates VM configuration against ex...
+    VMValidator: __init__(6),_exec_in_vm(2),_setup_in_progress(0),validate_mounts(0),validate_packages(0)  # Validates VM configuration against ex...
   src/clonebox/p2p.py:
     i: subprocess,tempfile,pathlib.Path,typing.Optional
     e: P2PManager
