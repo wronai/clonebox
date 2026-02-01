@@ -8,6 +8,7 @@ from abc import ABC, abstractmethod
 from datetime import datetime
 from typing import Optional
 
+from clonebox.policies import PolicyEngine, PolicyViolationError
 from .models import HealthCheckResult, HealthStatus, ProbeConfig
 
 try:
@@ -57,6 +58,19 @@ class HTTPProbe(HealthProbe):
 
         start = time.time()
         try:
+            policy = PolicyEngine.load_effective()
+            if policy is not None:
+                try:
+                    policy.assert_url_allowed(config.url)
+                except PolicyViolationError as e:
+                    duration_ms = (time.time() - start) * 1000
+                    return self._create_result(
+                        config,
+                        HealthStatus.UNHEALTHY,
+                        duration_ms,
+                        error=str(e),
+                    )
+
             req = urllib.request.Request(
                 config.url,
                 method=config.method,
