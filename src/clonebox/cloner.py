@@ -1156,7 +1156,7 @@ fi
         )
         mount_checks_str = "\n".join(mount_checks) if mount_checks else "echo 'No mounts to check'"
 
-        script = f"""#!/bin/bash
+        script = fr"""#!/bin/bash
 # CloneBox Health Check Script
 # Generated automatically - validates all installed components
 
