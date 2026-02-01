@@ -72,12 +72,14 @@ class TestSelectiveVMClonerInit:
     @patch("clonebox.cloner.libvirt")
     def test_system_images_dir(self, mock_libvirt):
         mock_libvirt.open.return_value = MagicMock()
+        mock_libvirt.openAuth.return_value = MagicMock()
         cloner = SelectiveVMCloner()
         assert cloner.SYSTEM_IMAGES_DIR == Path("/var/lib/libvirt/images")
 
     @patch("clonebox.cloner.libvirt")
     def test_user_images_dir(self, mock_libvirt):
         mock_libvirt.open.return_value = MagicMock()
+        mock_libvirt.openAuth.return_value = MagicMock()
         cloner = SelectiveVMCloner()
         expected = Path.home() / ".local/share/libvirt/images"
         assert cloner.USER_IMAGES_DIR == expected
@@ -93,17 +95,22 @@ class TestSelectiveVMClonerInit:
     def test_init_session_type(self, mock_libvirt, user_session, expected_uri):
         mock_conn = MagicMock()
         mock_libvirt.open.return_value = mock_conn
+        mock_libvirt.openAuth.return_value = mock_conn
 
         cloner = SelectiveVMCloner(user_session=user_session)
 
         assert cloner.conn_uri == expected_uri
         assert cloner.user_session is user_session
-        mock_libvirt.open.assert_called_with(expected_uri)
+        
+        # Verify openAuth was called with expected URI
+        args, _ = mock_libvirt.openAuth.call_args
+        assert args[0] == expected_uri
 
     @patch("clonebox.cloner.libvirt")
     def test_init_custom_uri(self, mock_libvirt):
         mock_conn = MagicMock()
         mock_libvirt.open.return_value = mock_conn
+        mock_libvirt.openAuth.return_value = mock_conn
 
         cloner = SelectiveVMCloner(conn_uri="qemu+ssh://host/system")
 
@@ -122,6 +129,7 @@ class TestSelectiveVMClonerInit:
 
             mock_libvirt.libvirtError = real_libvirt.libvirtError
             mock_libvirt.open.side_effect = real_libvirt.libvirtError("Connection refused")
+            mock_libvirt.openAuth.side_effect = real_libvirt.libvirtError("Connection refused")
         except ImportError:
             # If libvirt is not installed, create a mock exception
             class MockLibvirtError(Exception):
@@ -129,6 +137,7 @@ class TestSelectiveVMClonerInit:
 
             mock_libvirt.libvirtError = MockLibvirtError
             mock_libvirt.open.side_effect = MockLibvirtError("Connection refused")
+            mock_libvirt.openAuth.side_effect = MockLibvirtError("Connection refused")
 
         with pytest.raises(ConnectionError) as exc_info:
             SelectiveVMCloner()
@@ -149,6 +158,7 @@ class TestSelectiveVMClonerMethods:
     @patch("clonebox.cloner.libvirt")
     def test_get_images_dir(self, mock_libvirt, user_session, expected_path):
         mock_libvirt.open.return_value = MagicMock()
+        mock_libvirt.openAuth.return_value = MagicMock()
 
         cloner = SelectiveVMCloner(user_session=user_session)
         assert cloner.get_images_dir() == expected_path
@@ -159,6 +169,7 @@ class TestSelectiveVMClonerMethods:
         mock_conn.isAlive.return_value = True
         mock_conn.networkLookupByName.return_value.isActive.return_value = 1
         mock_libvirt.open.return_value = mock_conn
+        mock_libvirt.openAuth.return_value = mock_conn
 
         cloner = SelectiveVMCloner(user_session=True)  # Use user session to avoid permission issues
         checks = cloner.check_prerequisites()
@@ -182,6 +193,7 @@ class TestSelectiveVMClonerMethods:
         mock_conn = MagicMock()
         mock_conn.isAlive.return_value = True
         mock_libvirt.open.return_value = mock_conn
+        mock_libvirt.openAuth.return_value = mock_conn
 
         cloner = SelectiveVMCloner(user_session=user_session)
         assert cloner.check_prerequisites()["session_type"] == expected_type
@@ -203,6 +215,7 @@ class TestSelectiveVMClonerMethods:
         mock_conn.lookupByID.return_value = running_vm
         mock_conn.lookupByName.return_value = stopped_vm
         mock_libvirt.open.return_value = mock_conn
+        mock_libvirt.openAuth.return_value = mock_conn
 
         cloner = SelectiveVMCloner()
         vms = cloner.list_vms()
@@ -217,6 +230,7 @@ class TestSelectiveVMClonerMethods:
     def test_close(self, mock_libvirt):
         mock_conn = MagicMock()
         mock_libvirt.open.return_value = mock_conn
+        mock_libvirt.openAuth.return_value = mock_conn
 
         cloner = SelectiveVMCloner()
         cloner.close()
@@ -230,6 +244,7 @@ class TestVMXMLGeneration:
     @patch("clonebox.cloner.libvirt")
     def test_generate_vm_xml_basic(self, mock_libvirt):
         mock_libvirt.open.return_value = MagicMock()
+        mock_libvirt.openAuth.return_value = MagicMock()
 
         cloner = SelectiveVMCloner()
         config = VMConfig(name="test-vm", ram_mb=2048, vcpus=2)
@@ -245,6 +260,7 @@ class TestVMXMLGeneration:
     @patch("clonebox.cloner.libvirt")
     def test_generate_vm_xml_with_paths(self, mock_libvirt):
         mock_libvirt.open.return_value = MagicMock()
+        mock_libvirt.openAuth.return_value = MagicMock()
 
         cloner = SelectiveVMCloner()
         config = VMConfig(name="test-vm", paths={"/home/user/project": "/mnt/project"})
@@ -266,6 +282,7 @@ class TestVMCreation:
         mock_conn = MagicMock()
         mock_conn.lookupByName.side_effect = Exception("not found")
         mock_libvirt.open.return_value = mock_conn
+        mock_libvirt.openAuth.return_value = mock_conn
 
         cloner = SelectiveVMCloner()
         config = VMConfig(name="test-vm")

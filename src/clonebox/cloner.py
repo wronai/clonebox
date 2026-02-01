@@ -92,6 +92,7 @@ class VMConfig:
     snap_packages: list = field(default_factory=list)  # Snap packages to install
     services: list = field(default_factory=list)
     post_commands: list = field(default_factory=list)  # Commands to run after setup
+    copy_paths: dict = field(default_factory=dict)  # Paths to copy (import) instead of bind-mount
     user_session: bool = field(
         default_factory=lambda: os.getenv("VM_USER_SESSION", "false").lower() == "true"
     )  # Use qemu:///session instead of qemu:///system
@@ -183,7 +184,13 @@ class SelectiveVMCloner:
             )
 
         try:
-            self.conn = libvirt.open(self.conn_uri)
+            # Use openAuth to avoid blocking on graphical auth dialogs (polkit)
+            # This is more robust for CLI usage
+            def auth_cb(creds, opaque):
+                return 0
+
+            auth = [[libvirt.VIR_CRED_AUTHNAME, libvirt.VIR_CRED_NOECHOPROMPT], auth_cb, None]
+            self.conn = libvirt.openAuth(self.conn_uri, auth, 0)
         except libvirt.libvirtError as e:
             raise ConnectionError(
                 f"Cannot connect to {self.conn_uri}\n"
@@ -523,7 +530,8 @@ class SelectiveVMCloner:
             pass
 
         # CPU tuning element
-        if limits.cpu.shares or limits.cpu.quota or limits.cpu.pin:
+        # Only available in system session (requires cgroups)
+        if not self.user_session and (limits.cpu.shares or limits.cpu.quota or limits.cpu.pin):
             cputune = ET.SubElement(root, "cputune")
             ET.SubElement(cputune, "shares").text = str(limits.cpu.shares)
             if limits.cpu.quota:
@@ -534,7 +542,8 @@ class SelectiveVMCloner:
                     ET.SubElement(cputune, "vcpupin", vcpu=str(idx), cpuset=str(cpu))
 
         # Memory tuning element
-        if limits.memory.soft_limit or limits.memory.swap:
+        # Only available in system session (requires cgroups)
+        if not self.user_session and (limits.memory.soft_limit or limits.memory.swap):
             memtune = ET.SubElement(root, "memtune")
             ET.SubElement(memtune, "hard_limit", unit="KiB").text = str(limit_kib)
             if limits.memory.soft_limit_bytes:
@@ -558,7 +567,8 @@ class SelectiveVMCloner:
         ET.SubElement(disk, "target", dev="vda", bus="virtio")
         
         # Disk I/O tuning
-        if limits.disk.read_bps or limits.disk.write_bps or limits.disk.read_iops or limits.disk.write_iops:
+        # Only available in system session (requires cgroups)
+        if not self.user_session and (limits.disk.read_bps or limits.disk.write_bps or limits.disk.read_iops or limits.disk.write_iops):
             iotune = ET.SubElement(disk, "iotune")
             if limits.disk.read_bps_bytes:
                 ET.SubElement(iotune, "read_bytes_sec").text = str(limits.disk.read_bps_bytes)
@@ -586,6 +596,16 @@ class SelectiveVMCloner:
                 ET.SubElement(fs, "source", dir=host_path)
                 # Use simple tag names for 9p mounts
                 tag = f"mount{idx}"
+                ET.SubElement(fs, "target", dir=tag)
+
+        # 9p filesystem mounts for COPY paths (mounted to temp location for import)
+        for idx, (host_path, guest_path) in enumerate(config.copy_paths.items()):
+            if Path(host_path).exists():
+                fs = ET.SubElement(devices, "filesystem", type="mount", accessmode="mapped")
+                ET.SubElement(fs, "driver", type="path", wrpolicy="immediate")
+                ET.SubElement(fs, "source", dir=host_path)
+                # Use import tag names for copy mounts
+                tag = f"import{idx}"
                 ET.SubElement(fs, "target", dir=tag)
 
         # Network interface
@@ -655,7 +675,8 @@ class SelectiveVMCloner:
         import base64
 
         wants_google_chrome = any(
-            p == "/home/ubuntu/.config/google-chrome" for p in (config.paths or {}).values()
+            p == "/home/ubuntu/.config/google-chrome"
+            for p in list((config.paths or {}).values()) + list((config.copy_paths or {}).values())
         )
 
         apt_pkg_list = list(config.packages or [])
@@ -1298,6 +1319,40 @@ fi
                 # Add fstab entry for persistence after reboot
                 fstab_entries.append(f"{tag} {guest_path} 9p {mount_opts},nofail 0 0")
 
+        # Handle copy_paths (import then copy)
+        all_copy_paths = dict(config.copy_paths) if config.copy_paths else {}
+        for idx, (host_path, guest_path) in enumerate(all_copy_paths.items()):
+            if Path(host_path).exists():
+                tag = f"import{idx}"
+                temp_mount_point = f"/mnt/import{idx}"
+                # Use regular mount options
+                mount_opts = "trans=virtio,version=9p2000.L,mmap,uid=1000,gid=1000"
+
+                # 1. Create temp mount point
+                mount_commands.append(f"  - mkdir -p {temp_mount_point}")
+                
+                # 2. Mount the 9p share
+                mount_commands.append(f"  - mount -t 9p -o {mount_opts} {tag} {temp_mount_point} || true")
+                
+                # 3. Ensure target directory exists and permissions are prepared
+                if str(guest_path).startswith("/home/ubuntu/"):
+                    mount_commands.append(f"  - mkdir -p {guest_path}")
+                    mount_commands.append(f"  - chown 1000:1000 {guest_path}")
+                else:
+                    mount_commands.append(f"  - mkdir -p {guest_path}")
+
+                # 4. Copy contents (cp -rT to copy contents of source to target)
+                # We use || true to ensure boot continues even if copy fails
+                mount_commands.append(f"  - echo 'Importing {host_path} to {guest_path}...'")
+                mount_commands.append(f"  - cp -rT {temp_mount_point} {guest_path} || true")
+                
+                # 5. Fix ownership recursively
+                mount_commands.append(f"  - chown -R 1000:1000 {guest_path}")
+
+                # 6. Unmount and cleanup
+                mount_commands.append(f"  - umount {temp_mount_point} || true")
+                mount_commands.append(f"  - rmdir {temp_mount_point} || true")
+
         # User-data
         # Add desktop environment if GUI is enabled
         base_packages = ["qemu-guest-agent", "cloud-guest-utils"]
@@ -1876,8 +1931,14 @@ esac
                             }
                         )
 
-            # Check for google-chrome from app_data_paths
-            for host_path, guest_path in (config.paths or {}).items():
+            # Check for google-chrome from app_data_paths (now in copy_paths or paths)
+            all_paths_to_check = {}
+            if config.paths:
+                all_paths_to_check.update(config.paths)
+            if config.copy_paths:
+                all_paths_to_check.update(config.copy_paths)
+
+            for host_path, guest_path in all_paths_to_check.items():
                 if guest_path == "/home/ubuntu/.config/google-chrome":
                     autostart_apps.append(
                         {
@@ -2330,7 +2391,31 @@ final_message: "CloneBox VM is ready after $UPTIME seconds"
             vm.destroy()
         else:
             log(f"[cyan]🛑 Shutting down VM '{vm_name}'...[/]")
-            vm.shutdown()
+            try:
+                vm.shutdown()
+            except libvirt.libvirtError as e:
+                log(f"[red]❌ Failed to request shutdown: {e}[/]")
+                return False
+
+            # Wait for shutdown
+            import time
+            waiting = True
+            for i in range(30):
+                try:
+                    if not vm.isActive():
+                        waiting = False
+                        break
+                except libvirt.libvirtError:
+                    # Domain might be gone
+                    waiting = False
+                    break
+                time.sleep(1)
+            
+            if waiting:
+                log(f"[red]❌ Shutdown timed out. VM is still running.[/]")
+                log(f"[dim]The guest OS is not responding to ACPI shutdown signal.[/]")
+                log(f"[dim]Try using: clonebox stop {vm_name} --force[/]")
+                return False
 
         log("[green]✅ VM stopped![/]")
         return True

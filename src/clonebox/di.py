@@ -34,7 +34,7 @@ class DependencyContainer:
 
     def __init__(self):
         self._registrations: Dict[Type, ServiceRegistration] = {}
-        self._lock = threading.Lock()
+        self._lock = threading.RLock()
 
     def register(
         self,

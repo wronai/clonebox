@@ -137,6 +137,7 @@ def test_cloner_additional_branches():
     with patch("clonebox.cloner.libvirt") as mock_libvirt:
         mock_conn = Mock()
         mock_libvirt.open.return_value = mock_conn
+        mock_libvirt.openAuth.return_value = mock_conn
         cloner = SelectiveVMCloner()
 
         # Cover _get_downloads_dir
@@ -164,6 +165,7 @@ def test_cloner_create_vm_branches():
     with patch("clonebox.cloner.libvirt") as mock_libvirt:
         mock_conn = Mock()
         mock_libvirt.open.return_value = mock_conn
+        mock_libvirt.openAuth.return_value = mock_conn
         cloner = SelectiveVMCloner()
 
         config = VMConfig(name="test-vm", packages=["vim"])
@@ -299,6 +301,7 @@ def test_cloner_cloudinit_generation():
     with patch("clonebox.cloner.libvirt") as mock_libvirt:
         mock_conn = Mock()
         mock_libvirt.open.return_value = mock_conn
+        mock_libvirt.openAuth.return_value = mock_conn
         cloner = SelectiveVMCloner()
 
         config = VMConfig(
@@ -332,6 +335,7 @@ def test_cloner_delete_vm_branches():
     with patch("clonebox.cloner.libvirt") as mock_libvirt:
         mock_conn = Mock()
         mock_libvirt.open.return_value = mock_conn
+        mock_libvirt.openAuth.return_value = mock_conn
         cloner = SelectiveVMCloner()
 
         mock_vm = Mock()

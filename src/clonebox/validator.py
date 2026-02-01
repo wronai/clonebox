@@ -106,14 +106,14 @@ class VMValidator:
             return None
 
     def validate_mounts(self) -> Dict:
-        """Validate all mount points are accessible and contain data."""
-        self.console.print("\n[bold]💾 Validating Mount Points...[/]")
+        """Validate all mount points and copied data paths."""
+        self.console.print("\n[bold]💾 Validating Mounts & Data...[/]")
 
-        all_paths = self.config.get("paths", {}).copy()
-        all_paths.update(self.config.get("app_data_paths", {}))
+        paths = self.config.get("paths", {})
+        app_data_paths = self.config.get("app_data_paths", {})
 
-        if not all_paths:
-            self.console.print("[dim]No mount points configured[/]")
+        if not paths and not app_data_paths:
+            self.console.print("[dim]No mounts or data paths configured[/]")
             return self.results["mounts"]
 
         # Get mounted filesystems
@@ -122,64 +122,95 @@ class VMValidator:
         if mount_output:
             mounted_paths = [line.split()[2] for line in mount_output.split("\n") if line.strip()]
 
-        mount_table = Table(title="Mount Validation", border_style="cyan")
+        mount_table = Table(title="Data Validation", border_style="cyan")
         mount_table.add_column("Guest Path", style="bold")
-        mount_table.add_column("Mounted", justify="center")
-        mount_table.add_column("Accessible", justify="center")
+        mount_table.add_column("Type", justify="center")
+        mount_table.add_column("Status", justify="center")
         mount_table.add_column("Files", justify="right")
 
-        for host_path, guest_path in all_paths.items():
+        # Validate bind mounts (paths)
+        for host_path, guest_path in paths.items():
             self.results["mounts"]["total"] += 1
-
+            
             # Check if mounted
             is_mounted = any(guest_path in mp for mp in mounted_paths)
-
+            
             # Check if accessible
             accessible = False
             file_count = "?"
-
+            
             if is_mounted:
                 test_result = self._exec_in_vm(f"test -d {guest_path} && echo 'yes' || echo 'no'")
                 accessible = test_result == "yes"
-
+                
                 if accessible:
-                    # Get file count
                     count_str = self._exec_in_vm(f"ls -A {guest_path} 2>/dev/null | wc -l")
                     if count_str and count_str.isdigit():
                         file_count = count_str
 
-            # Determine status
             if is_mounted and accessible:
-                mount_status = "[green]✅[/]"
-                access_status = "[green]✅[/]"
+                status_icon = "[green]✅ Mounted[/]"
                 self.results["mounts"]["passed"] += 1
                 status = "pass"
             elif is_mounted:
-                mount_status = "[green]✅[/]"
-                access_status = "[red]❌[/]"
+                status_icon = "[red]❌ Inaccessible[/]"
                 self.results["mounts"]["failed"] += 1
                 status = "mounted_but_inaccessible"
             else:
-                mount_status = "[red]❌[/]"
-                access_status = "[dim]N/A[/]"
+                status_icon = "[red]❌ Not Mounted[/]"
                 self.results["mounts"]["failed"] += 1
                 status = "not_mounted"
 
-            mount_table.add_row(guest_path, mount_status, access_status, str(file_count))
+            mount_table.add_row(guest_path, "Bind Mount", status_icon, str(file_count))
+            self.results["mounts"]["details"].append({
+                "path": guest_path,
+                "type": "mount",
+                "mounted": is_mounted,
+                "accessible": accessible,
+                "files": file_count,
+                "status": status
+            })
 
-            self.results["mounts"]["details"].append(
-                {
-                    "path": guest_path,
-                    "mounted": is_mounted,
-                    "accessible": accessible,
-                    "files": file_count,
-                    "status": status,
-                }
-            )
+        # Validate copied paths (app_data_paths)
+        for host_path, guest_path in app_data_paths.items():
+            self.results["mounts"]["total"] += 1
+            
+            # Check if exists and has content
+            exists = False
+            file_count = "?"
+            
+            test_result = self._exec_in_vm(f"test -d {guest_path} && echo 'yes' || echo 'no'")
+            exists = test_result == "yes"
+            
+            if exists:
+                count_str = self._exec_in_vm(f"ls -A {guest_path} 2>/dev/null | wc -l")
+                if count_str and count_str.isdigit():
+                    file_count = count_str
+
+            # For copied paths, we just check existence and content
+            if exists:
+                # Warning if empty? Maybe, but strictly it passed existence check
+                status_icon = "[green]✅ Copied[/]"
+                self.results["mounts"]["passed"] += 1
+                status = "pass"
+            else:
+                status_icon = "[red]❌ Missing[/]"
+                self.results["mounts"]["failed"] += 1
+                status = "missing"
+
+            mount_table.add_row(guest_path, "Imported", status_icon, str(file_count))
+            self.results["mounts"]["details"].append({
+                "path": guest_path,
+                "type": "copy",
+                "mounted": False, # Expected false for copies
+                "accessible": exists,
+                "files": file_count,
+                "status": status
+            })
 
         self.console.print(mount_table)
         self.console.print(
-            f"[dim]{self.results['mounts']['passed']}/{self.results['mounts']['total']} mounts working[/]"
+            f"[dim]{self.results['mounts']['passed']}/{self.results['mounts']['total']} paths valid[/]"
         )
 
         return self.results["mounts"]

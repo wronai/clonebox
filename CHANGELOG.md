@@ -1,3 +1,23 @@
+## [1.1.11] - 2026-02-01
+
+### Summary
+
+feat(tests): configuration management system
+
+### Core
+
+- update src/clonebox/cloner.py
+- update src/clonebox/di.py
+- update src/clonebox/models.py
+- update src/clonebox/validator.py
+
+### Test
+
+- update tests/test_cloner.py
+- update tests/test_coverage_boost_final.py
+- update tests/test_network.py
+
+
 ## [1.1.10] - 2026-02-01
 
 ### Summary

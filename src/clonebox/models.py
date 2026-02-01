@@ -116,10 +116,6 @@ class CloneBoxConfig(BaseModel):
         """Convert to legacy VMConfig dataclass for compatibility."""
         from clonebox.cloner import VMConfig as VMConfigDataclass
 
-        # Merge paths and app_data_paths
-        all_paths = dict(self.paths)
-        all_paths.update(self.app_data_paths)
-
         return VMConfigDataclass(
             name=self.vm.name,
             ram_mb=self.vm.ram_mb,
@@ -127,7 +123,8 @@ class CloneBoxConfig(BaseModel):
             disk_size_gb=self.vm.disk_size_gb,
             gui=self.vm.gui,
             base_image=self.vm.base_image,
-            paths=all_paths,
+            paths=self.paths,
+            copy_paths=self.app_data_paths,  # Map app_data_paths to copy_paths
             packages=self.packages,
             snap_packages=self.snap_packages,
             services=self.services,

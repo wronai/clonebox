@@ -40,6 +40,7 @@ class TestNetworkMode:
         """Test auto mode with system session uses default network."""
         mock_conn = MagicMock()
         mock_libvirt.open.return_value = mock_conn
+        mock_libvirt.openAuth.return_value = mock_conn
 
         cloner = SelectiveVMCloner(user_session=False)
         config = VMConfig(network_mode="auto")
@@ -51,6 +52,8 @@ class TestNetworkMode:
     def test_resolve_network_mode_auto_user_with_default(self, mock_libvirt):
         """Test auto mode with user session and default network available."""
         mock_conn = MagicMock()
+        mock_libvirt.open.return_value = mock_conn
+        mock_libvirt.openAuth.return_value = mock_conn
         mock_net = MagicMock()
         mock_net.isActive.return_value = 1
         mock_conn.networkLookupByName.return_value = mock_net
@@ -78,6 +81,7 @@ class TestNetworkMode:
         mock_conn = MagicMock()
         mock_conn.networkLookupByName.side_effect = libvirt_error("No network")
         mock_libvirt.open.return_value = mock_conn
+        mock_libvirt.openAuth.return_value = mock_conn
 
         cloner = SelectiveVMCloner(user_session=True)
         config = VMConfig(network_mode="auto")
@@ -90,6 +94,7 @@ class TestNetworkMode:
         """Test explicit default mode."""
         mock_conn = MagicMock()
         mock_libvirt.open.return_value = mock_conn
+        mock_libvirt.openAuth.return_value = mock_conn
 
         cloner = SelectiveVMCloner(user_session=True)
         config = VMConfig(network_mode="default")
@@ -102,6 +107,7 @@ class TestNetworkMode:
         """Test explicit user mode."""
         mock_conn = MagicMock()
         mock_libvirt.open.return_value = mock_conn
+        mock_libvirt.openAuth.return_value = mock_conn
 
         cloner = SelectiveVMCloner(user_session=False)
         config = VMConfig(network_mode="user")
@@ -114,6 +120,7 @@ class TestNetworkMode:
         """Test invalid network mode falls back to default."""
         mock_conn = MagicMock()
         mock_libvirt.open.return_value = mock_conn
+        mock_libvirt.openAuth.return_value = mock_conn
 
         cloner = SelectiveVMCloner()
         config = VMConfig(network_mode="invalid")
@@ -125,6 +132,8 @@ class TestNetworkMode:
     def test_default_network_active_true(self, mock_libvirt):
         """Test _default_network_active returns True when network is active."""
         mock_conn = MagicMock()
+        mock_libvirt.open.return_value = mock_conn
+        mock_libvirt.openAuth.return_value = mock_conn
         mock_net = MagicMock()
         mock_net.isActive.return_value = 1
         mock_conn.networkLookupByName.return_value = mock_net
@@ -138,6 +147,8 @@ class TestNetworkMode:
         """Test _default_network_active returns False when network is inactive."""
 
         mock_conn = MagicMock()
+        mock_libvirt.open.return_value = mock_conn
+        mock_libvirt.openAuth.return_value = mock_conn
         mock_net = MagicMock()
         mock_net.isActive.return_value = 0
         mock_conn.networkLookupByName.return_value = mock_net
@@ -162,6 +173,7 @@ class TestNetworkMode:
         mock_conn = MagicMock()
         mock_conn.networkLookupByName.side_effect = libvirt_error("Not found")
         mock_libvirt.open.return_value = mock_conn
+        mock_libvirt.openAuth.return_value = mock_conn
 
         cloner = SelectiveVMCloner()
         assert cloner._default_network_active() is False
@@ -171,6 +183,7 @@ class TestNetworkMode:
         """Test VM XML generation with user network."""
         mock_conn = MagicMock()
         mock_libvirt.open.return_value = mock_conn
+        mock_libvirt.openAuth.return_value = mock_conn
 
         cloner = SelectiveVMCloner()
         config = VMConfig(name="test-vm", network_mode="user")
@@ -185,6 +198,7 @@ class TestNetworkMode:
         """Test VM XML generation with default network."""
         mock_conn = MagicMock()
         mock_libvirt.open.return_value = mock_conn
+        mock_libvirt.openAuth.return_value = mock_conn
 
         cloner = SelectiveVMCloner()
         config = VMConfig(name="test-vm", network_mode="default")
