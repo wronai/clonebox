@@ -400,7 +400,7 @@ class VMValidator:
         svc_table.add_column("PID", justify="right", style="dim")
         svc_table.add_column("Note", style="dim")
 
-        # Define here once to avoid NameError in the loop
+        # Define setup_in_progress once before the loop to fix NameError
         setup_in_progress = self._setup_in_progress() is True
 
         for service in services:
