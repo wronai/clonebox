@@ -2724,20 +2724,69 @@ def cmd_monitor(args) -> None:
 def cmd_exec(args) -> None:
     """Execute command in VM via QEMU Guest Agent."""
     vm_name, config_file = _resolve_vm_name_and_config_file(args.name)
-    conn_uri = "qemu:///session" if getattr(args, "user", False) else "qemu:///system"
-    command = args.command
-    if isinstance(command, list):
-        command = " ".join(command).strip()
+    user_session = getattr(args, "user", False)
+    timeout = getattr(args, "timeout", 30)
+
+    # When using argparse.REMAINDER for `command`, any flags placed after the VM name
+    # may end up inside args.command. Recover common exec flags from the remainder.
+    command_tokens = args.command
+    if not isinstance(command_tokens, list):
+        command_tokens = [str(command_tokens)] if command_tokens is not None else []
+
+    if "--" in command_tokens:
+        sep_idx = command_tokens.index("--")
+        pre_tokens = command_tokens[:sep_idx]
+        post_tokens = command_tokens[sep_idx + 1 :]
+    else:
+        pre_tokens = command_tokens
+        post_tokens = []
+
+    i = 0
+    while i < len(pre_tokens):
+        tok = pre_tokens[i]
+        if tok in ("-u", "--user"):
+            user_session = True
+            i += 1
+            continue
+        if tok in ("-t", "--timeout"):
+            if i + 1 < len(pre_tokens):
+                try:
+                    timeout = int(pre_tokens[i + 1])
+                except ValueError:
+                    pass
+                i += 2
+                continue
+        break
+
+    remaining_pre = pre_tokens[i:]
+    if post_tokens:
+        command_tokens = remaining_pre + post_tokens
+    else:
+        command_tokens = remaining_pre
+
+    command = " ".join(command_tokens).strip()
     if not command:
         console.print("[red]❌ No command specified[/]")
         return
-    timeout = getattr(args, "timeout", 30)
+
+    conn_uri = "qemu:///session" if user_session else "qemu:///system"
+    other_conn_uri = "qemu:///system" if conn_uri == "qemu:///session" else "qemu:///session"
 
     qga_ready = _qga_ping(vm_name, conn_uri)
+    if not qga_ready:
+        alt_ready = _qga_ping(vm_name, other_conn_uri)
+        if alt_ready:
+            conn_uri = other_conn_uri
+            qga_ready = True
     if not qga_ready:
         for _ in range(12):  # ~60s
             time.sleep(5)
             qga_ready = _qga_ping(vm_name, conn_uri)
+            if not qga_ready:
+                alt_ready = _qga_ping(vm_name, other_conn_uri)
+                if alt_ready:
+                    conn_uri = other_conn_uri
+                    qga_ready = True
             if qga_ready:
                 break
 

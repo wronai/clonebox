@@ -27,21 +27,21 @@ help:
 # Installation
 install:
 	@if [ -d ".venv" ]; then \
-		.venv/bin/pip install -e .; \
+		.venv/bin/pip install -e . --upgrade; \
 	else \
 		echo "Creating virtual environment..."; \
 		python3 -m venv .venv; \
-		.venv/bin/pip install -e .; \
+		.venv/bin/pip install -e . --upgrade; \
 	fi
 
 install-dev:
 	@if [ -d ".venv" ]; then \
-		.venv/bin/pip install -e ".[dev]" || .venv/bin/pip install -e . pytest ruff mypy black build bump2version; \
+		.venv/bin/pip install -e ".[dev,test]" --upgrade || .venv/bin/pip install -e . --upgrade pytest ruff mypy black build bump2version pytest-cov pytest-timeout pytest-asyncio; \
 		.venv/bin/pre-commit install || true; \
 	else \
 		echo "Creating virtual environment..."; \
 		python3 -m venv .venv; \
-		.venv/bin/pip install -e ".[dev]" || .venv/bin/pip install -e . pytest ruff mypy black build bump2version; \
+		.venv/bin/pip install -e ".[dev,test]" --upgrade || .venv/bin/pip install -e . --upgrade pytest ruff mypy black build bump2version pytest-cov pytest-timeout pytest-asyncio; \
 		.venv/bin/pre-commit install || true; \
 	fi
 

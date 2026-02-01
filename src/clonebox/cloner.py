@@ -1267,25 +1267,33 @@ fi
         pre_chown_dirs: set[str] = set()
         for idx, (host_path, guest_path) in enumerate(all_paths.items()):
             if Path(host_path).exists():
-                if str(guest_path).startswith("/home/ubuntu/snap/"):
-                    guest_parts = Path(guest_path).parts
-                    if len(guest_parts) > 4:
-                        snap_name = guest_parts[4]
-                        for d in (
-                            "/home/ubuntu",
-                            "/home/ubuntu/snap",
-                            f"/home/ubuntu/snap/{snap_name}",
-                        ):
-                            if d not in pre_chown_dirs:
-                                pre_chown_dirs.add(d)
-                                mount_commands.append(f"  - mkdir -p {d}")
-                                mount_commands.append(f"  - chown 1000:1000 {d}")
+                # Ensure all parent directories in /home/ubuntu are owned by user
+                # This prevents "Permission denied" when creating config dirs (e.g. .config) as root
+                if str(guest_path).startswith("/home/ubuntu/"):
+                    try:
+                        rel_path = Path(guest_path).relative_to("/home/ubuntu")
+                        current = Path("/home/ubuntu")
+                        # Create and chown each component in the path
+                        for part in rel_path.parts:
+                            current = current / part
+                            d_str = str(current)
+                            if d_str not in pre_chown_dirs:
+                                pre_chown_dirs.add(d_str)
+                                mount_commands.append(f"  - mkdir -p {d_str}")
+                                mount_commands.append(f"  - chown 1000:1000 {d_str}")
+                    except ValueError:
+                        pass
+
                 tag = f"mount{idx}"
                 # Use uid=1000,gid=1000 to give ubuntu user access to mounts
                 # mmap allows proper file mapping
                 mount_opts = "trans=virtio,version=9p2000.L,mmap,uid=1000,gid=1000,users"
-                mount_commands.append(f"  - mkdir -p {guest_path}")
-                mount_commands.append(f"  - chown 1000:1000 {guest_path}")
+                
+                # Ensure target exists and is owned by user (if not already handled)
+                if str(guest_path) not in pre_chown_dirs:
+                    mount_commands.append(f"  - mkdir -p {guest_path}")
+                    mount_commands.append(f"  - chown 1000:1000 {guest_path}")
+
                 mount_commands.append(f"  - mount -t 9p -o {mount_opts} {tag} {guest_path} || true")
                 # Add fstab entry for persistence after reboot
                 fstab_entries.append(f"{tag} {guest_path} 9p {mount_opts},nofail 0 0")
@@ -1330,32 +1338,9 @@ fi
         for cmd in mount_commands:
             runcmd_lines.append(cmd)
 
-        runcmd_lines.append("  - chown -R 1000:1000 /home/ubuntu || true")
-        runcmd_lines.append("  - chown -R 1000:1000 /home/ubuntu/snap || true")
-
-        # Install snap packages
-        if config.snap_packages:
-            runcmd_lines.append("  - echo 'Installing snap packages...'")
-            for snap_pkg in config.snap_packages:
-                runcmd_lines.append(
-                    f"  - snap install {snap_pkg} --classic || snap install {snap_pkg} || true"
-                )
-
-            # Connect snap interfaces for GUI apps (not auto-connected via cloud-init)
-            runcmd_lines.append("  - echo 'Connecting snap interfaces...'")
-            for snap_pkg in config.snap_packages:
-                interfaces = SNAP_INTERFACES.get(snap_pkg, DEFAULT_SNAP_INTERFACES)
-                for iface in interfaces:
-                    runcmd_lines.append(
-                        f"  - snap connect {snap_pkg}:{iface} :{iface} 2>/dev/null || true"
-                    )
-
-            runcmd_lines.append("  - systemctl restart snapd || true")
-
-        # Add GUI setup if enabled - runs AFTER package installation completes
+        # Create user directories with correct permissions EARLY to avoid race conditions with GDM
         if config.gui:
-            # Create directories that GNOME services need BEFORE GUI starts
-            # These may conflict with mounted host directories, so ensure they exist with correct perms
+            # Create directories that GNOME services need
             runcmd_lines.extend(
                 [
                     "  - mkdir -p /home/ubuntu/.config/pulse /home/ubuntu/.cache/ibus /home/ubuntu/.local/share",
@@ -1368,6 +1353,36 @@ fi
                 ]
             )
 
+        runcmd_lines.append("  - chown -R 1000:1000 /home/ubuntu || true")
+        runcmd_lines.append("  - chown -R 1000:1000 /home/ubuntu/snap || true")
+
+        # Install snap packages (with retry logic)
+        if config.snap_packages:
+            runcmd_lines.append("  - echo 'Installing snap packages...'")
+            for snap_pkg in config.snap_packages:
+                # Try classic first, then strict, with retries
+                cmd = (
+                    f"for i in 1 2 3; do "
+                    f"snap install {snap_pkg} --classic && break || "
+                    f"snap install {snap_pkg} && break || "
+                    f"sleep 10; "
+                    f"done"
+                )
+                runcmd_lines.append(f"  - {cmd}")
+
+            # Connect snap interfaces for GUI apps (not auto-connected via cloud-init)
+            runcmd_lines.append("  - echo 'Connecting snap interfaces...'")
+            for snap_pkg in config.snap_packages:
+                interfaces = SNAP_INTERFACES.get(snap_pkg, DEFAULT_SNAP_INTERFACES)
+                for iface in interfaces:
+                    runcmd_lines.append(
+                        f"  - snap connect {snap_pkg}:{iface} :{iface} 2>/dev/null || true"
+                    )
+
+            runcmd_lines.append("  - systemctl restart snapd || true")
+
+        # Add remaining GUI setup if enabled
+        if config.gui:
             # Create autostart entries for GUI apps
             autostart_apps = {
                 "pycharm-community": (

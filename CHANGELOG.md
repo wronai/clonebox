@@ -1,3 +1,19 @@
+## [1.1.10] - 2026-02-01
+
+### Summary
+
+feat(build): CLI interface improvements
+
+### Core
+
+- update src/clonebox/cli.py
+- update src/clonebox/cloner.py
+
+### Other
+
+- build: update Makefile
+
+
 ## [1.1.9] - 2026-01-31
 
 ### Summary
