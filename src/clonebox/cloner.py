@@ -1546,6 +1546,12 @@ fi
         # Build runcmd - services, mounts, snaps, post_commands
         runcmd_lines = []
 
+        wants_chrome = any(
+            p == "/home/ubuntu/.config/google-chrome"
+            for p in list((config.paths or {}).values())
+            + list((config.copy_paths or {}).values())
+        )
+
         # Add detailed logging header
         runcmd_lines.append("  - echo '═══════════════════════════════════════════════════════════'")
         runcmd_lines.append("  - echo '           CloneBox VM Installation Progress'")
@@ -2664,12 +2670,17 @@ final_message: "CloneBox VM is ready after $UPTIME seconds"
             log("[green]✅ VM started![/]")
 
         if open_viewer:
-            log("[cyan]🖥️  Opening virt-viewer...[/]")
-            subprocess.Popen(
-                ["virt-viewer", "-c", self.conn_uri, vm_name],
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-            )
+            import shutil
+            if shutil.which("virt-viewer"):
+                log("[cyan]🖥️  Opening virt-viewer...[/]")
+                subprocess.Popen(
+                    ["virt-viewer", "-c", self.conn_uri, vm_name],
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                )
+            else:
+                log("[yellow]⚠️  Warning: 'virt-viewer' not found. Cannot open console automatically.[/]")
+                log("[dim]   Install it with: sudo apt install virt-viewer[/]")
 
         return True
 
