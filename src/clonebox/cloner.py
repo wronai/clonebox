@@ -1668,7 +1668,7 @@ fi
                 f"/home/{config.username}/.cache/tracker3",
                 f"/home/{config.username}/.config/autostart",
             ]:
-                runcmd_lines.append(f"  - mkdir -p {d} && echo '    → Created {d}'")
+                runcmd_lines.append(f"  - mkdir -p {d} && echo '  → Created {d}'")
             
             runcmd_lines.extend(
                 [
