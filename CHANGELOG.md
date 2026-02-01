@@ -1,3 +1,30 @@
+## [1.1.14] - 2026-02-01
+
+### Summary
+
+feat(tests): CLI interface improvements
+
+### Core
+
+- update src/clonebox/audit.py
+- update src/clonebox/cli.py
+- update src/clonebox/orchestrator.py
+- update src/clonebox/plugins/__init__.py
+- update src/clonebox/plugins/base.py
+- update src/clonebox/plugins/manager.py
+
+### Test
+
+- update tests/test_audit.py
+- update tests/test_orchestrator.py
+- update tests/test_plugins.py
+
+### Other
+
+- update project.functions.toon
+- update project.toon
+
+
 ## [1.1.13] - 2026-02-01
 
 ### Summary

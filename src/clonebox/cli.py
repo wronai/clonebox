@@ -34,6 +34,9 @@ from clonebox.monitor import ResourceMonitor, format_bytes
 from clonebox.p2p import P2PManager
 from clonebox.snapshots import SnapshotManager, SnapshotType
 from clonebox.health import HealthCheckManager, ProbeConfig, ProbeType
+from clonebox.audit import get_audit_logger, AuditQuery, AuditEventType, AuditOutcome
+from clonebox.orchestrator import Orchestrator, OrchestrationResult
+from clonebox.plugins import get_plugin_manager, PluginHook, PluginContext
 
 # Custom questionary style
 custom_style = Style(
@@ -3126,6 +3129,307 @@ def cmd_list_remote(args) -> None:
         console.print("[yellow]No VMs found on remote host.[/]")
 
 
+# === Audit Commands ===
+
+
+def cmd_audit_list(args) -> None:
+    """List audit events."""
+    query = AuditQuery()
+
+    # Build filters
+    event_type = None
+    if hasattr(args, "type") and args.type:
+        try:
+            event_type = AuditEventType(args.type)
+        except ValueError:
+            console.print(f"[red]Unknown event type: {args.type}[/]")
+            return
+
+    outcome = None
+    if hasattr(args, "outcome") and args.outcome:
+        try:
+            outcome = AuditOutcome(args.outcome)
+        except ValueError:
+            console.print(f"[red]Unknown outcome: {args.outcome}[/]")
+            return
+
+    limit = getattr(args, "limit", 50)
+    target = getattr(args, "target", None)
+
+    events = query.query(
+        event_type=event_type,
+        target_name=target,
+        outcome=outcome,
+        limit=limit,
+    )
+
+    if not events:
+        console.print("[yellow]No audit events found.[/]")
+        return
+
+    if getattr(args, "json", False):
+        console.print_json(json.dumps([e.to_dict() for e in events], default=str))
+        return
+
+    table = Table(title="Audit Events", border_style="cyan")
+    table.add_column("Time", style="dim")
+    table.add_column("Event")
+    table.add_column("Target")
+    table.add_column("Outcome")
+    table.add_column("User")
+
+    for event in reversed(events[-limit:]):
+        outcome_style = {
+            "success": "green",
+            "failure": "red",
+            "partial": "yellow",
+            "denied": "red bold",
+            "skipped": "dim",
+        }.get(event.outcome.value, "white")
+
+        target_str = event.target_name or "-"
+        table.add_row(
+            event.timestamp.strftime("%Y-%m-%d %H:%M:%S"),
+            event.event_type.value,
+            target_str,
+            f"[{outcome_style}]{event.outcome.value}[/]",
+            event.user,
+        )
+
+    console.print(table)
+
+
+def cmd_audit_show(args) -> None:
+    """Show audit event details."""
+    query = AuditQuery()
+    events = query.query(limit=1000)
+
+    for event in events:
+        if event.event_id == args.event_id:
+            console.print_json(json.dumps(event.to_dict(), indent=2, default=str))
+            return
+
+    console.print(f"[red]Event not found: {args.event_id}[/]")
+
+
+def cmd_audit_failures(args) -> None:
+    """Show recent failures."""
+    query = AuditQuery()
+    events = query.get_failures(limit=getattr(args, "limit", 20))
+
+    if not events:
+        console.print("[green]No failures recorded.[/]")
+        return
+
+    table = Table(title="Recent Failures", border_style="red")
+    table.add_column("Time", style="dim")
+    table.add_column("Event")
+    table.add_column("Target")
+    table.add_column("Error")
+
+    for event in reversed(events):
+        table.add_row(
+            event.timestamp.strftime("%Y-%m-%d %H:%M:%S"),
+            event.event_type.value,
+            event.target_name or "-",
+            (event.error_message or "-")[:50],
+        )
+
+    console.print(table)
+
+
+# === Orchestration Commands ===
+
+
+def cmd_compose_up(args) -> None:
+    """Start VMs from compose file."""
+    compose_file = Path(args.file) if hasattr(args, "file") and args.file else Path("clonebox-compose.yaml")
+
+    if not compose_file.exists():
+        console.print(f"[red]Compose file not found: {compose_file}[/]")
+        return
+
+    user_session = getattr(args, "user", False)
+    services = args.services if hasattr(args, "services") and args.services else None
+
+    console.print(f"[cyan]🚀 Starting VMs from: {compose_file}[/]")
+
+    try:
+        orch = Orchestrator.from_file(compose_file, user_session=user_session)
+        result = orch.up(services=services, console=console)
+
+        if result.success:
+            console.print("[green]✅ All VMs started successfully[/]")
+        else:
+            console.print("[yellow]⚠️ Some VMs failed to start:[/]")
+            for name, error in result.errors.items():
+                console.print(f"  [red]{name}:[/] {error}")
+
+        console.print(f"[dim]Duration: {result.duration_seconds:.1f}s[/]")
+
+    except Exception as e:
+        console.print(f"[red]❌ Orchestration failed: {e}[/]")
+
+
+def cmd_compose_down(args) -> None:
+    """Stop VMs from compose file."""
+    compose_file = Path(args.file) if hasattr(args, "file") and args.file else Path("clonebox-compose.yaml")
+
+    if not compose_file.exists():
+        console.print(f"[red]Compose file not found: {compose_file}[/]")
+        return
+
+    user_session = getattr(args, "user", False)
+    services = args.services if hasattr(args, "services") and args.services else None
+    force = getattr(args, "force", False)
+
+    console.print(f"[cyan]🛑 Stopping VMs from: {compose_file}[/]")
+
+    try:
+        orch = Orchestrator.from_file(compose_file, user_session=user_session)
+        result = orch.down(services=services, force=force, console=console)
+
+        if result.success:
+            console.print("[green]✅ All VMs stopped successfully[/]")
+        else:
+            console.print("[yellow]⚠️ Some VMs failed to stop:[/]")
+            for name, error in result.errors.items():
+                console.print(f"  [red]{name}:[/] {error}")
+
+    except Exception as e:
+        console.print(f"[red]❌ Stop failed: {e}[/]")
+
+
+def cmd_compose_status(args) -> None:
+    """Show status of VMs from compose file."""
+    compose_file = Path(args.file) if hasattr(args, "file") and args.file else Path("clonebox-compose.yaml")
+
+    if not compose_file.exists():
+        console.print(f"[red]Compose file not found: {compose_file}[/]")
+        return
+
+    user_session = getattr(args, "user", False)
+
+    try:
+        orch = Orchestrator.from_file(compose_file, user_session=user_session)
+        status = orch.status()
+
+        if getattr(args, "json", False):
+            console.print_json(json.dumps(status, default=str))
+            return
+
+        table = Table(title=f"Compose Status: {compose_file.name}", border_style="cyan")
+        table.add_column("VM")
+        table.add_column("State")
+        table.add_column("Actual")
+        table.add_column("Health")
+        table.add_column("Depends On")
+
+        for name, info in status.items():
+            state = info["orchestration_state"]
+            actual = info["actual_state"]
+            health = "✅" if info["health_check_passed"] else "⏳"
+            deps = ", ".join(info["depends_on"]) or "-"
+
+            state_style = {
+                "running": "green",
+                "healthy": "green bold",
+                "stopped": "dim",
+                "failed": "red",
+                "pending": "yellow",
+            }.get(state, "white")
+
+            table.add_row(
+                name,
+                f"[{state_style}]{state}[/]",
+                actual,
+                health,
+                deps,
+            )
+
+        console.print(table)
+
+    except Exception as e:
+        console.print(f"[red]❌ Failed to get status: {e}[/]")
+
+
+# === Plugin Commands ===
+
+
+def cmd_plugin_list(args) -> None:
+    """List installed plugins."""
+    manager = get_plugin_manager()
+
+    # Load plugins if not already loaded
+    if not manager.list_plugins():
+        manager.load_all()
+
+    plugins = manager.list_plugins()
+
+    if not plugins:
+        console.print("[yellow]No plugins installed.[/]")
+        console.print("[dim]Plugin directories:[/]")
+        for d in manager.plugin_dirs:
+            console.print(f"  {d}")
+        return
+
+    table = Table(title="Installed Plugins", border_style="cyan")
+    table.add_column("Name")
+    table.add_column("Version")
+    table.add_column("Enabled")
+    table.add_column("Description")
+
+    for plugin in plugins:
+        enabled = "[green]✅[/]" if plugin["enabled"] else "[red]❌[/]"
+        table.add_row(
+            plugin["name"],
+            plugin["version"],
+            enabled,
+            (plugin.get("description", "") or "")[:40],
+        )
+
+    console.print(table)
+
+
+def cmd_plugin_enable(args) -> None:
+    """Enable a plugin."""
+    manager = get_plugin_manager()
+    manager.load_all()
+
+    if manager.enable(args.name):
+        console.print(f"[green]✅ Plugin '{args.name}' enabled[/]")
+    else:
+        console.print(f"[red]Plugin '{args.name}' not found[/]")
+
+
+def cmd_plugin_disable(args) -> None:
+    """Disable a plugin."""
+    manager = get_plugin_manager()
+    manager.load_all()
+
+    if manager.disable(args.name):
+        console.print(f"[yellow]⚠️ Plugin '{args.name}' disabled[/]")
+    else:
+        console.print(f"[red]Plugin '{args.name}' not found[/]")
+
+
+def cmd_plugin_discover(args) -> None:
+    """Discover available plugins."""
+    manager = get_plugin_manager()
+    discovered = manager.discover()
+
+    if not discovered:
+        console.print("[yellow]No plugins discovered.[/]")
+        console.print("[dim]Plugin directories:[/]")
+        for d in manager.plugin_dirs:
+            console.print(f"  {d}")
+        return
+
+    console.print("[bold]Discovered plugins:[/]")
+    for name in discovered:
+        console.print(f"  • {name}")
+
+
 def main():
     """Main entry point."""
     parser = argparse.ArgumentParser(
@@ -3711,6 +4015,67 @@ def main():
     list_remote_parser = subparsers.add_parser("list-remote", help="List VMs on remote host")
     list_remote_parser.add_argument("host", help="Remote host (user@hostname)")
     list_remote_parser.set_defaults(func=cmd_list_remote)
+
+    # === Audit Commands ===
+    audit_parser = subparsers.add_parser("audit", help="View audit logs")
+    audit_sub = audit_parser.add_subparsers(dest="audit_command", help="Audit commands")
+
+    audit_list = audit_sub.add_parser("list", aliases=["ls"], help="List audit events")
+    audit_list.add_argument("--type", "-t", help="Filter by event type (e.g., vm.create)")
+    audit_list.add_argument("--target", help="Filter by target name")
+    audit_list.add_argument("--outcome", "-o", choices=["success", "failure", "partial"], help="Filter by outcome")
+    audit_list.add_argument("--limit", "-n", type=int, default=50, help="Max events to show")
+    audit_list.add_argument("--json", action="store_true", help="Output as JSON")
+    audit_list.set_defaults(func=cmd_audit_list)
+
+    audit_show = audit_sub.add_parser("show", help="Show audit event details")
+    audit_show.add_argument("event_id", help="Event ID to show")
+    audit_show.set_defaults(func=cmd_audit_show)
+
+    audit_failures = audit_sub.add_parser("failures", help="Show recent failures")
+    audit_failures.add_argument("--limit", "-n", type=int, default=20, help="Max events to show")
+    audit_failures.set_defaults(func=cmd_audit_failures)
+
+    # === Compose/Orchestration Commands ===
+    compose_parser = subparsers.add_parser("compose", help="Multi-VM orchestration")
+    compose_sub = compose_parser.add_subparsers(dest="compose_command", help="Compose commands")
+
+    compose_up = compose_sub.add_parser("up", help="Start VMs from compose file")
+    compose_up.add_argument("-f", "--file", default="clonebox-compose.yaml", help="Compose file")
+    compose_up.add_argument("-u", "--user", action="store_true", help="Use user session")
+    compose_up.add_argument("services", nargs="*", help="Specific services to start")
+    compose_up.set_defaults(func=cmd_compose_up)
+
+    compose_down = compose_sub.add_parser("down", help="Stop VMs from compose file")
+    compose_down.add_argument("-f", "--file", default="clonebox-compose.yaml", help="Compose file")
+    compose_down.add_argument("-u", "--user", action="store_true", help="Use user session")
+    compose_down.add_argument("--force", action="store_true", help="Force stop")
+    compose_down.add_argument("services", nargs="*", help="Specific services to stop")
+    compose_down.set_defaults(func=cmd_compose_down)
+
+    compose_status = compose_sub.add_parser("status", aliases=["ps"], help="Show compose status")
+    compose_status.add_argument("-f", "--file", default="clonebox-compose.yaml", help="Compose file")
+    compose_status.add_argument("-u", "--user", action="store_true", help="Use user session")
+    compose_status.add_argument("--json", action="store_true", help="Output as JSON")
+    compose_status.set_defaults(func=cmd_compose_status)
+
+    # === Plugin Commands ===
+    plugin_parser = subparsers.add_parser("plugin", help="Manage plugins")
+    plugin_sub = plugin_parser.add_subparsers(dest="plugin_command", help="Plugin commands")
+
+    plugin_list = plugin_sub.add_parser("list", aliases=["ls"], help="List plugins")
+    plugin_list.set_defaults(func=cmd_plugin_list)
+
+    plugin_enable = plugin_sub.add_parser("enable", help="Enable a plugin")
+    plugin_enable.add_argument("name", help="Plugin name")
+    plugin_enable.set_defaults(func=cmd_plugin_enable)
+
+    plugin_disable = plugin_sub.add_parser("disable", help="Disable a plugin")
+    plugin_disable.add_argument("name", help="Plugin name")
+    plugin_disable.set_defaults(func=cmd_plugin_disable)
+
+    plugin_discover = plugin_sub.add_parser("discover", help="Discover available plugins")
+    plugin_discover.set_defaults(func=cmd_plugin_discover)
 
     args = parser.parse_args()
 

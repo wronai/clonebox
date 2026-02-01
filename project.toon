@@ -1,46 +1,75 @@
-# clonebox | 39f 14626L | python:39
+# clonebox | 60f 20183L | python:60
 # Keys: M=modules, D=details, i=imports, c=classes, f=functions, m=methods
-M[39]:
+M[60]:
+  tests/test_orchestrator.py,228
   tests/conftest.py,345
   tests/test_profiles.py,39
-  tests/test_cloner.py,201
+  tests/test_audit.py,244
+  tests/test_cloner.py,258
   tests/__init__.py,0
-  tests/test_cloner_simple.py,24
+  tests/test_plugins.py,344
+  tests/test_cloner_simple.py,27
   tests/test_validator.py,442
   tests/test_container.py,168
-  tests/test_coverage_boost_final.py,289
+  tests/test_coverage_boost_final.py,328
   tests/test_dashboard_coverage.py,90
   tests/test_models.py,260
-  tests/test_network.py,133
+  tests/test_network.py,146
   tests/test_coverage_additional.py,28
   tests/test_detector.py,183
   tests/test_cli.py,373
-  tests/e2e/test_p2p_workflow.py,294
+  tests/e2e/test_p2p_workflow.py,286
   tests/e2e/test_full_workflow.py,243
   tests/e2e/__init__.py,1
   tests/e2e/test_container_workflow.py,61
+  src/clonebox/resources.py,167
+  src/clonebox/resource_monitor.py,124
   src/clonebox/dashboard.py,136
-  src/clonebox/validator.py,813
-  src/clonebox/p2p.py,138
-  src/clonebox/cli.py,2941
+  src/clonebox/validator.py,893
+  src/clonebox/p2p.py,140
+  src/clonebox/cli.py,3295
   src/clonebox/importer.py,167
   src/clonebox/detector.py,589
   src/clonebox/exporter.py,145
   src/clonebox/__init__.py,10
+  src/clonebox/di.py,127
   src/clonebox/__main__.py,4
   src/clonebox/container.py,154
-  src/clonebox/cloner.py,1816
-  src/clonebox/monitor.py,220
-  src/clonebox/models.py,181
+  src/clonebox/logging.py,99
+  src/clonebox/orchestrator.py,444
+  src/clonebox/cloner.py,2043
+  src/clonebox/rollback.py,137
+  src/clonebox/monitor.py,218
+  src/clonebox/models.py,180
   src/clonebox/profiles.py,47
+  src/clonebox/audit.py,352
+  src/clonebox/secrets.py,263
+  src/clonebox/backends/subprocess_runner.py,50
+  src/clonebox/backends/qemu_disk.py,40
+  src/clonebox/backends/libvirt_backend.py,178
   src/clonebox/health/manager.py,264
   src/clonebox/health/__init__.py,15
   src/clonebox/health/models.py,152
-  src/clonebox/health/probes.py,288
-  src/clonebox/snapshots/manager.py,284
+  src/clonebox/health/probes.py,286
+  src/clonebox/plugins/base.py,245
+  src/clonebox/plugins/manager.py,326
+  src/clonebox/plugins/__init__.py,22
+  src/clonebox/snapshots/manager.py,278
   src/clonebox/snapshots/__init__.py,10
-  src/clonebox/snapshots/models.py,149
+  src/clonebox/snapshots/models.py,145
+  src/clonebox/interfaces/process.py,37
+  src/clonebox/interfaces/hypervisor.py,71
+  src/clonebox/interfaces/disk.py,32
+  src/clonebox/interfaces/network.py,25
 D:
+  tests/test_orchestrator.py:
+    i: tempfile,pytest,yaml,clonebox.orchestrator.{OrchestratedVM,OrchestrationPlan,OrchestrationResult,Orchestrator},pathlib.Path,unittest.mock.{MagicMock,patch}
+    e: TestOrchestratedVM,TestOrchestrator,TestOrchestrationPlan,TestOrchestrationResult,TestParallelStartGroups
+    TestOrchestratedVM: test_create_vm(0),test_vm_with_health_check(0)  # Test OrchestratedVM dataclass.
+    TestOrchestrator: simple_compose(1),circular_compose(1),test_load_compose_file(1),test_load_invalid_version(1),test_orchestrator_from_file(1)  # Test Orchestrator class.
+    TestOrchestrationPlan: test_plan_creation(0)  # Test OrchestrationPlan dataclass.
+    TestOrchestrationResult: test_successful_result(0),test_failed_result(0)  # Test OrchestrationResult dataclass.
+    TestParallelStartGroups: test_independent_vms_same_group(1),test_mixed_dependencies(1)  # Test parallel start group detection.
   tests/conftest.py:
     i: os,tempfile,pytest,yaml,pathlib.Path,unittest.mock.{MagicMock,patch}
     e: temp_dir,session_temp_dir,module_vm_config,temp_config_dir,module_mock_subprocess,mock_subprocess,module_mock_virsh,mock_virsh
@@ -60,16 +89,33 @@ D:
     test_profile_deep_merge_nested_dicts()->None
     test_merge_with_profile_invalid_profile_is_noop()->None
     test_load_profile_prefers_search_paths_over_builtins(tmp_path:Path)->None
+  tests/test_audit.py:
+    i: json,tempfile,datetime,pytest,clonebox.audit.{AuditEvent,AuditEventType,AuditLogger,AuditOutcome,AuditQuery},pathlib.Path
+    e: TestAuditEvent,TestAuditLogger,TestAuditQuery,TestAuditContext,TestGlobalLogger
+    TestAuditEvent: test_create_event(0),test_event_to_dict(0),test_event_to_json(0),test_event_from_dict(0)  # Test AuditEvent dataclass.
+    TestAuditLogger: test_logger_init(1),test_log_event(1),test_log_disabled(1),test_operation_context_success(1),test_operation_context_failure(1)  # Test AuditLogger class.
+    TestAuditQuery: populated_log(1),test_query_all(1),test_query_by_type(1),test_query_by_target(1),test_query_by_outcome(1)  # Test AuditQuery class.
+    TestAuditContext: test_add_detail(0),test_set_error(0)  # Test AuditContext class.
+    TestGlobalLogger: test_get_audit_logger(0),test_set_audit_logger(1)  # Test global logger functions.
   tests/test_cloner.py:
-    i: pytest,clonebox.cloner.{SelectiveVMCloner,VMConfig},pathlib.Path,unittest.mock.{MagicMock,patch}
-    e: TestVMConfig,TestSelectiveVMClonerInit,TestSelectiveVMClonerMethods,TestVMXMLGeneration,TestVMCreation
+    i: os,pytest,clonebox.cloner.{SelectiveVMCloner,VMConfig},clonebox.di.{DependencyContainer,set_container},pathlib.Path,unittest.mock.{MagicMock,Mock,patch}
+    e: mock_container,TestVMConfig,TestSelectiveVMClonerInit,TestSelectiveVMClonerMethods,TestVMXMLGeneration,TestVMCreation
     TestVMConfig: test_default_values(0),test_custom_values(0),test_to_dict(0)  # Test VMConfig dataclass.
     TestSelectiveVMClonerInit: test_system_images_dir(1),test_user_images_dir(1),test_init_session_type(3),test_init_custom_uri(1),test_init_no_libvirt(0)  # Test SelectiveVMCloner initialization.
     TestSelectiveVMClonerMethods: test_get_images_dir(3),test_check_prerequisites_returns_dict(1),test_check_prerequisites_session_type(3),test_list_vms(1),test_close(1)  # Test SelectiveVMCloner methods.
-    TestVMXMLGeneration: test_generate_vm_xml_basic(1),test_generate_vm_xml_with_paths(1)  # Test VM XML generation.
+    TestVMXMLGeneration: test_generate_vm_xml_basic(1),test_generate_vm_xml_with_paths(1),test_generate_vm_xml_tuning_exclusion(1)  # Test VM XML generation.
     TestVMCreation: test_create_vm_permission_error(2)  # Test VM creation (with mocked libvirt).
+    mock_container()->None
+  tests/test_plugins.py:
+    i: tempfile,pytest,clonebox.plugins.base.{Plugin,PluginContext,PluginHook,PluginMetadata},clonebox.plugins.manager.PluginManager,pathlib.Path,unittest.mock.{MagicMock,patch}
+    e: TestPluginMetadata,TestPluginContext,SamplePlugin,CancelingPlugin,TestPlugin,TestPluginManager,TestGlobalPluginManager,TestPluginHooks
+    TestPluginMetadata: test_create_metadata(0),test_metadata_to_dict(0)  # Test PluginMetadata dataclass.
+    TestPluginContext: test_create_context(0),test_add_error(0),test_add_warning(0),test_cancel_operation(0)  # Test PluginContext dataclass.
+    SamplePlugin: __init__(0),metadata(0),initialize(1),shutdown(0),on_post_vm_create(1)  # Sample plugin for testing.
+    CancelingPlugin: metadata(0),on_pre_vm_create(1)  # Plugin that cancels operations.
+    TestPlugin: test_sample_plugin_metadata(0),test_handle_hook(0),test_initialize_and_shutdown(0)  # Test Plugin base class.
   tests/test_cloner_simple.py:
-    i: pytest,unittest.mock.{Mock,patch}
+    i: os,pytest,unittest.mock.{Mock,patch}
     e: test_cloner_import,test_vm_config
     test_cloner_import()->None
     test_vm_config()->None
@@ -91,8 +137,9 @@ D:
     _which_side_effect(mapping)->None
   tests/test_coverage_boost_final.py:
     i: pytest,os,tempfile,sys,clonebox.cloner.SelectiveVMCloner,clonebox.validator.VMValidator,pathlib.Path,unittest.mock.{MagicMock,Mock,patch}
-    e: ValidatorResponder,test_validator_comprehensive_coverage,test_cloner_additional_branches,test_cloner_create_vm_branches,test_dashboard_endpoints,test_dashboard_error_paths,test_dashboard_run,test_cloner_cloudinit_generation
+    e: mock_container,ValidatorResponder,test_validator_comprehensive_coverage,test_cloner_additional_branches,test_cloner_create_vm_branches,test_dashboard_endpoints,test_dashboard_error_paths,test_dashboard_run
     ValidatorResponder: __init__(1),__call__(2)
+    mock_container()->None
     test_validator_comprehensive_coverage(monkeypatch)->None
     test_cloner_additional_branches()->None
     test_cloner_create_vm_branches()->None
@@ -100,7 +147,6 @@ D:
     test_dashboard_error_paths(monkeypatch)->None
     test_dashboard_run(monkeypatch)->None
     test_cloner_cloudinit_generation()->None
-    test_cloner_delete_vm_branches()->None
   tests/test_dashboard_coverage.py:
     i: pytest,sys,os,unittest.mock.{MagicMock,Mock,patch}
     e: test_dashboard_import_and_functions,test_dashboard_with_mocked_dependencies,test_dashboard_constant_values
@@ -115,9 +161,10 @@ D:
     TestCloneBoxConfigYAML: test_yaml_roundtrip(1),test_parse_generated_yaml(1)  # Test YAML serialization/deserialization.
     TestContainerConfig: test_default_values(0),test_name_validation(2),test_mounts_include_workspace_and_extra(1),test_ports_validation(2),test_to_docker_run_cmd_requires_resolved_engine(0)
   tests/test_network.py:
-    i: clonebox.cloner.{SelectiveVMCloner,VMConfig},pathlib.Path,unittest.mock.{MagicMock,patch}
-    e: TestNetworkMode
+    i: pytest,clonebox.cloner.{SelectiveVMCloner,VMConfig},clonebox.di.{DependencyContainer,set_container},clonebox.interfaces.hypervisor.HypervisorBackend,pathlib.Path,unittest.mock.{MagicMock,Mock,patch}
+    e: mock_container,TestNetworkMode
     TestNetworkMode: test_vm_config_network_mode_default(1),test_vm_config_network_mode_custom(1),test_resolve_network_mode_auto_system(1),test_resolve_network_mode_auto_user_with_default(1),test_resolve_network_mode_auto_user_no_default(1)  # Test network mode resolution and fall...
+    mock_container()->None
   tests/test_coverage_additional.py:
     i: pytest,unittest.mock.{Mock,patch}
     e: test_cloner_imports,test_dashboard_import,test_main_module,test_init_module
@@ -159,6 +206,21 @@ D:
     i: json,shutil,subprocess,sys,pytest,uuid.uuid4
     e: test_container_full_workflow
     test_container_full_workflow(tmp_path)->None
+  src/clonebox/resources.py:
+    i: dataclasses.{dataclass,field},enum.Enum,typing.{List,Optional,Union}
+    e: parse_size,parse_bandwidth,CPULimits,MemoryLimits,DiskLimits,NetworkLimits,ResourceLimits
+    CPULimits: get_max_percent(0),to_libvirt_xml(0)  # CPU resource limits.
+    MemoryLimits: limit_bytes(0),soft_limit_bytes(0),swap_bytes(0),to_libvirt_xml(0)  # Memory resource limits.
+    DiskLimits: read_bps_bytes(0),write_bps_bytes(0),to_libvirt_xml(0)  # Disk I/O limits.
+    NetworkLimits: inbound_kbps(0),outbound_kbps(0),to_libvirt_xml(0)  # Network bandwidth limits.
+    ResourceLimits: from_dict(1)  # Combined resource limits for a VM.
+    parse_size(value:Union[str;int])->int
+    parse_bandwidth(value:Union[str;int])->int
+  src/clonebox/resource_monitor.py:
+    i: datetime,libvirt,dataclasses.dataclass,typing.{Any,Dict,List,Optional},xml.etree.ElementTree
+    e: ResourceUsage,ResourceMonitor
+    ResourceUsage:   # Current resource usage of a VM.
+    ResourceMonitor: __init__(1),get_usage(1),_calculate_cpu_percent(2),_get_disk_stats(1),_get_network_stats(1)  # Monitor VM resource usage using libvirt.
   src/clonebox/dashboard.py:
     i: json,subprocess,sys,fastapi.FastAPI,fastapi.responses.{HTMLResponse,JSONResponse},typing.{Any,List}
     e: dashboard,api_vms,api_containers,api_vms_json,api_containers_json,run_dashboard
@@ -207,15 +269,44 @@ D:
     e: VMExporter,SecureExporter
     VMExporter: __init__(1),conn(0),export_vm(4),_export_app_data(1),_export_user_data(1)  # Export VM with disks, app data, and u...
     SecureExporter: __init__(1),generate_key(0),load_key(0),export_encrypted(4),close(0)  # AES-256 encrypted VM export.
+  src/clonebox/di.py:
+    i: inspect,threading,dataclasses.dataclass,typing
+    e: T,ServiceRegistration,DependencyContainer,get_container,set_container,create_default_container
+    ServiceRegistration:   # Registration info for a service.
+    DependencyContainer: __init__(0),register(5),resolve(1),_create_instance(1),has(1)  # IoC container for dependency injection.
+    get_container()->DependencyContainer
+    set_container(container:DependencyContainer)->None
+    create_default_container()->DependencyContainer
   src/clonebox/container.py:
     i: json,shutil,subprocess,tempfile,clonebox.models.ContainerConfig,pathlib.Path,typing.{Any,Dict,List,Optional}
     e: ContainerCloner
     ContainerCloner: __init__(1),_resolve_engine(1),detect_engine(0),_run(4),build_dockerfile(1)
+  src/clonebox/logging.py:
+    i: logging,sys,datetime,structlog,contextlib.contextmanager,pathlib.Path,typing.Optional
+    e: configure_logging,get_logger,log_operation
+    configure_logging(level:str='INFO';json_output:bool=False;log_file:Optional[Path]=None;console_output:bool=True)->None
+    get_logger(name:str='clonebox')->structlog.stdlib.BoundLogger
+    log_operation(logger:Any;operation:str)->None
+  src/clonebox/orchestrator.py:
+    i: collections.defaultdict,concurrent.futures.{Future,ThreadPoolExecutor,as_completed},dataclasses.{dataclass,field},enum.Enum,pathlib.Path,typing.{List,Optional}
+    e: VMOrchestrationState,OrchestratedVM,OrchestrationPlan,OrchestrationResult,Orchestrator,load_compose_file
+    VMOrchestrationState:   # State of a VM within orchestration.
+    OrchestratedVM:   # A VM within an orchestration.
+    OrchestrationPlan:   # Execution plan for orchestration.
+    OrchestrationResult:   # Result of an orchestration operation.
+    Orchestrator: __init__(4),from_file(3),cloner(0),_create_plan(0),_topological_sort(1)  # Orchestrate multiple VMs with depende...
+    load_compose_file(path:Path)->Dict[str, Any]
   src/clonebox/cloner.py:
-    i: json,os,subprocess,tempfile,uuid,dataclasses.{dataclass,field},pathlib.Path,urllib.request,xml.etree.ElementTree
+    i: base64,json,logging,os,secrets,shutil,string,subprocess,tempfile,time
     e: SNAP_INTERFACES,DEFAULT_SNAP_INTERFACES,VMConfig,SelectiveVMCloner
     VMConfig: to_dict(0)  # Configuration for the VM to create.
-    SelectiveVMCloner: __init__(2),SYSTEM_IMAGES_DIR(0),USER_IMAGES_DIR(0),DEFAULT_BASE_IMAGE_URL(0),DEFAULT_BASE_IMAGE_FILENAME(0)  # Creates VMs with only selected applic...
+    SelectiveVMCloner: __init__(6),SYSTEM_IMAGES_DIR(0),USER_IMAGES_DIR(0),DEFAULT_BASE_IMAGE_URL(0),DEFAULT_BASE_IMAGE_FILENAME(0)  # Creates VMs with only selected applic...
+  src/clonebox/rollback.py:
+    i: logging,shutil,contextlib.contextmanager,dataclasses.{dataclass,field},pathlib.Path,typing.{Any,Callable,List,Optional}
+    e: RollbackAction,RollbackContext,vm_creation_transaction
+    RollbackAction:   # A single rollback action.
+    RollbackContext: add_file(2),add_directory(2),add_action(3),add_libvirt_domain(2),commit(0)  # Context manager for transactional ope...
+    vm_creation_transaction(cloner:Any;config:Any;console:Optional[Any]=None)->None
   src/clonebox/monitor.py:
     i: json,subprocess,time,libvirt,dataclasses.dataclass,pathlib.Path,typing.{Any,Dict,List,Optional}
     e: VMStats,ContainerStats,ResourceMonitor,format_bytes
@@ -235,6 +326,37 @@ D:
     load_profile(profile_name:str;search_paths:list[Path])->Optional[Dict[str, Any]]
     _deep_merge(base:Dict[str;Any];override:Dict[str;Any])->Dict[str, Any]
     merge_with_profile(base_config:Dict[str;Any];profile_name:Optional[str]=None)->Dict[str, Any]
+  src/clonebox/audit.py:
+    i: datetime,contextlib.contextmanager,dataclasses.{dataclass,field},enum.Enum,pathlib.Path,typing.{Any,Dict,List,Optional}
+    e: AuditEventType,AuditOutcome,AuditEvent,AuditContext,AuditLogger,AuditQuery,get_audit_logger,set_audit_logger
+    AuditEventType:   # Types of auditable events.
+    AuditOutcome:   # Outcome of an audited operation.
+    AuditEvent: __post_init__(0),to_dict(0),to_json(0),from_dict(1)  # A single audit event.
+    AuditContext: add_detail(2),set_outcome(1),set_error(1)  # Context for an audited operation.
+    AuditLogger: __init__(3),log(6),_write_event(1),set_correlation_id(1),clear_correlation_id(0)  # Audit logger that writes events to fi...
+    get_audit_logger()->AuditLogger
+    set_audit_logger(logger:AuditLogger)->None
+    audit_operation(event_type:AuditEventType;target_type:Optional[str]=None;target_name:Optional[str]=None)->Generator[AuditContext, None, None]
+  src/clonebox/secrets.py:
+    i: json,os,secrets,string,subprocess,abc.{ABC,abstractmethod},dataclasses.dataclass,pathlib.Path,typing.Any
+    e: SecretValue,SecretsProvider,EnvSecretsProvider,VaultSecretsProvider,SOPSSecretsProvider,SecretsManager,SSHKeyPair
+    SecretValue: __repr__(0),redacted(0)  # Represents a secret value with metadata.
+    SecretsProvider: get_secret(1),list_secrets(0),is_available(0)  # Abstract base class for secrets provi...
+    EnvSecretsProvider: __init__(1),_load_env_file(0),get_secret(1),list_secrets(0),is_available(0)  # Load secrets from environment variabl...
+    VaultSecretsProvider: __init__(3),_get_client(0),get_secret(1),list_secrets(0),is_available(0)  # Load secrets from HashiCorp Vault.
+    SOPSSecretsProvider: __init__(1),_decrypt(0),get_secret(1),list_secrets(0),is_available(0)  # Load secrets from SOPS-encrypted files.
+  src/clonebox/backends/subprocess_runner.py:
+    i: subprocess,interfaces.process.{ProcessResult,ProcessRunner},pathlib.Path,typing.{Dict,List,Optional}
+    e: SubprocessRunner
+    SubprocessRunner: run(6),run_shell(3)  # Run processes using the subprocess mo...
+  src/clonebox/backends/qemu_disk.py:
+    i: subprocess,interfaces.disk.DiskManager,pathlib.Path,typing.{Any,Dict,Optional}
+    e: QemuDiskManager
+    QemuDiskManager: create_disk(4),resize_disk(2),get_disk_info(1),create_snapshot(2),delete_disk(1)  # Manage VM disks using qemu-img.
+  src/clonebox/backends/libvirt_backend.py:
+    i: base64,json,time,libvirt,interfaces.hypervisor.{HypervisorBackend,VMInfo},typing.{Any,Dict,List,Optional}
+    e: LibvirtBackend
+    LibvirtBackend: __init__(2),connect(0),disconnect(0),conn(0),define_vm(1)  # libvirt hypervisor backend.
   src/clonebox/health/manager.py:
     i: json,time,datetime,models.{HealthCheckResult,HealthStatus},pathlib.Path,typing.{Any,Dict,List,Optional}
     e: HealthCheckManager
@@ -256,6 +378,21 @@ D:
     CommandProbe: check(1)  # Command execution probe.
     ScriptProbe: check(1)  # Script execution probe.
     get_probe(probe_type:str)->HealthProbe
+  src/clonebox/plugins/base.py:
+    i: abc.{ABC,abstractmethod},dataclasses.{dataclass,field},enum.Enum,typing.{Any,Callable,Dict,List,Optional}
+    e: PluginHook,PluginMetadata,PluginContext,Plugin
+    PluginHook:   # Available plugin hooks.
+    PluginMetadata: to_dict(0)  # Metadata about a plugin.
+    PluginContext: add_error(1),add_warning(1),cancel(1),add_detail(2)  # Context passed to plugin hooks.
+    Plugin: metadata(0),initialize(1),shutdown(0),on_pre_vm_create(1),on_post_vm_create(1)  # Base class for CloneBox plugins.
+  src/clonebox/plugins/manager.py:
+    i: importlib,sys,dataclasses.{dataclass,field},importlib.util,pathlib.Path,typing.{Any,Dict,List,Optional}
+    e: LoadedPlugin,PluginManager,get_plugin_manager,set_plugin_manager,trigger_hook
+    LoadedPlugin:   # Information about a loaded plugin.
+    PluginManager: __init__(2),_load_config(0),_save_config(0),discover(0),load(2)  # Manages CloneBox plugins.
+    get_plugin_manager()->PluginManager
+    set_plugin_manager(manager:PluginManager)->None
+    trigger_hook(hook:PluginHook)->PluginContext
   src/clonebox/snapshots/manager.py:
     i: json,subprocess,datetime,datetime.timedelta,models.Snapshot,pathlib.Path,typing.{Any,Dict,List,Optional}
     e: SnapshotManager
@@ -267,3 +404,21 @@ D:
     SnapshotState:   # State of snapshot operation.
     Snapshot: to_dict(0),from_dict(1),is_expired(0),age(0)  # Represents a VM snapshot.
     SnapshotPolicy: to_dict(0),from_dict(1),generate_snapshot_name(1)  # Policy for automatic snapshots.
+  src/clonebox/interfaces/process.py:
+    i: abc.{ABC,abstractmethod},dataclasses.dataclass,pathlib.Path,typing.{Dict,List,Optional}
+    e: ProcessResult,ProcessRunner
+    ProcessResult: success(0)  # Result of process execution.
+    ProcessRunner: run(6),run_shell(3)  # Abstract interface for process execut...
+  src/clonebox/interfaces/hypervisor.py:
+    i: abc.{ABC,abstractmethod},dataclasses.dataclass,typing.{Any,Dict,List,Optional}
+    e: VMInfo,HypervisorBackend
+    VMInfo:   # VM information returned by hypervisor.
+    HypervisorBackend: name(0),connect(0),disconnect(0),define_vm(1),undefine_vm(1)  # Abstract interface for hypervisor ope...
+  src/clonebox/interfaces/disk.py:
+    i: abc.{ABC,abstractmethod},pathlib.Path,typing.{Any,Dict,Optional}
+    e: DiskManager
+    DiskManager: create_disk(4),resize_disk(2),get_disk_info(1),create_snapshot(2),delete_disk(1)  # Abstract interface for disk operations.
+  src/clonebox/interfaces/network.py:
+    i: abc.{ABC,abstractmethod},typing.{Any,Dict,Optional}
+    e: NetworkManager
+    NetworkManager: create_network(2),delete_network(1),network_exists(1),is_network_active(1),get_vm_ip(1)  # Abstract interface for network operat...
