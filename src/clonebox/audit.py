@@ -228,7 +228,11 @@ class AuditLogger:
 
         # Ensure log directory exists
         if self.enabled:
-            self.log_path.parent.mkdir(parents=True, exist_ok=True)
+            try:
+                self.log_path.parent.mkdir(parents=True, exist_ok=True)
+            except (PermissionError, OSError):
+                # If we can't create log directory, disable audit logging
+                self.enabled = False
 
     def log(
         self,

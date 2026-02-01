@@ -3,15 +3,17 @@
 
 VM_NAME="${1:-clone-clonebox}"
 USER_SESSION="${2:-false}"
+SHOW_ALL="${3:-false}"
 
 if [ "$USER_SESSION" = "true" ]; then
     CONNECT="qemu:///session"
+    # For user sessions, we'll use QEMU Guest Agent to fetch logs
+    USE_QGA=true
 else
     CONNECT="qemu:///system"
+    LOGS_DISK="/var/lib/libvirt/images/clonebox-logs.qcow2"
+    USE_QGA=false
 fi
-
-LOGS_DISK="/var/lib/libvirt/images/clonebox-logs.qcow2"
-MOUNT_POINT="/mnt/clonebox-logs"
 
 echo "CloneBox Log Viewer"
 echo "=================="
@@ -24,6 +26,121 @@ if ! virsh --connect "$CONNECT" domstate "$VM_NAME" | grep -q "running"; then
     echo "❌ VM is not running!"
     exit 1
 fi
+
+# For user session, use QEMU Guest Agent to fetch logs
+if [ "$USE_QGA" = "true" ]; then
+    echo "📋 Fetching logs via QEMU Guest Agent..."
+    echo ""
+    
+    # Create temp directory for logs
+    TEMP_DIR=$(mktemp -d)
+    trap "rm -rf $TEMP_DIR" EXIT
+    
+    # Fetch logs using QGA
+    SCRIPT_DIR="$(dirname "$(readlink -f "$0")")"
+    python3 "$SCRIPT_DIR/fetch-logs.py" "$VM_NAME" "$CONNECT" "$TEMP_DIR"
+    
+    echo ""
+    echo "📋 Available logs:"
+    echo "-------------------"
+    ls -la "$TEMP_DIR/"
+    echo ""
+    
+    # If SHOW_ALL is true, display all logs and exit
+    if [ "$SHOW_ALL" = "true" ]; then
+        echo "📄 All logs:"
+        echo "============"
+        echo ""
+        echo "--- Boot diagnostic log ---"
+        cat "$TEMP_DIR/clonebox-boot.log"
+        echo ""
+        echo "--- Monitor log ---"
+        cat "$TEMP_DIR/clonebox-monitor.log"
+        echo ""
+        echo "--- Cloud-init output log (last 100 lines) ---"
+        cat "$TEMP_DIR/cloud-init-output.log"
+        echo ""
+        echo "--- Cloud-init log (last 100 lines) ---"
+        cat "$TEMP_DIR/cloud-init.log"
+        exit 0
+    fi
+    
+    # Menu
+    echo "What would you like to view?"
+    echo "1) Boot diagnostic log"
+    echo "2) Monitor log"
+    echo "3) Cloud-init output log"
+    echo "4) Cloud-init log"
+    echo "5) All logs summary"
+    echo "6) Show all logs at once"
+    echo "7) Exit"
+    echo ""
+    
+    read -p "Select option: " choice
+    
+    case "$choice" in
+        1)
+            echo "📄 Boot diagnostic log:"
+            echo "======================"
+            less "$TEMP_DIR/clonebox-boot.log"
+            ;;
+        2)
+            echo "📄 Monitor log:"
+            echo "==============="
+            less "$TEMP_DIR/clonebox-monitor.log"
+            ;;
+        3)
+            echo "📄 Cloud-init output log:"
+            echo "========================"
+            less "$TEMP_DIR/cloud-init-output.log"
+            ;;
+        4)
+            echo "📄 Cloud-init log:"
+            echo "=================="
+            less "$TEMP_DIR/cloud-init.log"
+            ;;
+        5)
+            echo "📊 Logs summary:"
+            echo "================"
+            echo "Boot log ($(wc -l < "$TEMP_DIR/clonebox-boot.log" 2>/dev/null || echo 0) lines):"
+            tail -20 "$TEMP_DIR/clonebox-boot.log" 2>/dev/null || echo "Not found"
+            echo ""
+            echo "Monitor log ($(wc -l < "$TEMP_DIR/clonebox-monitor.log" 2>/dev/null || echo 0) lines):"
+            tail -10 "$TEMP_DIR/clonebox-monitor.log" 2>/dev/null || echo "Not found"
+            echo ""
+            echo "Cloud-init output log ($(wc -l < "$TEMP_DIR/cloud-init-output.log" 2>/dev/null || echo 0) lines):"
+            tail -10 "$TEMP_DIR/cloud-init-output.log" 2>/dev/null || echo "Not found"
+            ;;
+        6)
+            echo "📄 All logs:"
+            echo "============"
+            echo ""
+            echo "--- Boot diagnostic log ---"
+            cat "$TEMP_DIR/clonebox-boot.log"
+            echo ""
+            echo "--- Monitor log ---"
+            cat "$TEMP_DIR/clonebox-monitor.log"
+            echo ""
+            echo "--- Cloud-init output log (last 100 lines) ---"
+            cat "$TEMP_DIR/cloud-init-output.log"
+            echo ""
+            echo "--- Cloud-init log (last 100 lines) ---"
+            cat "$TEMP_DIR/cloud-init.log"
+            ;;
+        7)
+            echo "👋 Exiting..."
+            exit 0
+            ;;
+        *)
+            echo "Invalid option"
+            ;;
+    esac
+    
+    exit 0
+fi
+
+# For system session, use the original disk mounting approach
+MOUNT_POINT="/mnt/clonebox-logs"
 
 # Check if logs disk exists
 if [ ! -f "$LOGS_DISK" ]; then

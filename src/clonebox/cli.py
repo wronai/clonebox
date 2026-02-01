@@ -37,6 +37,7 @@ from clonebox.health import HealthCheckManager, ProbeConfig, ProbeType
 from clonebox.audit import get_audit_logger, AuditQuery, AuditEventType, AuditOutcome
 from clonebox.orchestrator import Orchestrator, OrchestrationResult
 from clonebox.plugins import get_plugin_manager, PluginHook, PluginContext
+from clonebox.remote import RemoteCloner, RemoteConnection
 
 # Custom questionary style
 custom_style = Style(
@@ -599,6 +600,78 @@ def cmd_repair(args):
                 timeout=timeout,
             )
         )
+
+
+def cmd_logs(args):
+    """View logs from VM."""
+    import subprocess
+    import sys
+    
+    name = args.name
+    user_session = getattr(args, "user", False)
+    show_all = getattr(args, "all", False)
+    
+    try:
+        vm_name, _ = _resolve_vm_name_and_config_file(name)
+    except FileNotFoundError as e:
+        console.print(f"[red]❌ {e}[/]")
+        return
+    
+    # Path to the logs script
+    script_dir = Path(__file__).parent.parent.parent / "scripts"
+    logs_script = script_dir / "clonebox-logs.sh"
+    
+    if not logs_script.exists():
+        console.print(f"[red]❌ Logs script not found: {logs_script}[/]")
+        return
+    
+    # Run the logs script
+    try:
+        console.print(f"[cyan]📋 Opening logs for VM: {vm_name}[/]")
+        subprocess.run(
+            [str(logs_script), vm_name, "true" if user_session else "false", "true" if show_all else "false"],
+            check=True
+        )
+    except subprocess.CalledProcessError as e:
+        console.print(f"[red]❌ Failed to view logs: {e}[/]")
+        sys.exit(1)
+    except KeyboardInterrupt:
+        console.print("\n[yellow]Interrupted.[/]")
+
+
+def cmd_set_password(args):
+    """Set password for VM user."""
+    import subprocess
+    import sys
+    
+    name = args.name
+    user_session = getattr(args, "user", False)
+    
+    try:
+        vm_name, _ = _resolve_vm_name_and_config_file(name)
+    except FileNotFoundError as e:
+        console.print(f"[red]❌ {e}[/]")
+        return
+    
+    # Path to the set-password script
+    script_dir = Path(__file__).parent.parent.parent / "scripts"
+    set_password_script = script_dir / "set-vm-password.sh"
+    
+    if not set_password_script.exists():
+        console.print(f"[red]❌ Set password script not found: {set_password_script}[/]")
+        return
+    
+    # Run the set-password script interactively
+    try:
+        console.print(f"[cyan]🔐 Setting password for VM: {vm_name}[/]")
+        subprocess.run(
+            [str(set_password_script), vm_name, "true" if user_session else "false"]
+        )
+    except subprocess.CalledProcessError as e:
+        console.print(f"[red]❌ Failed to set password: {e}[/]")
+        sys.exit(1)
+    except KeyboardInterrupt:
+        console.print("\n[yellow]Interrupted.[/]")
 
 
 def interactive_mode():
@@ -1972,7 +2045,7 @@ def load_env_file(env_path: Path) -> dict:
                 continue
             if "=" in line:
                 key, value = line.split("=", 1)
-                env_vars[key.strip()] = value.strip()
+                env_vars[key.strip()] = value.strip().strip("'\"")
 
     return env_vars
 
@@ -1991,6 +2064,22 @@ def expand_env_vars(value, env_vars: dict):
     elif isinstance(value, list):
         return [expand_env_vars(item, env_vars) for item in value]
     return value
+
+
+def _find_unexpanded_env_placeholders(value) -> set:
+    if isinstance(value, str):
+        return set(re.findall(r"\$\{([^}]+)\}", value))
+    if isinstance(value, dict):
+        found = set()
+        for v in value.values():
+            found |= _find_unexpanded_env_placeholders(v)
+        return found
+    if isinstance(value, list):
+        found = set()
+        for item in value:
+            found |= _find_unexpanded_env_placeholders(item)
+        return found
+    return set()
 
 
 def deduplicate_list(items: list, key=None) -> list:
@@ -2249,6 +2338,14 @@ def load_clonebox_config(path: Path) -> dict:
     # Expand environment variables in config
     config = expand_env_vars(config, env_vars)
 
+    unresolved = _find_unexpanded_env_placeholders(config)
+    if unresolved:
+        unresolved_sorted = ", ".join(sorted(unresolved))
+        raise ValueError(
+            f"Unresolved environment variables in config: {unresolved_sorted}. "
+            f"Set them in {env_file} or in the process environment."
+        )
+
     return config
 
 
@@ -2362,6 +2459,9 @@ def create_vm_from_config(
     all_paths = config.get("paths", {}).copy()
     all_paths.update(config.get("app_data_paths", {}))
 
+    vm_section = config.get("vm") or {}
+    auth_method = vm_section.get("auth_method") or "ssh_key"
+
     vm_config = VMConfig(
         name=config["vm"]["name"],
         ram_mb=config["vm"].get("ram_mb", 8192),
@@ -2378,6 +2478,8 @@ def create_vm_from_config(
         network_mode=config["vm"].get("network_mode", "auto"),
         username=config["vm"].get("username", "ubuntu"),
         password=config["vm"].get("password", "ubuntu"),
+        auth_method=auth_method,
+        ssh_public_key=vm_section.get("ssh_public_key"),
     )
 
     cloner = SelectiveVMCloner(user_session=user_session)
@@ -3238,6 +3340,104 @@ def cmd_audit_failures(args) -> None:
     console.print(table)
 
 
+def cmd_audit_search(args) -> None:
+    """Search audit events."""
+    from datetime import datetime, timedelta
+
+    query = AuditQuery()
+
+    # Parse event type
+    event_type = None
+    if hasattr(args, "event") and args.event:
+        try:
+            event_type = AuditEventType(args.event)
+        except ValueError:
+            console.print(f"[red]Unknown event type: {args.event}[/]")
+            return
+
+    # Parse time range
+    start_time = None
+    if hasattr(args, "since") and args.since:
+        since = args.since.lower()
+        now = datetime.now()
+        if "hour" in since:
+            hours = int(since.split()[0]) if since[0].isdigit() else 1
+            start_time = now - timedelta(hours=hours)
+        elif "day" in since:
+            days = int(since.split()[0]) if since[0].isdigit() else 1
+            start_time = now - timedelta(days=days)
+        elif "week" in since:
+            weeks = int(since.split()[0]) if since[0].isdigit() else 1
+            start_time = now - timedelta(weeks=weeks)
+
+    user = getattr(args, "user_filter", None)
+    target = getattr(args, "target", None)
+    limit = getattr(args, "limit", 100)
+
+    events = query.query(
+        event_type=event_type,
+        target_name=target,
+        user=user,
+        start_time=start_time,
+        limit=limit,
+    )
+
+    if not events:
+        console.print("[yellow]No matching audit events found.[/]")
+        return
+
+    console.print(f"[bold]Found {len(events)} events:[/]")
+
+    for event in events:
+        outcome_color = "green" if event.outcome.value == "success" else "red"
+        console.print(
+            f"  [{outcome_color}]{event.outcome.value}[/] "
+            f"{event.timestamp.strftime('%Y-%m-%d %H:%M')} "
+            f"[cyan]{event.event_type.value}[/] "
+            f"{event.target_name or '-'}"
+        )
+
+
+def cmd_audit_export(args) -> None:
+    """Export audit events to file."""
+    query = AuditQuery()
+    events = query.query(limit=getattr(args, "limit", 10000))
+
+    if not events:
+        console.print("[yellow]No audit events to export.[/]")
+        return
+
+    output_format = getattr(args, "format", "json")
+    output_file = getattr(args, "output", None)
+
+    if output_format == "json":
+        data = [e.to_dict() for e in events]
+        content = json.dumps(data, indent=2, default=str)
+    else:
+        # CSV format
+        import csv
+        import io
+        output = io.StringIO()
+        writer = csv.writer(output)
+        writer.writerow(["timestamp", "event_type", "outcome", "target", "user", "error"])
+        for e in events:
+            writer.writerow([
+                e.timestamp.isoformat(),
+                e.event_type.value,
+                e.outcome.value,
+                e.target_name or "",
+                e.user,
+                e.error_message or "",
+            ])
+        content = output.getvalue()
+
+    if output_file:
+        Path(output_file).write_text(content)
+        console.print(f"[green]✅ Exported {len(events)} events to {output_file}[/]")
+    else:
+        console.print(content)
+
+
 # === Orchestration Commands ===
 
 
@@ -3353,6 +3553,42 @@ def cmd_compose_status(args) -> None:
         console.print(f"[red]❌ Failed to get status: {e}[/]")
 
 
+def cmd_compose_logs(args) -> None:
+    """Show aggregated logs from VMs."""
+    compose_file = Path(args.file) if hasattr(args, "file") and args.file else Path("clonebox-compose.yaml")
+
+    if not compose_file.exists():
+        console.print(f"[red]Compose file not found: {compose_file}[/]")
+        return
+
+    user_session = getattr(args, "user", False)
+    follow = getattr(args, "follow", False)
+    lines = getattr(args, "lines", 50)
+    service = getattr(args, "service", None)
+
+    try:
+        orch = Orchestrator.from_file(compose_file, user_session=user_session)
+
+        if service:
+            # Logs for specific service
+            logs = orch.logs(service, follow=follow, lines=lines)
+            if logs:
+                console.print(f"[bold]Logs for {service}:[/]")
+                console.print(logs)
+            else:
+                console.print(f"[yellow]No logs available for {service}[/]")
+        else:
+            # Logs for all services
+            for name in orch.plan.vms.keys():
+                logs = orch.logs(name, follow=False, lines=lines)
+                if logs:
+                    console.print(f"\n[bold cyan]━━━ {name} ━━━[/]")
+                    console.print(logs)
+
+    except Exception as e:
+        console.print(f"[red]❌ Failed to get logs: {e}[/]")
+
+
 # === Plugin Commands ===
 
 
@@ -3428,6 +3664,199 @@ def cmd_plugin_discover(args) -> None:
     console.print("[bold]Discovered plugins:[/]")
     for name in discovered:
         console.print(f"  • {name}")
+
+
+def cmd_plugin_install(args) -> None:
+    """Install a plugin."""
+    manager = get_plugin_manager()
+    source = args.source
+
+    console.print(f"[cyan]📦 Installing plugin from: {source}[/]")
+
+    if manager.install(source):
+        console.print("[green]✅ Plugin installed successfully[/]")
+        console.print("[dim]Run 'clonebox plugin discover' to see available plugins[/]")
+    else:
+        console.print(f"[red]❌ Failed to install plugin from: {source}[/]")
+
+
+def cmd_plugin_uninstall(args) -> None:
+    """Uninstall a plugin."""
+    manager = get_plugin_manager()
+    name = args.name
+
+    console.print(f"[cyan]🗑️  Uninstalling plugin: {name}[/]")
+
+    if manager.uninstall(name):
+        console.print(f"[green]✅ Plugin '{name}' uninstalled successfully[/]")
+    else:
+        console.print(f"[red]❌ Failed to uninstall plugin: {name}[/]")
+
+
+# === Remote Management Commands ===
+
+
+def cmd_remote_list(args) -> None:
+    """List VMs on remote host."""
+    host = args.host
+    user_session = getattr(args, "user", False)
+
+    console.print(f"[cyan]🔍 Connecting to: {host}[/]")
+
+    try:
+        remote = RemoteCloner(host, verify=True)
+
+        if not remote.is_clonebox_installed():
+            console.print("[red]❌ CloneBox is not installed on remote host[/]")
+            return
+
+        vms = remote.list_vms(user_session=user_session)
+
+        if not vms:
+            console.print("[yellow]No VMs found on remote host.[/]")
+            return
+
+        table = Table(title=f"VMs on {host}", border_style="cyan")
+        table.add_column("Name")
+        table.add_column("Status")
+
+        for vm in vms:
+            name = vm.get("name", str(vm))
+            status = vm.get("state", vm.get("status", "-"))
+            table.add_row(name, status)
+
+        console.print(table)
+
+    except ConnectionError as e:
+        console.print(f"[red]❌ Connection failed: {e}[/]")
+    except Exception as e:
+        console.print(f"[red]❌ Error: {e}[/]")
+
+
+def cmd_remote_status(args) -> None:
+    """Get VM status on remote host."""
+    host = args.host
+    vm_name = args.vm_name
+    user_session = getattr(args, "user", False)
+
+    console.print(f"[cyan]🔍 Getting status of {vm_name} on {host}[/]")
+
+    try:
+        remote = RemoteCloner(host, verify=True)
+        status = remote.get_status(vm_name, user_session=user_session)
+
+        if getattr(args, "json", False):
+            console.print_json(json.dumps(status, default=str))
+        else:
+            for key, value in status.items():
+                console.print(f"  [bold]{key}:[/] {value}")
+
+    except Exception as e:
+        console.print(f"[red]❌ Error: {e}[/]")
+
+
+def cmd_remote_start(args) -> None:
+    """Start VM on remote host."""
+    host = args.host
+    vm_name = args.vm_name
+    user_session = getattr(args, "user", False)
+
+    console.print(f"[cyan]🚀 Starting {vm_name} on {host}[/]")
+
+    try:
+        remote = RemoteCloner(host, verify=True)
+        remote.start_vm(vm_name, user_session=user_session)
+        console.print(f"[green]✅ VM {vm_name} started[/]")
+
+    except Exception as e:
+        console.print(f"[red]❌ Error: {e}[/]")
+
+
+def cmd_remote_stop(args) -> None:
+    """Stop VM on remote host."""
+    host = args.host
+    vm_name = args.vm_name
+    user_session = getattr(args, "user", False)
+    force = getattr(args, "force", False)
+
+    console.print(f"[cyan]🛑 Stopping {vm_name} on {host}[/]")
+
+    try:
+        remote = RemoteCloner(host, verify=True)
+        remote.stop_vm(vm_name, force=force, user_session=user_session)
+        console.print(f"[green]✅ VM {vm_name} stopped[/]")
+
+    except Exception as e:
+        console.print(f"[red]❌ Error: {e}[/]")
+
+
+def cmd_remote_delete(args) -> None:
+    """Delete VM on remote host."""
+    host = args.host
+    vm_name = args.vm_name
+    user_session = getattr(args, "user", False)
+    keep_storage = getattr(args, "keep_storage", False)
+
+    if not getattr(args, "yes", False):
+        confirm = questionary.confirm(
+            f"Delete VM '{vm_name}' on {host}?",
+            default=False,
+            style=custom_style,
+        ).ask()
+        if not confirm:
+            console.print("[yellow]Aborted.[/]")
+            return
+
+    console.print(f"[cyan]🗑️ Deleting {vm_name} on {host}[/]")
+
+    try:
+        remote = RemoteCloner(host, verify=True)
+        remote.delete_vm(vm_name, keep_storage=keep_storage, user_session=user_session)
+        console.print(f"[green]✅ VM {vm_name} deleted[/]")
+
+    except Exception as e:
+        console.print(f"[red]❌ Error: {e}[/]")
+
+
+def cmd_remote_exec(args) -> None:
+    """Execute command in VM on remote host."""
+    host = args.host
+    vm_name = args.vm_name
+    command = " ".join(args.command) if args.command else "echo ok"
+    user_session = getattr(args, "user", False)
+    timeout = getattr(args, "timeout", 30)
+
+    try:
+        remote = RemoteCloner(host, verify=True)
+        output = remote.exec_in_vm(vm_name, command, timeout=timeout, user_session=user_session)
+        console.print(output)
+
+    except Exception as e:
+        console.print(f"[red]❌ Error: {e}[/]")
+
+
+def cmd_remote_health(args) -> None:
+    """Run health check on remote VM."""
+    host = args.host
+    vm_name = args.vm_name
+    user_session = getattr(args, "user", False)
+
+    console.print(f"[cyan]🏥 Running health check on {vm_name}@{host}[/]")
+
+    try:
+        remote = RemoteCloner(host, verify=True)
+        result = remote.health_check(vm_name, user_session=user_session)
+
+        if result["success"]:
+            console.print("[green]✅ Health check passed[/]")
+        else:
+            console.print("[red]❌ Health check failed[/]")
+
+        if result.get("output"):
+            console.print(result["output"])
+
+    except Exception as e:
+        console.print(f"[red]❌ Error: {e}[/]")
 
 
 def main():
@@ -3812,6 +4241,37 @@ def main():
     )
     repair_parser.set_defaults(func=cmd_repair)
 
+    # Logs command - view VM logs
+    logs_parser = subparsers.add_parser("logs", help="View logs from VM")
+    logs_parser.add_argument(
+        "name", nargs="?", default=None, help="VM name or '.' to use .clonebox.yaml"
+    )
+    logs_parser.add_argument(
+        "-u",
+        "--user",
+        action="store_true",
+        help="Use user session (qemu:///session)",
+    )
+    logs_parser.add_argument(
+        "--all",
+        action="store_true",
+        help="Show all logs at once without interactive menu",
+    )
+    logs_parser.set_defaults(func=cmd_logs)
+
+    # Set-password command - set password for VM user
+    set_password_parser = subparsers.add_parser("set-password", help="Set password for VM user")
+    set_password_parser.add_argument(
+        "name", nargs="?", default=None, help="VM name or '.' to use .clonebox.yaml"
+    )
+    set_password_parser.add_argument(
+        "-u",
+        "--user",
+        action="store_true",
+        help="Use user session (qemu:///session)",
+    )
+    set_password_parser.set_defaults(func=cmd_set_password)
+
     # Export command - package VM for migration
     export_parser = subparsers.add_parser("export", help="Export VM and data for migration")
     export_parser.add_argument(
@@ -4036,6 +4496,20 @@ def main():
     audit_failures.add_argument("--limit", "-n", type=int, default=20, help="Max events to show")
     audit_failures.set_defaults(func=cmd_audit_failures)
 
+    audit_search = audit_sub.add_parser("search", help="Search audit events")
+    audit_search.add_argument("--event", "-e", help="Event type (e.g., vm.create)")
+    audit_search.add_argument("--since", "-s", help="Time range (e.g., '1 hour ago', '7 days')")
+    audit_search.add_argument("--user-filter", help="Filter by user")
+    audit_search.add_argument("--target", help="Filter by target name")
+    audit_search.add_argument("--limit", "-n", type=int, default=100, help="Max events to show")
+    audit_search.set_defaults(func=cmd_audit_search)
+
+    audit_export = audit_sub.add_parser("export", help="Export audit events to file")
+    audit_export.add_argument("--format", "-f", choices=["json", "csv"], default="json", help="Output format")
+    audit_export.add_argument("--output", "-o", help="Output file (stdout if not specified)")
+    audit_export.add_argument("--limit", "-n", type=int, default=10000, help="Max events to export")
+    audit_export.set_defaults(func=cmd_audit_export)
+
     # === Compose/Orchestration Commands ===
     compose_parser = subparsers.add_parser("compose", help="Multi-VM orchestration")
     compose_sub = compose_parser.add_subparsers(dest="compose_command", help="Compose commands")
@@ -4059,6 +4533,14 @@ def main():
     compose_status.add_argument("--json", action="store_true", help="Output as JSON")
     compose_status.set_defaults(func=cmd_compose_status)
 
+    compose_logs = compose_sub.add_parser("logs", help="Show aggregated logs from VMs")
+    compose_logs.add_argument("-f", "--file", default="clonebox-compose.yaml", help="Compose file")
+    compose_logs.add_argument("-u", "--user", action="store_true", help="Use user session")
+    compose_logs.add_argument("--follow", action="store_true", help="Follow log output")
+    compose_logs.add_argument("--lines", "-n", type=int, default=50, help="Number of lines to show")
+    compose_logs.add_argument("service", nargs="?", help="Specific service to show logs for")
+    compose_logs.set_defaults(func=cmd_compose_logs)
+
     # === Plugin Commands ===
     plugin_parser = subparsers.add_parser("plugin", help="Manage plugins")
     plugin_sub = plugin_parser.add_subparsers(dest="plugin_command", help="Plugin commands")
@@ -4076,6 +4558,65 @@ def main():
 
     plugin_discover = plugin_sub.add_parser("discover", help="Discover available plugins")
     plugin_discover.set_defaults(func=cmd_plugin_discover)
+
+    plugin_install = plugin_sub.add_parser("install", help="Install a plugin")
+    plugin_install.add_argument("source", help="Plugin source (PyPI package, git URL, or local path)")
+    plugin_install.set_defaults(func=cmd_plugin_install)
+
+    plugin_uninstall = plugin_sub.add_parser("uninstall", aliases=["remove"], help="Uninstall a plugin")
+    plugin_uninstall.add_argument("name", help="Plugin name")
+    plugin_uninstall.set_defaults(func=cmd_plugin_uninstall)
+
+    # === Remote Management Commands ===
+    remote_parser = subparsers.add_parser("remote", help="Manage VMs on remote hosts")
+    remote_sub = remote_parser.add_subparsers(dest="remote_command", help="Remote commands")
+
+    remote_list = remote_sub.add_parser("list", aliases=["ls"], help="List VMs on remote host")
+    remote_list.add_argument("host", help="Remote host (user@hostname)")
+    remote_list.add_argument("-u", "--user", action="store_true", help="Use user session on remote")
+    remote_list.set_defaults(func=cmd_remote_list)
+
+    remote_status = remote_sub.add_parser("status", help="Get VM status on remote host")
+    remote_status.add_argument("host", help="Remote host (user@hostname)")
+    remote_status.add_argument("vm_name", help="VM name")
+    remote_status.add_argument("-u", "--user", action="store_true", help="Use user session on remote")
+    remote_status.add_argument("--json", action="store_true", help="Output as JSON")
+    remote_status.set_defaults(func=cmd_remote_status)
+
+    remote_start = remote_sub.add_parser("start", help="Start VM on remote host")
+    remote_start.add_argument("host", help="Remote host (user@hostname)")
+    remote_start.add_argument("vm_name", help="VM name")
+    remote_start.add_argument("-u", "--user", action="store_true", help="Use user session on remote")
+    remote_start.set_defaults(func=cmd_remote_start)
+
+    remote_stop = remote_sub.add_parser("stop", help="Stop VM on remote host")
+    remote_stop.add_argument("host", help="Remote host (user@hostname)")
+    remote_stop.add_argument("vm_name", help="VM name")
+    remote_stop.add_argument("-u", "--user", action="store_true", help="Use user session on remote")
+    remote_stop.add_argument("-f", "--force", action="store_true", help="Force stop")
+    remote_stop.set_defaults(func=cmd_remote_stop)
+
+    remote_delete = remote_sub.add_parser("delete", aliases=["rm"], help="Delete VM on remote host")
+    remote_delete.add_argument("host", help="Remote host (user@hostname)")
+    remote_delete.add_argument("vm_name", help="VM name")
+    remote_delete.add_argument("-u", "--user", action="store_true", help="Use user session on remote")
+    remote_delete.add_argument("-y", "--yes", action="store_true", help="Skip confirmation")
+    remote_delete.add_argument("--keep-storage", action="store_true", help="Keep disk images")
+    remote_delete.set_defaults(func=cmd_remote_delete)
+
+    remote_exec = remote_sub.add_parser("exec", help="Execute command in VM on remote host")
+    remote_exec.add_argument("host", help="Remote host (user@hostname)")
+    remote_exec.add_argument("vm_name", help="VM name")
+    remote_exec.add_argument("command", nargs=argparse.REMAINDER, help="Command to execute")
+    remote_exec.add_argument("-u", "--user", action="store_true", help="Use user session on remote")
+    remote_exec.add_argument("-t", "--timeout", type=int, default=30, help="Command timeout")
+    remote_exec.set_defaults(func=cmd_remote_exec)
+
+    remote_health = remote_sub.add_parser("health", help="Run health check on remote VM")
+    remote_health.add_argument("host", help="Remote host (user@hostname)")
+    remote_health.add_argument("vm_name", help="VM name")
+    remote_health.add_argument("-u", "--user", action="store_true", help="Use user session on remote")
+    remote_health.set_defaults(func=cmd_remote_health)
 
     args = parser.parse_args()
 

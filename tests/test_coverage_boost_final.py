@@ -325,7 +325,7 @@ def test_cloner_cloudinit_generation():
             ):
                 mock_run.return_value = Mock(returncode=0)
                 mock_read.side_effect = ["private key", "public key"]
-                iso_path = cloner._create_cloudinit_iso(vm_dir, config)
+                iso_path = cloner._create_cloudinit_iso(vm_dir, config, user_session=False)
                 assert iso_path is not None
                 assert (vm_dir / "cloud-init" / "user-data").exists()
                 assert (vm_dir / "cloud-init" / "meta-data").exists()

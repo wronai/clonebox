@@ -61,6 +61,12 @@ dashboard = [
     "fastapi>=0.100.0",
     "uvicorn>=0.22.0",
 ]
+secrets = [
+    "hvac>=2.0.0",
+]
+full = [
+    "hvac>=2.0.0",
+]
 
 [project.scripts]
 clonebox = "clonebox.cli:main"

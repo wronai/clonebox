@@ -35,6 +35,7 @@ from clonebox.logging import get_logger, log_operation
 from clonebox.resources import ResourceLimits
 from clonebox.rollback import vm_creation_transaction
 from clonebox.secrets import SecretsManager, SSHKeyPair
+from clonebox.audit import get_audit_logger, AuditEventType, AuditOutcome
 
 log = get_logger(__name__)
 
@@ -365,121 +366,131 @@ class SelectiveVMCloner:
         Returns:
             UUID of created VM
         """
-        with log_operation(
-            log, "vm.create", vm_name=config.name, ram_mb=config.ram_mb
-        ):
-            with vm_creation_transaction(self, config, console) as ctx:
-                # If VM already exists, optionally replace it
-                existing_vm = None
-                try:
-                    candidate_vm = self.conn.lookupByName(config.name)
-                    if candidate_vm is not None:
-                        try:
-                            if hasattr(candidate_vm, "name") and callable(candidate_vm.name):
-                                if candidate_vm.name() == config.name:
-                                    existing_vm = candidate_vm
-                            else:
-                                existing_vm = candidate_vm
-                        except Exception:
-                            existing_vm = candidate_vm
-                except Exception:
+        audit = get_audit_logger()
+        with audit.operation(
+            AuditEventType.VM_CREATE,
+            target_type="vm",
+            target_name=config.name,
+        ) as audit_ctx:
+            audit_ctx.add_detail("ram_mb", config.ram_mb)
+            audit_ctx.add_detail("vcpus", config.vcpus)
+            audit_ctx.add_detail("disk_size_gb", config.disk_size_gb)
+
+            with log_operation(
+                log, "vm.create", vm_name=config.name, ram_mb=config.ram_mb
+            ):
+                with vm_creation_transaction(self, config, console) as ctx:
+                    # If VM already exists, optionally replace it
                     existing_vm = None
+                    try:
+                        candidate_vm = self.conn.lookupByName(config.name)
+                        if candidate_vm is not None:
+                            try:
+                                if hasattr(candidate_vm, "name") and callable(candidate_vm.name):
+                                    if candidate_vm.name() == config.name:
+                                        existing_vm = candidate_vm
+                                else:
+                                    existing_vm = candidate_vm
+                            except Exception:
+                                existing_vm = candidate_vm
+                    except Exception:
+                        existing_vm = None
 
-                if existing_vm is not None:
-                    if not replace:
-                        raise RuntimeError(
-                            f"VM '{config.name}' already exists.\n\n"
+                    if existing_vm is not None:
+                        if not replace:
+                            raise RuntimeError(
+                                f"VM '{config.name}' already exists.\n\n"
+                                f"🔧 Solutions:\n"
+                                f"  1. Reuse existing VM: clonebox start {config.name}\n"
+                                f"  2. Replace it: clonebox clone . --name {config.name} --replace\n"
+                                f"  3. Delete it: clonebox delete {config.name}\n"
+                            )
+
+                        log.info(f"VM '{config.name}' already exists - replacing...")
+                        self.delete_vm(config.name, delete_storage=True, console=console, ignore_not_found=True)
+
+                    # Determine images directory
+                    images_dir = self.get_images_dir()
+                    try:
+                        vm_dir = ctx.add_directory(images_dir / config.name)
+                        vm_dir.mkdir(parents=True, exist_ok=True)
+                    except PermissionError as e:
+                        raise PermissionError(
+                            f"Cannot create VM directory: {images_dir / config.name}\n\n"
                             f"🔧 Solutions:\n"
-                            f"  1. Reuse existing VM: clonebox start {config.name}\n"
-                            f"  2. Replace it: clonebox clone . --name {config.name} --replace\n"
-                            f"  3. Delete it: clonebox delete {config.name}\n"
-                        )
+                            f"  1. Use --user flag to run in user session (recommended):\n"
+                            f"     clonebox clone . --user\n\n"
+                            f"  2. Run with sudo (not recommended):\n"
+                            f"     sudo clonebox clone .\n\n"
+                            f"  3. Fix directory permissions:\n"
+                            f"     sudo mkdir -p {images_dir}\n"
+                            f"     sudo chown -R $USER:libvirt {images_dir}\n\n"
+                            f"Original error: {e}"
+                        ) from e
 
-                    log.info(f"VM '{config.name}' already exists - replacing...")
-                    self.delete_vm(config.name, delete_storage=True, console=console, ignore_not_found=True)
+                    # Create root disk
+                    root_disk = ctx.add_file(vm_dir / "root.qcow2")
 
-                # Determine images directory
-                images_dir = self.get_images_dir()
-                try:
-                    vm_dir = ctx.add_directory(images_dir / config.name)
-                    vm_dir.mkdir(parents=True, exist_ok=True)
-                except PermissionError as e:
-                    raise PermissionError(
-                        f"Cannot create VM directory: {images_dir / config.name}\n\n"
-                        f"🔧 Solutions:\n"
-                        f"  1. Use --user flag to run in user session (recommended):\n"
-                        f"     clonebox clone . --user\n\n"
-                        f"  2. Run with sudo (not recommended):\n"
-                        f"     sudo clonebox clone .\n\n"
-                        f"  3. Fix directory permissions:\n"
-                        f"     sudo mkdir -p {images_dir}\n"
-                        f"     sudo chown -R $USER:libvirt {images_dir}\n\n"
-                        f"Original error: {e}"
-                    ) from e
+                    if not config.base_image:
+                        config.base_image = str(self._ensure_default_base_image(console=console))
 
-                # Create root disk
-                root_disk = ctx.add_file(vm_dir / "root.qcow2")
+                    if config.base_image and Path(config.base_image).exists():
+                        # Use backing file for faster creation
+                        log.debug(f"Creating disk with backing file: {config.base_image}")
+                        cmd = [
+                            "qemu-img",
+                            "create",
+                            "-f",
+                            "qcow2",
+                            "-b",
+                            config.base_image,
+                            "-F",
+                            "qcow2",
+                            str(root_disk),
+                            f"{config.disk_size_gb}G",
+                        ]
+                    else:
+                        # Create empty disk
+                        log.debug(f"Creating empty {config.disk_size_gb}GB disk...")
+                        cmd = ["qemu-img", "create", "-f", "qcow2", str(root_disk), f"{config.disk_size_gb}G"]
 
-                if not config.base_image:
-                    config.base_image = str(self._ensure_default_base_image(console=console))
+                    subprocess.run(cmd, check=True, capture_output=True)
 
-                if config.base_image and Path(config.base_image).exists():
-                    # Use backing file for faster creation
-                    log.debug(f"Creating disk with backing file: {config.base_image}")
-                    cmd = [
-                        "qemu-img",
-                        "create",
-                        "-f",
-                        "qcow2",
-                        "-b",
-                        config.base_image,
-                        "-F",
-                        "qcow2",
-                        str(root_disk),
-                        f"{config.disk_size_gb}G",
-                    ]
-                else:
-                    # Create empty disk
-                    log.debug(f"Creating empty {config.disk_size_gb}GB disk...")
-                    cmd = ["qemu-img", "create", "-f", "qcow2", str(root_disk), f"{config.disk_size_gb}G"]
+                    # Create cloud-init ISO if packages/services specified
+                    cloudinit_iso = None
+                    if (
+                        config.packages
+                        or config.services
+                        or config.snap_packages
+                        or config.post_commands
+                        or config.gui
+                    ):
+                        cloudinit_iso = ctx.add_file(self._create_cloudinit_iso(vm_dir, config, self.user_session))
+                        log.info(f"Created cloud-init ISO with {len(config.packages)} packages")
 
-                subprocess.run(cmd, check=True, capture_output=True)
+                    # Generate VM XML
+                    vm_xml = self._generate_vm_xml(config, root_disk, cloudinit_iso)
+                    ctx.add_libvirt_domain(self.conn, config.name)
 
-                # Create cloud-init ISO if packages/services specified
-                cloudinit_iso = None
-                if (
-                    config.packages
-                    or config.services
-                    or config.snap_packages
-                    or config.post_commands
-                    or config.gui
-                ):
-                    cloudinit_iso = ctx.add_file(self._create_cloudinit_iso(vm_dir, config))
-                    log.info(f"Created cloud-init ISO with {len(config.packages)} packages")
+                    # Define VM
+                    log.info(f"Defining VM '{config.name}'...")
+                    try:
+                        vm = self.conn.defineXML(vm_xml)
+                    except Exception as e:
+                        raise RuntimeError(
+                            f"Failed to define VM '{config.name}'.\n"
+                            f"Error: {e}\n\n"
+                            f"If the VM already exists, try: clonebox clone . --name {config.name} --replace\n"
+                        ) from e
 
-                # Generate VM XML
-                vm_xml = self._generate_vm_xml(config, root_disk, cloudinit_iso)
-                ctx.add_libvirt_domain(self.conn, config.name)
+                    # Start if autostart requested
+                    if getattr(config, "autostart", False):
+                        self.start_vm(config.name, open_viewer=True)
 
-                # Define VM
-                log.info(f"Defining VM '{config.name}'...")
-                try:
-                    vm = self.conn.defineXML(vm_xml)
-                except Exception as e:
-                    raise RuntimeError(
-                        f"Failed to define VM '{config.name}'.\n"
-                        f"Error: {e}\n\n"
-                        f"If the VM already exists, try: clonebox clone . --name {config.name} --replace\n"
-                    ) from e
+                    # All good - commit transaction
+                    ctx.commit()
 
-                # Start if autostart requested
-                if getattr(config, "autostart", False):
-                    self.start_vm(config.name, open_viewer=True)
-
-                # All good - commit transaction
-                ctx.commit()
-
-                return vm.UUIDString()
+                    return vm.UUIDString()
 
     def _generate_vm_xml(
         self, config: VMConfig = None, root_disk: Path = None, cloudinit_iso: Optional[Path] = None
@@ -1262,7 +1273,7 @@ fi
         encoded = base64.b64encode(script.encode()).decode()
         return encoded
 
-    def _create_cloudinit_iso(self, vm_dir: Path, config: VMConfig) -> Path:
+    def _create_cloudinit_iso(self, vm_dir: Path, config: VMConfig, user_session: bool = False) -> Path:
         """Create cloud-init ISO with secure credential handling."""
         secrets_mgr = SecretsManager()
 
@@ -1286,6 +1297,17 @@ fi
                 key_pair.save(ssh_key_path)
                 ssh_authorized_keys = [key_pair.public_key]
                 log.info(f"SSH key generated and saved to: {ssh_key_path}")
+
+            local_password = getattr(config, "password", None)
+            if getattr(config, "gui", False) and local_password:
+                chpasswd_config = (
+                    "chpasswd:\n"
+                    "  list: |\n"
+                    f"    {config.username}:{local_password}\n"
+                    "  expire: False"
+                )
+                lock_passwd = "false"
+                ssh_pwauth = "true"
 
         elif auth_method == "one_time_password":
             otp, chpasswd_raw = SecretsManager.generate_one_time_password()
@@ -2273,19 +2295,25 @@ if __name__ == "__main__":
         # Note: The bash monitor is already installed above, no need to install Python monitor
 
         # Create logs disk for host access
+        # Use different paths based on session type
+        if user_session:
+            logs_disk_path = str(Path.home() / ".local/share/libvirt/images/clonebox-logs.qcow2")
+        else:
+            logs_disk_path = "/var/lib/libvirt/images/clonebox-logs.qcow2"
+        
         runcmd_lines.extend(
             [
                 "  - mkdir -p /mnt/logs",
-                "  - truncate -s 1G /var/lib/libvirt/images/clonebox-logs.qcow2",
-                "  - mkfs.ext4 -F /var/lib/libvirt/images/clonebox-logs.qcow2",
-                "  - echo '/var/lib/libvirt/images/clonebox-logs.qcow2 /mnt/logs ext4 loop,defaults 0 0' >> /etc/fstab",
+                f"  - truncate -s 1G {logs_disk_path}",
+                f"  - mkfs.ext4 -F {logs_disk_path}",
+                f"  - echo '{logs_disk_path} /mnt/logs ext4 loop,defaults 0 0' >> /etc/fstab",
                 "  - mount -a",
                 "  - mkdir -p /mnt/logs/var/log",
                 "  - mkdir -p /mnt/logs/tmp",
                 "  - cp -r /var/log/clonebox*.log /mnt/logs/var/log/ 2>/dev/null || true",
                 "  - cp -r /tmp/*-error.log /mnt/logs/tmp/ 2>/dev/null || true",
-                "  - echo 'Logs disk mounted at /mnt/logs - accessible from host as /var/lib/libvirt/images/clonebox-logs.qcow2'",
-                "  - \"echo 'To view logs on host: sudo mount -o loop /var/lib/libvirt/images/clonebox-logs.qcow2 /mnt/clonebox-logs'\"",
+                f"  - echo 'Logs disk mounted at /mnt/logs - accessible from host as {logs_disk_path}'",
+                f"  - \"echo 'To view logs on host: sudo mount -o loop {logs_disk_path} /mnt/clonebox-logs'\"",
             ]
         )
 

@@ -388,6 +388,91 @@ class PluginManager:
             self._save_config()
             return True
 
+    def install(self, source: str) -> bool:
+        """
+        Install a plugin from a source.
+
+        Sources:
+        - PyPI package name: "clonebox-plugin-kubernetes"
+        - Git URL: "git+https://github.com/user/plugin.git"
+        - Local path: "/path/to/plugin"
+
+        Returns True if installation succeeded.
+        """
+        import subprocess
+
+        # Handle local path
+        if Path(source).exists():
+            target_dir = self.plugin_dirs[0]  # User plugins dir
+            target_dir.mkdir(parents=True, exist_ok=True)
+            source_path = Path(source)
+
+            if source_path.is_file() and source_path.suffix == ".py":
+                # Single file plugin
+                import shutil
+                shutil.copy(source_path, target_dir / source_path.name)
+                return True
+            elif source_path.is_dir():
+                # Directory plugin
+                import shutil
+                target = target_dir / source_path.name
+                if target.exists():
+                    shutil.rmtree(target)
+                shutil.copytree(source_path, target)
+                return True
+
+        # Handle pip installable (PyPI or git)
+        try:
+            result = subprocess.run(
+                [sys.executable, "-m", "pip", "install", "--user", source],
+                capture_output=True,
+                text=True,
+            )
+            return result.returncode == 0
+        except Exception:
+            return False
+
+    def uninstall(self, name: str) -> bool:
+        """
+        Uninstall a plugin.
+
+        Returns True if uninstallation succeeded.
+        """
+        import subprocess
+
+        # Check if it's a local plugin
+        for plugin_dir in self.plugin_dirs:
+            plugin_path = plugin_dir / f"{name}.py"
+            plugin_pkg = plugin_dir / name
+
+            if plugin_path.exists():
+                plugin_path.unlink()
+                return True
+            if plugin_pkg.exists() and plugin_pkg.is_dir():
+                import shutil
+                shutil.rmtree(plugin_pkg)
+                return True
+
+        # Try pip uninstall
+        try:
+            result = subprocess.run(
+                [sys.executable, "-m", "pip", "uninstall", "-y", f"clonebox-plugin-{name}"],
+                capture_output=True,
+                text=True,
+            )
+            if result.returncode == 0:
+                return True
+
+            # Try with original name
+            result = subprocess.run(
+                [sys.executable, "-m", "pip", "uninstall", "-y", name],
+                capture_output=True,
+                text=True,
+            )
+            return result.returncode == 0
+        except Exception:
+            return False
+
     def list_plugins(self) -> List[Dict[str, Any]]:
         """List all loaded plugins."""
         return [

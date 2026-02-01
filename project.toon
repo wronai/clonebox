@@ -1,6 +1,6 @@
-# clonebox | 60f 20183L | python:60
+# clonebox | 63f 21974L | python:63
 # Keys: M=modules, D=details, i=imports, c=classes, f=functions, m=methods
-M[60]:
+M[63]:
   tests/test_orchestrator.py,228
   tests/conftest.py,345
   tests/test_profiles.py,39
@@ -12,10 +12,12 @@ M[60]:
   tests/test_validator.py,442
   tests/test_container.py,168
   tests/test_coverage_boost_final.py,328
+  tests/test_cli_new_commands.py,298
   tests/test_dashboard_coverage.py,90
   tests/test_models.py,260
   tests/test_network.py,146
   tests/test_coverage_additional.py,28
+  tests/test_remote.py,283
   tests/test_detector.py,183
   tests/test_cli.py,373
   tests/e2e/test_p2p_workflow.py,286
@@ -27,23 +29,24 @@ M[60]:
   src/clonebox/dashboard.py,136
   src/clonebox/validator.py,893
   src/clonebox/p2p.py,140
-  src/clonebox/cli.py,3295
+  src/clonebox/cli.py,3645
   src/clonebox/importer.py,167
   src/clonebox/detector.py,589
   src/clonebox/exporter.py,145
   src/clonebox/__init__.py,10
   src/clonebox/di.py,127
+  src/clonebox/remote.py,411
   src/clonebox/__main__.py,4
   src/clonebox/container.py,154
   src/clonebox/logging.py,99
   src/clonebox/orchestrator.py,444
-  src/clonebox/cloner.py,2043
+  src/clonebox/cloner.py,2066
   src/clonebox/rollback.py,137
   src/clonebox/monitor.py,218
   src/clonebox/models.py,180
   src/clonebox/profiles.py,47
-  src/clonebox/audit.py,352
-  src/clonebox/secrets.py,263
+  src/clonebox/audit.py,355
+  src/clonebox/secrets.py,266
   src/clonebox/backends/subprocess_runner.py,50
   src/clonebox/backends/qemu_disk.py,40
   src/clonebox/backends/libvirt_backend.py,178
@@ -147,6 +150,13 @@ D:
     test_dashboard_error_paths(monkeypatch)->None
     test_dashboard_run(monkeypatch)->None
     test_cloner_cloudinit_generation()->None
+  tests/test_cli_new_commands.py:
+    i: argparse,json,pytest,pathlib.Path,unittest.mock.{MagicMock,PropertyMock,patch}
+    e: TestAuditCommands,TestComposeCommands,TestPluginCommands,TestRemoteCommands
+    TestAuditCommands: test_cmd_audit_list(1),test_cmd_audit_list_with_events(1),test_cmd_audit_failures(1),test_cmd_audit_search(1),test_cmd_audit_export_json(1)  # Test audit CLI commands.
+    TestComposeCommands: test_cmd_compose_up_no_file(1),test_cmd_compose_down_no_file(1),test_cmd_compose_status_no_file(1),test_cmd_compose_logs_no_file(1),test_cmd_compose_up_with_file(2)  # Test compose/orchestration CLI commands.
+    TestPluginCommands: test_cmd_plugin_list_empty(1),test_cmd_plugin_list_with_plugins(1),test_cmd_plugin_enable(1),test_cmd_plugin_disable(1),test_cmd_plugin_discover(1)  # Test plugin CLI commands.
+    TestRemoteCommands: test_cmd_remote_list(1),test_cmd_remote_list_not_installed(1),test_cmd_remote_status(1),test_cmd_remote_start(1),test_cmd_remote_stop(1)  # Test remote management CLI commands.
   tests/test_dashboard_coverage.py:
     i: pytest,sys,os,unittest.mock.{MagicMock,Mock,patch}
     e: test_dashboard_import_and_functions,test_dashboard_with_mocked_dependencies,test_dashboard_constant_values
@@ -172,6 +182,13 @@ D:
     test_dashboard_import()->None
     test_main_module()->None
     test_init_module()->None
+  tests/test_remote.py:
+    i: pytest,clonebox.remote.{RemoteCloner,RemoteCommandResult,RemoteConnection,connect},pathlib.Path,unittest.mock.{MagicMock,PropertyMock,patch}
+    e: TestRemoteConnection,TestRemoteCommandResult,TestRemoteCloner,TestConnectFunction
+    TestRemoteConnection: test_from_simple_host(0),test_from_host_with_port(0),test_from_qemu_uri(0),test_from_host_only(0),test_get_ssh_target(0)  # Test RemoteConnection dataclass.
+    TestRemoteCommandResult: test_successful_result(0),test_failed_result(0)  # Test RemoteCommandResult dataclass.
+    TestRemoteCloner: mock_subprocess(0),test_init_with_string(1),test_init_with_connection(1),test_verify_connection_success(1),test_verify_connection_failure(1)  # Test RemoteCloner class.
+    TestConnectFunction: test_connect(0),test_connect_with_kwargs(0)  # Test the connect() convenience function.
   tests/test_detector.py:
     i: pytest,clonebox.detector.{DetectedApplication,DetectedPath,DetectedService,SystemDetector,SystemSnapshot},pathlib.Path,unittest.mock.{MagicMock,patch}
     e: TestDetectedDataclasses,TestSystemDetector,TestDetectorHelpers,TestDetectorAppDataDirs
@@ -242,7 +259,7 @@ D:
     P2PManager: __init__(1),_run_ssh(2),_run_scp(3),export_remote(6),import_remote(5)  # Manage P2P VM transfers between works...
   src/clonebox/cli.py:
     i: argparse,json,os,re,sys,time,typing.{Any,Dict,Optional,Tuple}
-    e: print_banner,run_vm_diagnostics,cmd_watch,cmd_repair,interactive_mode,cmd_create,cmd_start,cmd_open
+    e: print_banner,run_vm_diagnostics,cmd_watch,cmd_repair,cmd_logs,interactive_mode,cmd_create,cmd_start
     print_banner()->None
     _resolve_vm_name_and_config_file(name:Optional[str])->Tuple[str, Optional[Path]]
     _qga_ping(vm_name:str;conn_uri:str)->bool
@@ -250,7 +267,7 @@ D:
     run_vm_diagnostics(vm_name:str;conn_uri:str;config_file:Optional[Path])->dict
     cmd_watch(args)->None
     cmd_repair(args)->None
-    interactive_mode()->None
+    cmd_logs(args)->None
   src/clonebox/importer.py:
     i: shutil,subprocess,tarfile,tempfile,libvirt,cryptography.fernet.Fernet,pathlib.Path,typing.Optional,xml.etree.ElementTree
     e: VMImporter,SecureImporter
@@ -277,6 +294,13 @@ D:
     get_container()->DependencyContainer
     set_container(container:DependencyContainer)->None
     create_default_container()->DependencyContainer
+  src/clonebox/remote.py:
+    i: json,subprocess,dataclasses.{dataclass,field},pathlib.Path,typing.{Any,Dict,List,Optional},urllib.parse.urlparse
+    e: RemoteConnection,RemoteCommandResult,RemoteCloner,connect
+    RemoteConnection: from_string(1),get_libvirt_uri(0),get_ssh_target(0)  # Remote libvirt connection configuration.
+    RemoteCommandResult:   # Result of a remote command execution.
+    RemoteCloner: __init__(3),_verify_connection(0),_build_ssh_command(0),_run_remote(2),_run_clonebox(2)  # Execute CloneBox operations on remote...
+    connect(connection_string:str)->RemoteCloner
   src/clonebox/container.py:
     i: json,shutil,subprocess,tempfile,clonebox.models.ContainerConfig,pathlib.Path,typing.{Any,Dict,List,Optional}
     e: ContainerCloner

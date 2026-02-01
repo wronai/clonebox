@@ -60,12 +60,15 @@ class EnvSecretsProvider(SecretsProvider):
 
     def _load_env_file(self) -> None:
         if self.env_file.exists():
-            with open(self.env_file) as f:
-                for line in f:
-                    line = line.strip()
-                    if line and not line.startswith("#") and "=" in line:
-                        key, _, value = line.partition("=")
-                        self._cache[key.strip()] = value.strip().strip("'\"")
+            try:
+                with open(self.env_file) as f:
+                    for line in f:
+                        line = line.strip()
+                        if line and not line.startswith("#") and "=" in line:
+                            key, _, value = line.partition("=")
+                            self._cache[key.strip()] = value.strip().strip("'\"")
+            except (FileNotFoundError, OSError):
+                return
 
     def get_secret(self, key: str) -> Optional[SecretValue]:
         # Check environment first, then cache from file
