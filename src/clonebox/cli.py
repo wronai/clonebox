@@ -2519,7 +2519,9 @@ def monitor_cloud_init_status(vm_name: str, user_session: bool = False, timeout:
                     for line in lines:
                         if line not in seen_lines:
                             # Print phase markers and sub-steps to console above the progress bar
-                            if "[" in line and "/10]" in line:
+                            if "❌" in line:
+                                console.print(f"[bold red]    {line}[/]")
+                            elif "[" in line and "/10]" in line:
                                 console.print(f"[bold cyan]  {line}[/]")
                             elif "→" in line:
                                 console.print(f"[dim]    {line}[/]")
@@ -2687,8 +2689,9 @@ def cmd_clone(args):
     if dry_run:
         console.print(f"[bold cyan]🔍 DRY RUN - Analyzing: {target_path}[/]\n")
     else:
-        console.print(f"[bold cyan]📦 Generating clone config for: {target_path}[/]\n")
-
+        console.print(f"[bold cyan]📦 Generating clone config for: {target_path}[/]")
+        # We'll show the size after detection below
+    
     # Detect system state
     with Progress(
         SpinnerColumn(),
@@ -2700,14 +2703,17 @@ def cmd_clone(args):
         detector = SystemDetector()
         snapshot = detector.detect_all()
 
-    # Generate config
-    vm_name = args.name or f"clone-{target_path.name}"
-    
     # Calculate estimated project size
     total_project_mb = sum(p.size_mb for p in snapshot.paths if p.type == "project")
     total_app_data_mb = sum(p.size_mb for p in snapshot.paths if p.type == "data")
     total_mb = total_project_mb + total_app_data_mb
     total_gb = total_mb / 1024
+
+    if not dry_run:
+        console.print(f"[dim]   Detected project data: {total_gb:.1f} GB[/]\n")
+
+    # Generate config
+    vm_name = args.name or f"clone-{target_path.name}"
     
     # Base OS and GUI overhead estimate (Ubuntu + GNOME + standard packages)
     os_overhead_gb = 15 if args.profile != "minimal" else 5

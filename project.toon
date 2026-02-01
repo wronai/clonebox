@@ -1,6 +1,6 @@
-# clonebox | 65f 23519L | python:65
+# clonebox | 69f 23871L | python:69
 # Keys: M=modules, D=details, i=imports, c=classes, f=functions, m=methods
-M[65]:
+M[69]:
   tests/test_orchestrator.py,228
   tests/conftest.py,345
   tests/test_profiles.py,39
@@ -31,7 +31,7 @@ M[65]:
   src/clonebox/dashboard.py,136
   src/clonebox/validator.py,1108
   src/clonebox/p2p.py,140
-  src/clonebox/cli.py,3823
+  src/clonebox/cli.py,3898
   src/clonebox/importer.py,167
   src/clonebox/detector.py,589
   src/clonebox/exporter.py,145
@@ -42,7 +42,7 @@ M[65]:
   src/clonebox/container.py,154
   src/clonebox/logging.py,99
   src/clonebox/orchestrator.py,444
-  src/clonebox/cloner.py,2248
+  src/clonebox/cloner.py,2293
   src/clonebox/rollback.py,137
   src/clonebox/monitor.py,218
   src/clonebox/models.py,180
@@ -55,7 +55,7 @@ M[65]:
   src/clonebox/health/manager.py,264
   src/clonebox/health/__init__.py,15
   src/clonebox/health/models.py,152
-  src/clonebox/health/probes.py,286
+  src/clonebox/health/probes.py,299
   src/clonebox/plugins/base.py,245
   src/clonebox/plugins/manager.py,392
   src/clonebox/plugins/__init__.py,22
@@ -66,6 +66,10 @@ M[65]:
   src/clonebox/interfaces/hypervisor.py,71
   src/clonebox/interfaces/disk.py,32
   src/clonebox/interfaces/network.py,25
+  src/clonebox/policies/engine.py,62
+  src/clonebox/policies/__init__.py,12
+  src/clonebox/policies/validators.py,19
+  src/clonebox/policies/models.py,41
 D:
   tests/test_orchestrator.py:
     i: tempfile,pytest,yaml,clonebox.orchestrator.{OrchestratedVM,OrchestrationPlan,OrchestrationResult,Orchestrator},pathlib.Path,unittest.mock.{MagicMock,patch}
@@ -410,7 +414,7 @@ D:
     HealthCheckResult: to_dict(0),is_healthy(0)  # Result of a health check.
     VMHealthState: to_dict(0),failure_rate(0)  # Aggregated health state for a VM.
   src/clonebox/health/probes.py:
-    i: socket,subprocess,time,datetime,abc.{ABC,abstractmethod},models.{HealthCheckResult,HealthStatus,ProbeConfig},typing.Optional
+    i: socket,subprocess,time,datetime,abc.{ABC,abstractmethod},clonebox.policies.{PolicyEngine,PolicyViolationError},models.HealthCheckResult,typing.Optional
     e: HealthProbe,HTTPProbe,TCPProbe,CommandProbe,ScriptProbe,get_probe
     HealthProbe: check(1),_create_result(3)  # Abstract base class for health probes.
     HTTPProbe: check(1)  # HTTP/HTTPS health probe.
@@ -462,3 +466,23 @@ D:
     i: abc.{ABC,abstractmethod},typing.{Any,Dict,Optional}
     e: NetworkManager
     NetworkManager: create_network(2),delete_network(1),network_exists(1),is_network_active(1),get_vm_ip(1)  # Abstract interface for network operat...
+  src/clonebox/policies/engine.py:
+    i: yaml,dataclasses.dataclass,models.PolicyFile,pathlib.Path,typing.Optional,validators.{extract_hostname,is_host_allowed}
+    e: PolicyValidationError,PolicyViolationError,DEFAULT_PROJECT_POLICY_FILES,DEFAULT_GLOBAL_POLICY_FILE,PolicyEngine
+    PolicyValidationError: 
+    PolicyViolationError: 
+    PolicyEngine: load(1),find_policy_file(1),load_effective(1),assert_url_allowed(1)
+  src/clonebox/policies/validators.py:
+    i: fnmatch,typing.List,urllib.parse.urlparse
+    e: extract_hostname,host_matches,is_host_allowed
+    extract_hostname(url:str)->str
+    host_matches(hostname:str;pattern:str)->bool
+    is_host_allowed(hostname:str;allowlist:List[str];blocklist:List[str])->bool
+  src/clonebox/policies/models.py:
+    i: pydantic.{BaseModel,Field,field_validator},typing.{List,Optional}
+    e: NetworkPolicy,OperationsPolicy,ResourcesPolicy,PolicySet,PolicyFile
+    NetworkPolicy: _validate_patterns(1)
+    OperationsPolicy: _validate_ops(1)
+    ResourcesPolicy: 
+    PolicySet: 
+    PolicyFile: 

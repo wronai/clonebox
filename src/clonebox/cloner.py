@@ -1583,7 +1583,7 @@ fi
                 runcmd_lines.append(f"  - echo '  → [{i}/{len(all_packages)}] Installing {pkg}...'")
                 runcmd_lines.append(f"  - apt-get install -y {pkg} || echo '    ⚠️  Failed to install {pkg}'")
             runcmd_lines.append("  - apt-get clean")
-            runcmd_lines.append("  - echo '  ✓ APT packages installed and cache cleaned'")
+            runcmd_lines.append("  - echo '  → ✓ APT packages installed and cache cleaned'")
             runcmd_lines.append("  - echo ''")
         else:
             runcmd_lines.append("  - echo '[2/10] 📦 No APT packages to install'")
@@ -1597,7 +1597,7 @@ fi
         runcmd_lines.append("  - systemctl enable --now snapd || true")
         runcmd_lines.append("  - echo '  → Waiting for snap system seed...'")
         runcmd_lines.append("  - timeout 300 snap wait system seed.loaded || true")
-        runcmd_lines.append("  - echo '  ✓ Core services enabled'")
+        runcmd_lines.append("  - echo '  → ✓ Core services enabled'")
         runcmd_lines.append("  - echo ''")
 
         # Phase 3: User services
@@ -1605,7 +1605,7 @@ fi
         for i, svc in enumerate(config.services, 1):
             runcmd_lines.append(f"  - echo '  → [{i}/{len(config.services)}] {svc}'")
             runcmd_lines.append(f"  - systemctl enable --now {svc} || true")
-        runcmd_lines.append("  - echo '  ✓ User services enabled'")
+        runcmd_lines.append("  - echo '  → ✓ User services enabled'")
         runcmd_lines.append("  - echo ''")
 
         # Phase 4: Filesystem mounts
@@ -1635,7 +1635,7 @@ fi
                     f"  - grep -qF \"{entry}\" /etc/fstab || echo '{entry}' >> /etc/fstab"
                 )
             runcmd_lines.append("  - mount -a || true")
-        runcmd_lines.append("  - echo '  ✓ Mounts configured'")
+        runcmd_lines.append("  - echo '  → ✓ Mounts configured'")
         runcmd_lines.append("  - echo ''")
 
         # Phase 5: Data Import (copied paths)
@@ -1651,7 +1651,7 @@ fi
                     runcmd_lines.append(cmd.replace("Importing", f"  → [{import_count}/{len(existing_copy_paths)}] Importing"))
                 else:
                     runcmd_lines.append(cmd)
-            runcmd_lines.append("  - echo '  ✓ Data import completed'")
+            runcmd_lines.append("  - echo '  → ✓ Data import completed'")
             runcmd_lines.append("  - echo ''")
         else:
             runcmd_lines.append("  - echo '[6/10] 📥 No data to import'")
@@ -1682,7 +1682,7 @@ fi
             )
             runcmd_lines.append("  - systemctl enable --now gdm3 || systemctl enable --now gdm || true")
             runcmd_lines.append("  - systemctl start display-manager || true")
-            runcmd_lines.append("  - echo '  ✓ GUI environment ready'")
+            runcmd_lines.append("  - echo '  → ✓ GUI environment ready'")
             runcmd_lines.append("  - echo ''")
         else:
             runcmd_lines.append("  - echo '[7/10] 🖥️  No GUI requested'")
@@ -1707,21 +1707,21 @@ fi
                     f"done"
                 )
                 runcmd_lines.append(f"  - {cmd}")
-            runcmd_lines.append("  - echo '  ✓ Snap packages installed'")
+            runcmd_lines.append("  - echo '  → ✓ Snap packages installed'")
             runcmd_lines.append("  - echo ''")
 
             # Connect snap interfaces for GUI apps (not auto-connected via cloud-init)
-            runcmd_lines.append(f"  - echo '  🔌 Connecting snap interfaces...'")
+            runcmd_lines.append(f"  - echo '  → 🔌 Connecting snap interfaces...'")
             for snap_pkg in config.snap_packages:
-                runcmd_lines.append(f"  - echo '    → {snap_pkg}'")
+                runcmd_lines.append(f"  - echo '    → Connecting interfaces for {snap_pkg}...'")
                 interfaces = SNAP_INTERFACES.get(snap_pkg, DEFAULT_SNAP_INTERFACES)
                 for iface in interfaces:
                     runcmd_lines.append(
                         f"  - snap connect {snap_pkg}:{iface} :{iface} 2>/dev/null || true"
                     )
-            runcmd_lines.append("  - echo '    ✓ Snap interfaces connected'")
+            runcmd_lines.append("  - echo '  → ✓ Snap interfaces connected'")
             runcmd_lines.append("  - systemctl restart snapd || true")
-            runcmd_lines.append("  - echo '  🧹 Optimizing snap storage...'")
+            runcmd_lines.append("  - echo '  → 🧹 Optimizing snap storage...'")
             runcmd_lines.append("  - snap set system refresh.retain=2")
             runcmd_lines.append("  - echo ''")
         else:
@@ -1730,7 +1730,7 @@ fi
 
         # Add remaining GUI setup if enabled
         if config.gui:
-            runcmd_lines.append("  - echo '  ⚙️  Creating autostart entries...'")
+            runcmd_lines.append("  - echo '  → ⚙️  Creating autostart entries...'")
             # Create autostart entries for GUI apps
             autostart_apps = {
                 "pycharm-community": (
@@ -1789,8 +1789,8 @@ Comment=CloneBox autostart
                 )
 
             # Fix ownership of autostart directory
-            runcmd_lines.append("  - chown -R 1000:1000 /home/ubuntu/.config/autostart")
-            runcmd_lines.append("  - echo '  ✓ Autostart entries created'")
+            runcmd_lines.append(f"  - chown -R 1000:1000 /home/{config.username}/.config/autostart")
+            runcmd_lines.append("  - echo '  → ✓ Autostart entries created'")
             runcmd_lines.append("  - echo ''")
 
         # Phase 8: Post commands
@@ -1800,9 +1800,9 @@ Comment=CloneBox autostart
                 # Truncate long commands for display
                 display_cmd = cmd[:60] + '...' if len(cmd) > 60 else cmd
                 runcmd_lines.append(f"  - echo '  → [{i}/{len(config.post_commands)}] {display_cmd}'")
-                runcmd_lines.append(f"  - {cmd} || echo '    ⚠️  Command {i} failed'")
+                runcmd_lines.append(f"  - {cmd} || echo '  → ❌ Command {i} failed'")
                 runcmd_lines.append(f"  - echo '    ✓ Command {i} completed'")
-            runcmd_lines.append("  - echo '  ✓ Post-setup commands finished'")
+            runcmd_lines.append("  - echo '  → ✓ Post-setup commands finished'")
             runcmd_lines.append("  - echo ''")
         else:
             runcmd_lines.append("  - echo '[9/10] ⚙️  No post-setup commands'")
@@ -1815,7 +1815,7 @@ Comment=CloneBox autostart
         runcmd_lines.append("  - echo '  → Vacuuming system logs'")
         runcmd_lines.append("  - journalctl --vacuum-size=50M >/dev/null 2>&1 || true")
         runcmd_lines.append("  - echo '  → Checking final disk usage'")
-        runcmd_lines.append("  - df -h / | sed 's/^/    /'")
+        runcmd_lines.append("  - df -h / | sed 's/^/    /' | while read line; do echo \"  → $line\"; done")
         
         runcmd_lines.append(
             f"  - echo '{health_script}' | base64 -d > /usr/local/bin/clonebox-health"
@@ -1824,7 +1824,7 @@ Comment=CloneBox autostart
         runcmd_lines.append(
             "  - /usr/local/bin/clonebox-health >> /var/log/clonebox-health.log 2>&1 || true"
         )
-        runcmd_lines.append("  - echo '  ✓ Health checks completed'")
+        runcmd_lines.append("  - echo '  → ✓ Health checks completed'")
         runcmd_lines.append("  - echo 'CloneBox VM ready!' > /var/log/clonebox-ready")
         
         # Final status

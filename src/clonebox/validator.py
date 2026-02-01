@@ -32,8 +32,8 @@ class VMValidator:
         self.require_running_apps = require_running_apps
         self.smoke_test = smoke_test
         self.results = {
-            "mounts": {"passed": 0, "failed": 0, "total": 0, "details": []},
-            "packages": {"passed": 0, "failed": 0, "total": 0, "details": []},
+            "mounts": {"passed": 0, "failed": 0, "skipped": 0, "total": 0, "details": []},
+            "packages": {"passed": 0, "failed": 0, "skipped": 0, "total": 0, "details": []},
             "snap_packages": {
                 "passed": 0,
                 "failed": 0,
@@ -41,7 +41,7 @@ class VMValidator:
                 "total": 0,
                 "details": [],
             },
-            "services": {"passed": 0, "failed": 0, "total": 0, "details": []},
+            "services": {"passed": 0, "failed": 0, "skipped": 0, "total": 0, "details": []},
             "disk": {"usage_pct": 0, "avail": "0", "total": "0"},
             "apps": {"passed": 0, "failed": 0, "skipped": 0, "total": 0, "details": []},
             "smoke": {"passed": 0, "failed": 0, "skipped": 0, "total": 0, "details": []},
@@ -186,6 +186,7 @@ class VMValidator:
             elif setup_in_progress:
                 status_icon = "[yellow]⏳ Pending[/]"
                 status = "pending"
+                self.results["mounts"]["skipped"] += 1
             else:
                 status_icon = "[red]❌ Not Mounted[/]"
                 self.results["mounts"]["failed"] += 1
@@ -226,6 +227,7 @@ class VMValidator:
             elif setup_in_progress:
                 status_icon = "[yellow]⏳ Pending[/]"
                 status = "pending"
+                self.results["mounts"]["skipped"] += 1
             else:
                 status_icon = "[red]❌ Missing[/]"
                 self.results["mounts"]["failed"] += 1
@@ -280,6 +282,7 @@ class VMValidator:
             else:
                 if setup_in_progress:
                     pkg_table.add_row(package, "[yellow]⏳ Pending[/]", "")
+                    self.results["packages"]["skipped"] += 1
                     self.results["packages"]["details"].append(
                         {"package": package, "installed": False, "version": None, "pending": True}
                     )
@@ -397,7 +400,7 @@ class VMValidator:
         svc_table.add_column("PID", justify="right", style="dim")
         svc_table.add_column("Note", style="dim")
 
-        # Define here to avoid NameError in loop
+        # Define setup_in_progress once before the loop to avoid NameError
         setup_in_progress = self._setup_in_progress() is True
 
         for service in services:
@@ -1216,12 +1219,14 @@ class VMValidator:
             + (self.results["smoke"]["failed"] if self.smoke_test else 0)
         )
 
-        # Get skipped services count
+        # Get skipped counts
+        skipped_mounts = self.results["mounts"].get("skipped", 0)
+        skipped_packages = self.results["packages"].get("skipped", 0)
         skipped_services = self.results["services"].get("skipped", 0)
         skipped_snaps = self.results["snap_packages"].get("skipped", 0)
         skipped_apps = self.results["apps"].get("skipped", 0)
         skipped_smoke = self.results["smoke"].get("skipped", 0) if self.smoke_test else 0
-        total_skipped = skipped_services + skipped_snaps + skipped_apps + skipped_smoke
+        total_skipped = skipped_mounts + skipped_packages + skipped_services + skipped_snaps + skipped_apps + skipped_smoke
 
         # Print summary
         self.console.print("\n[bold]📊 Validation Summary[/]")
@@ -1229,7 +1234,7 @@ class VMValidator:
         summary_table.add_column("Category", style="bold")
         summary_table.add_column("Passed", justify="right", style="green")
         summary_table.add_column("Failed", justify="right", style="red")
-        summary_table.add_column("Skipped", justify="right", style="dim")
+        summary_table.add_column("Skipped/Pending", justify="right", style="dim")
         summary_table.add_column("Total", justify="right")
 
         # Add Disk Space row
@@ -1238,7 +1243,6 @@ class VMValidator:
         disk_total = self.results.get("disk", {}).get("total", "?")
         
         # Calculate used space if possible
-        disk_status = "[green]OK[/]" if disk_usage_pct <= 90 else "[red]FULL[/]"
         disk_passed = "✅" if disk_usage_pct <= 90 else "—"
         disk_failed = "—" if disk_usage_pct <= 90 else f"{disk_usage_pct}%"
 
@@ -1254,14 +1258,14 @@ class VMValidator:
             "Mounts",
             str(self.results["mounts"]["passed"]),
             str(self.results["mounts"]["failed"]),
-            "—",
+            str(skipped_mounts) if skipped_mounts else "—",
             str(self.results["mounts"]["total"]),
         )
         summary_table.add_row(
             "APT Packages",
             str(self.results["packages"]["passed"]),
             str(self.results["packages"]["failed"]),
-            "—",
+            str(skipped_packages) if skipped_packages else "—",
             str(self.results["packages"]["total"]),
         )
         summary_table.add_row(
@@ -1275,7 +1279,7 @@ class VMValidator:
             "Services",
             str(self.results["services"]["passed"]),
             str(self.results["services"]["failed"]),
-            str(skipped_services),
+            str(skipped_services) if skipped_services else "—",
             str(self.results["services"]["total"]),
         )
         summary_table.add_row(
