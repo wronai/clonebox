@@ -1224,6 +1224,13 @@ class VMValidator:
         summary_table.add_column("Total", justify="right")
 
         summary_table.add_row(
+            "Disk Space",
+            "[green]OK[/]" if self.results.get("disk", {}).get("usage_pct", 0) <= 90 else "[red]FULL[/]",
+            str(self.results.get("disk", {}).get("usage_pct", "?")) + "%",
+            "—",
+            str(self.results.get("disk", {}).get("total", "?")),
+        )
+        summary_table.add_row(
             "Mounts",
             str(self.results["mounts"]["passed"]),
             str(self.results["mounts"]["failed"]),

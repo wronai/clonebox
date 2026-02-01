@@ -1432,10 +1432,10 @@ fi
         bind_mount_commands = []
         fstab_entries = []
         all_paths = dict(config.paths) if config.paths else {}
+        existing_bind_paths = {h: g for h, g in all_paths.items() if Path(h).exists()}
         pre_chown_dirs: set[str] = set()
-        for idx, (host_path, guest_path) in enumerate(all_paths.items()):
-            if Path(host_path).exists():
-                # Ensure all parent directories in /home/ubuntu are owned by user
+        for idx, (host_path, guest_path) in enumerate(existing_bind_paths.items()):
+            # Ensure all parent directories in /home/ubuntu are owned by user
                 # This prevents "Permission denied" when creating config dirs (e.g. .config) as root
                 if str(guest_path).startswith("/home/ubuntu/"):
                     try:
@@ -1542,6 +1542,9 @@ fi
 
         # Phase 2: Core services
         runcmd_lines.append("  - echo '[2/9] 🔧 Enabling core services...'")
+        runcmd_lines.append("  - echo '  → limiting journal size to 50M'")
+        runcmd_lines.append("  - sed -i 's/^#SystemMaxUse=/SystemMaxUse=50M/' /etc/systemd/journald.conf || true")
+        runcmd_lines.append("  - systemctl restart systemd-journald || true")
         runcmd_lines.append("  - echo '  → qemu-guest-agent'")
         runcmd_lines.append("  - systemctl enable --now qemu-guest-agent || true")
         runcmd_lines.append("  - echo '  → snapd'")
@@ -1560,14 +1563,16 @@ fi
         runcmd_lines.append("  - echo ''")
 
         # Phase 4: Filesystem mounts
-        runcmd_lines.append(f"  - echo '[4/9] 📁 Mounting shared directories ({len(config.paths)} mounts)...'")
+        runcmd_lines.append(f"  - echo '[4/9] 📁 Mounting shared directories ({len(existing_bind_paths)} mounts)...'")
         if bind_mount_commands:
+            mount_idx = 0
             for cmd in bind_mount_commands:
                 if "mount -t 9p" in cmd:
+                    mount_idx += 1
                     # Extract mount point for logging
                     parts = cmd.split()
                     mp = parts[-2] if len(parts) > 2 else "path"
-                    runcmd_lines.append(f"  - echo '  → Mounting {mp}...'")
+                    runcmd_lines.append(f"  - echo '  → [{mount_idx}/{len(existing_bind_paths)}] Mounting {mp}...'")
                 runcmd_lines.append(cmd)
         
         if fstab_entries:
@@ -1654,6 +1659,8 @@ fi
                     )
             runcmd_lines.append("  - echo '    ✓ Snap interfaces connected'")
             runcmd_lines.append("  - systemctl restart snapd || true")
+            runcmd_lines.append("  - echo '  🧹 Optimizing snap storage...'")
+            runcmd_lines.append("  - snap set system refresh.retain=2")
             runcmd_lines.append("  - echo ''")
         else:
             runcmd_lines.append("  - echo '[7/9] 📦 No snap packages to install'")
@@ -1734,6 +1741,8 @@ Comment=CloneBox autostart
         # Generate health check script
         health_script = self._generate_health_check_script(config)
         # Phase 9: Health checks and finalization
+        runcmd_lines.append("  - echo '  🧹 Vacuuming system logs to save space...'")
+        runcmd_lines.append("  - journalctl --vacuum-size=50M")
         runcmd_lines.append("  - echo '[9/9] 🏥 Running health checks...'")
         runcmd_lines.append(
             f"  - echo '{health_script}' | base64 -d > /usr/local/bin/clonebox-health"

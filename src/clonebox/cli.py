@@ -2504,8 +2504,10 @@ def monitor_cloud_init_status(vm_name: str, user_session: bool = False, timeout:
                     conn_uri,
                     "df / --output=pcent | tail -n 1 | tr -dc '0-9'"
                 )
+                disk_usage_str = ""
                 if disk_info and disk_info.isdigit():
                     usage = int(disk_info)
+                    disk_usage_str = f" [Disk: {usage}%]"
                     if usage > 90:
                         console.print(f"[bold red]⚠️  WARNING: VM Disk is nearly full ({usage}%)![/]")
                         console.print("[red]   Installation may fail. Consider increasing --disk-size-gb.[/]")
@@ -2527,19 +2529,19 @@ def monitor_cloud_init_status(vm_name: str, user_session: bool = False, timeout:
                 if restart_detected:
                     progress.update(
                         task,
-                        description=f"[cyan]Finalizing setup... ({minutes}m {seconds}s, {remaining})",
+                        description=f"[cyan]Finalizing setup... ({minutes}m {seconds}s, {remaining}){disk_usage_str}",
                     )
                 elif last_phases:
                     # Show the actual phase from logs
                     current_status = last_phases[-1]
                     progress.update(
                         task,
-                        description=f"[cyan]{current_status} ({minutes}m {seconds}s, {remaining})",
+                        description=f"[cyan]{current_status} ({minutes}m {seconds}s, {remaining}){disk_usage_str}",
                     )
                 else:
                     progress.update(
                         task,
-                        description=f"[cyan]Installing packages... ({minutes}m {seconds}s, {remaining})",
+                        description=f"[cyan]Installing packages... ({minutes}m {seconds}s, {remaining}){disk_usage_str}",
                     )
 
             except (subprocess.TimeoutExpired, Exception) as e:
