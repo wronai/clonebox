@@ -1930,7 +1930,10 @@ def cmd_test(args):
                         if is_accessible == "yes":
                             console.print(f"[green]✅ {guest_path} (mount)[/]")
                         else:
-                            console.print(f"[red]❌ {guest_path} (mount inaccessible)[/]")
+                            if cloud_init_running:
+                                console.print(f"[yellow]⏳ {guest_path} (mount pending)[/]")
+                            else:
+                                console.print(f"[red]❌ {guest_path} (mount inaccessible)[/]")
                     except Exception:
                         console.print(f"[yellow]⚠️  {guest_path} (could not check)[/]")
                 
@@ -1943,7 +1946,10 @@ def cmd_test(args):
                         if is_accessible == "yes":
                             console.print(f"[green]✅ {guest_path} (copied)[/]")
                         else:
-                            console.print(f"[red]❌ {guest_path} (copy missing)[/]")
+                            if cloud_init_running:
+                                console.print(f"[yellow]⏳ {guest_path} (copy pending)[/]")
+                            else:
+                                console.print(f"[red]❌ {guest_path} (copy missing)[/]")
                     except Exception:
                         console.print(f"[yellow]⚠️  {guest_path} (could not check)[/]")
         else:
@@ -2420,7 +2426,8 @@ def monitor_cloud_init_status(vm_name: str, user_session: bool = False, timeout:
     start_time = time.time()
     shutdown_count = 0  # Count consecutive shutdown detections
     restart_detected = False
-    last_phase = ""
+    last_phases = []
+    seen_lines = set()
 
     with Progress(
         SpinnerColumn(),
@@ -2453,7 +2460,7 @@ def monitor_cloud_init_status(vm_name: str, user_session: bool = False, timeout:
                         restart_detected = True
                         progress.update(
                             task,
-                            description="[yellow]⟳ VM restarting after package installation...",
+                            description="[yellow]⟳ VM restarting after installation...",
                         )
                     time.sleep(3)
                     continue
@@ -2466,7 +2473,7 @@ def monitor_cloud_init_status(vm_name: str, user_session: bool = False, timeout:
                 if restart_detected and "running" in vm_state and shutdown_count >= 3:
                     # VM restarted successfully - GUI should be ready
                     progress.update(
-                        task, description=f"[green]✓ GUI ready! Total time: {minutes}m {seconds}s"
+                        task, description=f"[green]✓ VM ready! Total time: {minutes}m {seconds}s"
                     )
                     time.sleep(2)
                     break
@@ -2484,33 +2491,43 @@ def monitor_cloud_init_status(vm_name: str, user_session: bool = False, timeout:
                     remaining = "almost done"
 
                 # Try to get real-time progress via QGA
-                phase_info = _exec_in_vm_qga(
+                # Get last 3 unique progress lines
+                raw_info = _exec_in_vm_qga(
                     vm_name, 
                     conn_uri, 
-                    "grep -E '\\[[0-9]/7\\]|→' /var/log/cloud-init-output.log | tail -n 1"
+                    "grep -E '\\[[0-9]/[0-9]\\]|→' /var/log/cloud-init-output.log 2>/dev/null | tail -n 5"
                 )
                 
-                if phase_info:
-                    # Clean up the line (remove possible terminal codes or extra spaces)
-                    clean_phase = phase_info.strip().split('\n')[-1].strip()
-                    if clean_phase:
-                        last_phase = clean_phase
+                if raw_info:
+                    lines = [l.strip() for l in raw_info.strip().split('\n') if l.strip()]
+                    for line in lines:
+                        if line not in seen_lines:
+                            # If it's a new phase line, we can log it to console above the progress bar
+                            if "[" in line and "/9]" in line:
+                                console.print(f"[dim]  {line}[/]")
+                            seen_lines.add(line)
+                            last_phases.append(line)
+                    
+                    # Keep only last 2 for the progress bar description
+                    if len(last_phases) > 2:
+                        last_phases = last_phases[-2:]
 
                 if restart_detected:
                     progress.update(
                         task,
-                        description=f"[cyan]Starting GUI... ({minutes}m {seconds}s, {remaining})",
+                        description=f"[cyan]Finalizing setup... ({minutes}m {seconds}s, {remaining})",
                     )
-                elif last_phase:
+                elif last_phases:
                     # Show the actual phase from logs
+                    current_status = last_phases[-1]
                     progress.update(
                         task,
-                        description=f"[cyan]{last_phase} ({minutes}m {seconds}s, {remaining})",
+                        description=f"[cyan]{current_status} ({minutes}m {seconds}s, {remaining})",
                     )
                 else:
                     progress.update(
                         task,
-                        description=f"[cyan]Installing desktop packages... ({minutes}m {seconds}s, {remaining})",
+                        description=f"[cyan]Installing packages... ({minutes}m {seconds}s, {remaining})",
                     )
 
             except (subprocess.TimeoutExpired, Exception) as e:

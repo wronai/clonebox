@@ -1,3 +1,16 @@
+## [1.1.17] - 2026-02-01
+
+### Summary
+
+feat(goal): CLI interface improvements
+
+### Core
+
+- update src/clonebox/cli.py
+- update src/clonebox/cloner.py
+- update src/clonebox/validator.py
+
+
 ## [1.1.16] - 2026-02-01
 
 ### Summary

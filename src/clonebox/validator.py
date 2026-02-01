@@ -155,6 +155,7 @@ class VMValidator:
         mount_table.add_column("Files", justify="right")
 
         # Validate bind mounts (paths)
+        setup_in_progress = self._setup_in_progress() is True
         for host_path, guest_path in paths.items():
             self.results["mounts"]["total"] += 1
             
@@ -182,6 +183,9 @@ class VMValidator:
                 status_icon = "[red]❌ Inaccessible[/]"
                 self.results["mounts"]["failed"] += 1
                 status = "mounted_but_inaccessible"
+            elif setup_in_progress:
+                status_icon = "[yellow]⏳ Pending[/]"
+                status = "pending"
             else:
                 status_icon = "[red]❌ Not Mounted[/]"
                 self.results["mounts"]["failed"] += 1
@@ -219,6 +223,9 @@ class VMValidator:
                 status_icon = "[green]✅ Copied[/]"
                 self.results["mounts"]["passed"] += 1
                 status = "pass"
+            elif setup_in_progress:
+                status_icon = "[yellow]⏳ Pending[/]"
+                status = "pending"
             else:
                 status_icon = "[red]❌ Missing[/]"
                 self.results["mounts"]["failed"] += 1
@@ -255,6 +262,8 @@ class VMValidator:
         pkg_table.add_column("Status", justify="center")
         pkg_table.add_column("Version", style="dim")
 
+        setup_in_progress = self._setup_in_progress() is True
+
         for package in packages:
             self.results["packages"]["total"] += 1
 
@@ -269,11 +278,17 @@ class VMValidator:
                     {"package": package, "installed": True, "version": version}
                 )
             else:
-                pkg_table.add_row(package, "[red]❌ Missing[/]", "")
-                self.results["packages"]["failed"] += 1
-                self.results["packages"]["details"].append(
-                    {"package": package, "installed": False, "version": None}
-                )
+                if setup_in_progress:
+                    pkg_table.add_row(package, "[yellow]⏳ Pending[/]", "")
+                    self.results["packages"]["details"].append(
+                        {"package": package, "installed": False, "version": None, "pending": True}
+                    )
+                else:
+                    pkg_table.add_row(package, "[red]❌ Missing[/]", "")
+                    self.results["packages"]["failed"] += 1
+                    self.results["packages"]["details"].append(
+                        {"package": package, "installed": False, "version": None}
+                    )
 
         self.console.print(pkg_table)
         self.console.print(
@@ -419,14 +434,14 @@ class VMValidator:
             else:
                 pid_value = "—"
 
-            enabled_icon = "[green]✅[/]" if is_enabled else "[yellow]⚠️[/]"
-            running_icon = "[green]✅[/]" if is_running else "[red]❌[/]"
+            enabled_icon = "[green]✅[/]" if is_enabled else ("[yellow]⏳[/]" if setup_in_progress else "[yellow]⚠️[/]")
+            running_icon = "[green]✅[/]" if is_running else ("[yellow]⏳[/]" if setup_in_progress else "[red]❌[/]")
 
             svc_table.add_row(service, enabled_icon, running_icon, pid_value, "")
 
             if is_enabled and is_running:
                 self.results["services"]["passed"] += 1
-            else:
+            elif not setup_in_progress:
                 self.results["services"]["failed"] += 1
 
             self.results["services"]["details"].append(
@@ -994,18 +1009,18 @@ class VMValidator:
             return self.results
 
         ci_status = self._exec_in_vm("cloud-init status --long 2>/dev/null || cloud-init status 2>/dev/null || true", timeout=20)
+        setup_in_progress = False
         if ci_status:
             ci_lower = ci_status.lower()
             if "running" in ci_lower:
-                self.console.print("[yellow]⏳ Cloud-init still running - skipping deep validation for now[/]")
-                self.results["overall"] = "cloud_init_running"
-                return self.results
+                self.console.print("[yellow]⏳ Cloud-init still running - deep validation will show pending states[/]")
+                setup_in_progress = True
 
         ready_msg = self._exec_in_vm(
             "cat /var/log/clonebox-ready 2>/dev/null || true",
             timeout=10,
         )
-        if not (ready_msg and "clonebox vm ready" in ready_msg.lower()):
+        if not setup_in_progress and not (ready_msg and "clonebox vm ready" in ready_msg.lower()):
             self.console.print(
                 "[yellow]⚠️  CloneBox ready marker not found - provisioning may not have completed[/]"
             )

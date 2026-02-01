@@ -1122,6 +1122,12 @@ fi
         mount_checks = []
         for idx, (host_path, guest_path) in enumerate(config.paths.items()):
             mount_checks.append(f'check_mount "{guest_path}" "mount{idx}"')
+        
+        # Add copied paths checks
+        copy_paths = config.copy_paths or config.app_data_paths
+        if copy_paths:
+            for idx, (host_path, guest_path) in enumerate(copy_paths.items()):
+                mount_checks.append(f'check_copy_path "{guest_path}"')
 
         apt_checks_str = "\n".join(apt_checks) if apt_checks else "echo 'No apt packages to check'"
         snap_checks_str = (
@@ -1227,6 +1233,30 @@ check_mount() {{
     else
         log "[INFO] Mount point '$path' does not exist yet"
         return 0
+    fi
+}
+
+check_copy_path() {
+    local path="$1"
+    if [ -d "$path" ]; then
+        if [ "$(ls -A "$path" 2>/dev/null | wc -l)" -gt 0 ]; then
+            log "[PASS] Path '$path' exists and contains data"
+            ((PASSED++))
+            return 0
+        else
+            log "[WARN] Path '$path' exists but is EMPTY"
+            ((WARNINGS++))
+            return 1
+        fi
+    else
+        if [ $SETUP_IN_PROGRESS -eq 1 ]; then
+            log "[INFO] Path '$path' not imported yet"
+            return 0
+        else
+            log "[FAIL] Path '$path' MISSING"
+            ((FAILED++))
+            return 1
+        fi
     fi
 }}
 
@@ -1373,7 +1403,7 @@ fi
         (cloudinit_dir / "meta-data").write_text(meta_data)
 
         # Generate mount commands and fstab entries for 9p filesystems
-        mount_commands = []
+        bind_mount_commands = []
         fstab_entries = []
         all_paths = dict(config.paths) if config.paths else {}
         pre_chown_dirs: set[str] = set()
@@ -1391,8 +1421,8 @@ fi
                             d_str = str(current)
                             if d_str not in pre_chown_dirs:
                                 pre_chown_dirs.add(d_str)
-                                mount_commands.append(f"  - mkdir -p {d_str}")
-                                mount_commands.append(f"  - chown 1000:1000 {d_str}")
+                                bind_mount_commands.append(f"  - mkdir -p {d_str}")
+                                bind_mount_commands.append(f"  - chown 1000:1000 {d_str}")
                     except ValueError:
                         pass
 
@@ -1403,46 +1433,48 @@ fi
                 
                 # Ensure target exists and is owned by user (if not already handled)
                 if str(guest_path) not in pre_chown_dirs:
-                    mount_commands.append(f"  - mkdir -p {guest_path}")
-                    mount_commands.append(f"  - chown 1000:1000 {guest_path}")
+                    bind_mount_commands.append(f"  - mkdir -p {guest_path}")
+                    bind_mount_commands.append(f"  - chown 1000:1000 {guest_path}")
 
-                mount_commands.append(f"  - mount -t 9p -o {mount_opts} {tag} {guest_path} || true")
+                bind_mount_commands.append(f"  - mount -t 9p -o {mount_opts} {tag} {guest_path} || true")
                 # Add fstab entry for persistence after reboot
                 fstab_entries.append(f"{tag} {guest_path} 9p {mount_opts},nofail 0 0")
 
         # Handle copy_paths (import then copy)
+        import_mount_commands = []
         all_copy_paths = dict(config.copy_paths) if config.copy_paths else {}
-        for idx, (host_path, guest_path) in enumerate(all_copy_paths.items()):
-            if Path(host_path).exists():
-                tag = f"import{idx}"
-                temp_mount_point = f"/mnt/import{idx}"
-                # Use regular mount options
-                mount_opts = "trans=virtio,version=9p2000.L,mmap,uid=1000,gid=1000"
+        existing_copy_paths = {h: g for h, g in all_copy_paths.items() if Path(h).exists()}
+        
+        for idx, (host_path, guest_path) in enumerate(existing_copy_paths.items()):
+            tag = f"import{idx}"
+            temp_mount_point = f"/mnt/import{idx}"
+            # Use regular mount options
+            mount_opts = "trans=virtio,version=9p2000.L,mmap,uid=1000,gid=1000"
 
-                # 1. Create temp mount point
-                mount_commands.append(f"  - mkdir -p {temp_mount_point}")
-                
-                # 2. Mount the 9p share
-                mount_commands.append(f"  - mount -t 9p -o {mount_opts} {tag} {temp_mount_point} || true")
-                
-                # 3. Ensure target directory exists and permissions are prepared
-                if str(guest_path).startswith("/home/ubuntu/"):
-                    mount_commands.append(f"  - mkdir -p {guest_path}")
-                    mount_commands.append(f"  - chown 1000:1000 {guest_path}")
-                else:
-                    mount_commands.append(f"  - mkdir -p {guest_path}")
+            # 1. Create temp mount point
+            import_mount_commands.append(f"  - mkdir -p {temp_mount_point}")
+            
+            # 2. Mount the 9p share
+            import_mount_commands.append(f"  - mount -t 9p -o {mount_opts} {tag} {temp_mount_point} || true")
+            
+            # 3. Ensure target directory exists and permissions are prepared
+            if str(guest_path).startswith("/home/ubuntu/"):
+                import_mount_commands.append(f"  - mkdir -p {guest_path}")
+                import_mount_commands.append(f"  - chown 1000:1000 {guest_path}")
+            else:
+                import_mount_commands.append(f"  - mkdir -p {guest_path}")
 
-                # 4. Copy contents (cp -rT to copy contents of source to target)
-                # We use || true to ensure boot continues even if copy fails
-                mount_commands.append(f"  - echo 'Importing {host_path} to {guest_path}...'")
-                mount_commands.append(f"  - cp -rT {temp_mount_point} {guest_path} || true")
-                
-                # 5. Fix ownership recursively
-                mount_commands.append(f"  - chown -R 1000:1000 {guest_path}")
+            # 4. Copy contents (cp -rT to copy contents of source to target)
+            # We use || true to ensure boot continues even if copy fails
+            import_mount_commands.append(f"  - echo 'Importing {host_path} to {guest_path}...'")
+            import_mount_commands.append(f"  - cp -rT {temp_mount_point} {guest_path} || true")
+            
+            # 5. Fix ownership recursively
+            import_mount_commands.append(f"  - chown -R 1000:1000 {guest_path}")
 
-                # 6. Unmount and cleanup
-                mount_commands.append(f"  - umount {temp_mount_point} || true")
-                mount_commands.append(f"  - rmdir {temp_mount_point} || true")
+            # 6. Unmount and cleanup
+            import_mount_commands.append(f"  - umount {temp_mount_point} || true")
+            import_mount_commands.append(f"  - rmdir {temp_mount_point} || true")
 
         # User-data
         # Add desktop environment if GUI is enabled
@@ -1467,21 +1499,22 @@ fi
         runcmd_lines.append("  - echo '═══════════════════════════════════════════════════════════'")
         runcmd_lines.append("  - echo ''")
         
-        # Phase 0: APT Packages
+        # Phase 1: APT Packages
         if all_packages:
-            runcmd_lines.append(f"  - echo '[0/7] 📦 Installing APT packages ({len(all_packages)} total)...'")
+            runcmd_lines.append(f"  - echo '[1/9] 📦 Installing APT packages ({len(all_packages)} total)...'")
             runcmd_lines.append("  - export DEBIAN_FRONTEND=noninteractive")
             runcmd_lines.append("  - apt-get update")
-            for pkg in all_packages:
-                runcmd_lines.append(f"  - echo '  → Installing {pkg}...'")
+            for i, pkg in enumerate(all_packages, 1):
+                runcmd_lines.append(f"  - echo '  → [{i}/{len(all_packages)}] Installing {pkg}...'")
                 runcmd_lines.append(f"  - apt-get install -y {pkg} || echo '    ⚠️  Failed to install {pkg}'")
             runcmd_lines.append("  - echo '  ✓ APT packages installed'")
             runcmd_lines.append("  - echo ''")
         else:
-            runcmd_lines.append("  - echo '[0/7] 📦 No APT packages to install'")
+            runcmd_lines.append("  - echo '[1/9] 📦 No APT packages to install'")
             runcmd_lines.append("  - echo ''")
 
-        # Phase 1: Core services
+        # Phase 2: Core services
+        runcmd_lines.append("  - echo '[2/9] 🔧 Enabling core services...'")
         runcmd_lines.append("  - echo '  → qemu-guest-agent'")
         runcmd_lines.append("  - systemctl enable --now qemu-guest-agent || true")
         runcmd_lines.append("  - echo '  → snapd'")
@@ -1491,23 +1524,30 @@ fi
         runcmd_lines.append("  - echo '  ✓ Core services enabled'")
         runcmd_lines.append("  - echo ''")
 
-        # Phase 2: User services
-        runcmd_lines.append(f"  - echo '[2/7] 🔧 Enabling user services ({len(config.services)} total)...'")
-        for svc in config.services:
-            runcmd_lines.append(f"  - echo '  → {svc}'")
+        # Phase 3: User services
+        runcmd_lines.append(f"  - echo '[3/9] 🔧 Enabling user services ({len(config.services)} total)...'")
+        for i, svc in enumerate(config.services, 1):
+            runcmd_lines.append(f"  - echo '  → [{i}/{len(config.services)}] {svc}'")
             runcmd_lines.append(f"  - systemctl enable --now {svc} || true")
         runcmd_lines.append("  - echo '  ✓ User services enabled'")
         runcmd_lines.append("  - echo ''")
 
-        # Phase 3: Filesystem mounts
-        runcmd_lines.append(f"  - echo '[3/7] 📁 Mounting shared directories ({len(fstab_entries)} mounts)...'")
+        # Phase 4: Filesystem mounts
+        runcmd_lines.append(f"  - echo '[4/9] 📁 Mounting shared directories ({len(config.paths)} mounts)...'")
+        if bind_mount_commands:
+            for cmd in bind_mount_commands:
+                if "mount -t 9p" in cmd:
+                    # Extract mount point for logging
+                    parts = cmd.split()
+                    mp = parts[-2] if len(parts) > 2 else "path"
+                    runcmd_lines.append(f"  - echo '  → Mounting {mp}...'")
+                runcmd_lines.append(cmd)
+        
         if fstab_entries:
             runcmd_lines.append(
                 "  - grep -q '^# CloneBox 9p mounts' /etc/fstab || echo '# CloneBox 9p mounts' >> /etc/fstab"
             )
-            for entry in fstab_entries:
-                mount_point = entry.split()[1] if len(entry.split()) > 1 else entry
-                runcmd_lines.append(f"  - echo '  → {mount_point}'")
+            for i, entry in enumerate(fstab_entries, 1):
                 runcmd_lines.append(
                     f"  - grep -qF \"{entry}\" /etc/fstab || echo '{entry}' >> /etc/fstab"
                 )
@@ -1515,12 +1555,27 @@ fi
         runcmd_lines.append("  - echo '  ✓ Mounts configured'")
         runcmd_lines.append("  - echo ''")
 
-        # Add mounts (immediate, before reboot)
-        for cmd in mount_commands:
-            runcmd_lines.append(cmd)
+        # Phase 5: Data Import (copied paths)
+        if existing_copy_paths:
+            runcmd_lines.append(f"  - echo '[5/9] 📥 Importing data ({len(existing_copy_paths)} paths)...'")
+            # Add import commands with progress
+            import_count = 0
+            for cmd in import_mount_commands:
+                if "Importing" in cmd:
+                    import_count += 1
+                    runcmd_lines.append(cmd.replace("Importing", f"  → [{import_count}/{len(existing_copy_paths)}] Importing"))
+                else:
+                    runcmd_lines.append(cmd)
+            runcmd_lines.append("  - echo '  ✓ Data import completed'")
+            runcmd_lines.append("  - echo ''")
+        else:
+            runcmd_lines.append("  - echo '[5/9] 📥 No data to import'")
+            runcmd_lines.append("  - echo ''")
 
-        # Create user directories with correct permissions EARLY to avoid race conditions with GDM
+        # Phase 6: GUI Environment Setup
         if config.gui:
+            runcmd_lines.append("  - echo '[6/9] 🖥️  Setting up GUI environment...'")
+            runcmd_lines.append("  - echo '  → Creating user directories'")
             # Create directories that GNOME services need
             runcmd_lines.extend(
                 [
@@ -1530,17 +1585,23 @@ fi
                     "  - chown -R 1000:1000 /home/ubuntu/.config /home/ubuntu/.cache /home/ubuntu/.local",
                     "  - chmod 700 /home/ubuntu/.config /home/ubuntu/.cache",
                     "  - systemctl set-default graphical.target",
-                    "  - systemctl enable --now gdm3 || systemctl enable --now gdm || true",
-                    "  - systemctl start display-manager || true",
+                    "  - echo '  → Starting display manager'",
                 ]
             )
+            runcmd_lines.append("  - systemctl enable --now gdm3 || systemctl enable --now gdm || true")
+            runcmd_lines.append("  - systemctl start display-manager || true")
+            runcmd_lines.append("  - echo '  ✓ GUI environment ready'")
+            runcmd_lines.append("  - echo ''")
+        else:
+            runcmd_lines.append("  - echo '[6/9] 🖥️  No GUI requested'")
+            runcmd_lines.append("  - echo ''")
 
         runcmd_lines.append("  - chown -R 1000:1000 /home/ubuntu || true")
         runcmd_lines.append("  - chown -R 1000:1000 /home/ubuntu/snap || true")
 
-        # Phase 4: Snap packages
+        # Phase 7: Snap packages
         if config.snap_packages:
-            runcmd_lines.append(f"  - echo '[4/7] 📦 Installing snap packages ({len(config.snap_packages)} packages)...'")
+            runcmd_lines.append(f"  - echo '[7/9] 📦 Installing snap packages ({len(config.snap_packages)} packages)...'")
             for i, snap_pkg in enumerate(config.snap_packages, 1):
                 runcmd_lines.append(f"  - echo '  → [{i}/{len(config.snap_packages)}] {snap_pkg}'")
                 # Try classic first, then strict, with retries
@@ -1556,24 +1617,24 @@ fi
             runcmd_lines.append("  - echo ''")
 
             # Connect snap interfaces for GUI apps (not auto-connected via cloud-init)
-            runcmd_lines.append(f"  - echo '[5/7] 🔌 Connecting snap interfaces...'")
+            runcmd_lines.append(f"  - echo '  🔌 Connecting snap interfaces...'")
             for snap_pkg in config.snap_packages:
-                runcmd_lines.append(f"  - echo '  → {snap_pkg}'")
+                runcmd_lines.append(f"  - echo '    → {snap_pkg}'")
                 interfaces = SNAP_INTERFACES.get(snap_pkg, DEFAULT_SNAP_INTERFACES)
                 for iface in interfaces:
                     runcmd_lines.append(
                         f"  - snap connect {snap_pkg}:{iface} :{iface} 2>/dev/null || true"
                     )
-            runcmd_lines.append("  - echo '  ✓ Snap interfaces connected'")
+            runcmd_lines.append("  - echo '    ✓ Snap interfaces connected'")
             runcmd_lines.append("  - systemctl restart snapd || true")
             runcmd_lines.append("  - echo ''")
         else:
-            runcmd_lines.append("  - echo '[4/7] 📦 No snap packages to install'")
-            runcmd_lines.append("  - echo '[5/7] 🔌 No snap interfaces to connect'")
+            runcmd_lines.append("  - echo '[7/9] 📦 No snap packages to install'")
             runcmd_lines.append("  - echo ''")
 
         # Add remaining GUI setup if enabled
         if config.gui:
+            runcmd_lines.append("  - echo '  ⚙️  Creating autostart entries...'")
             # Create autostart entries for GUI apps
             autostart_apps = {
                 "pycharm-community": (
@@ -1625,10 +1686,12 @@ Comment=CloneBox autostart
 
             # Fix ownership of autostart directory
             runcmd_lines.append("  - chown -R 1000:1000 /home/ubuntu/.config/autostart")
+            runcmd_lines.append("  - echo '  ✓ Autostart entries created'")
+            runcmd_lines.append("  - echo ''")
 
-        # Phase 6: Post commands
+        # Phase 8: Post commands
         if config.post_commands:
-            runcmd_lines.append(f"  - echo '[6/7] ⚙️  Running post-setup commands ({len(config.post_commands)} commands)...'")
+            runcmd_lines.append(f"  - echo '[8/9] ⚙️  Running post-setup commands ({len(config.post_commands)} commands)...'")
             for i, cmd in enumerate(config.post_commands, 1):
                 # Truncate long commands for display
                 display_cmd = cmd[:60] + '...' if len(cmd) > 60 else cmd
@@ -1638,13 +1701,13 @@ Comment=CloneBox autostart
             runcmd_lines.append("  - echo '  ✓ Post-setup commands completed'")
             runcmd_lines.append("  - echo ''")
         else:
-            runcmd_lines.append("  - echo '[6/7] ⚙️  No post-setup commands'")
+            runcmd_lines.append("  - echo '[8/9] ⚙️  No post-setup commands'")
             runcmd_lines.append("  - echo ''")
 
         # Generate health check script
         health_script = self._generate_health_check_script(config)
-        # Phase 7: Health checks and finalization
-        runcmd_lines.append("  - echo '[7/7] 🏥 Running health checks...'")
+        # Phase 9: Health checks and finalization
+        runcmd_lines.append("  - echo '[9/9] 🏥 Running health checks...'")
         runcmd_lines.append(
             f"  - echo '{health_script}' | base64 -d > /usr/local/bin/clonebox-health"
         )
@@ -1652,6 +1715,7 @@ Comment=CloneBox autostart
         runcmd_lines.append(
             "  - /usr/local/bin/clonebox-health >> /var/log/clonebox-health.log 2>&1 || true"
         )
+        runcmd_lines.append("  - echo '  ✓ Health checks completed'")
         runcmd_lines.append("  - echo 'CloneBox VM ready!' > /var/log/clonebox-ready")
         
         # Final status
@@ -1660,7 +1724,6 @@ Comment=CloneBox autostart
         runcmd_lines.append("  - echo '           ✅ CloneBox VM Installation Complete!'")
         runcmd_lines.append("  - echo '═══════════════════════════════════════════════════════════'")
         runcmd_lines.append("  - echo ''")
-
         # Generate boot diagnostic script (self-healing)
         boot_diag_script = self._generate_boot_diagnostic_script(config)
         runcmd_lines.append(
