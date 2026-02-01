@@ -1825,23 +1825,37 @@ def cmd_test(args):
     # Test 4: Check mounts (if running)
     if not quick and state == "running":
         console.print("[bold]4. Mount Points Check[/]")
-        all_paths = config.get("paths", {}).copy()
-        all_paths.update(config.get("app_data_paths", {}))
+        paths = config.get("paths", {})
+        app_data_paths = config.get("app_data_paths", {})
 
-        if all_paths:
+        if paths or app_data_paths:
             if not _qga_ping(vm_name, conn_uri):
                 console.print("[yellow]⚠️  QEMU guest agent not connected - cannot verify mounts[/]")
             else:
-                for idx, (host_path, guest_path) in enumerate(all_paths.items()):
+                # Check bind mounts
+                for idx, (host_path, guest_path) in enumerate(paths.items()):
                     try:
                         # Use the same QGA helper as diagnose/status
                         is_accessible = _qga_exec(
                             vm_name, conn_uri, f"test -d {guest_path} && echo yes || echo no", timeout=5
                         )
                         if is_accessible == "yes":
-                            console.print(f"[green]✅ {guest_path}[/]")
+                            console.print(f"[green]✅ {guest_path} (mount)[/]")
                         else:
-                            console.print(f"[red]❌ {guest_path} (not accessible)[/]")
+                            console.print(f"[red]❌ {guest_path} (mount inaccessible)[/]")
+                    except Exception:
+                        console.print(f"[yellow]⚠️  {guest_path} (could not check)[/]")
+                
+                # Check copied paths
+                for idx, (host_path, guest_path) in enumerate(app_data_paths.items()):
+                    try:
+                        is_accessible = _qga_exec(
+                            vm_name, conn_uri, f"test -d {guest_path} && echo yes || echo no", timeout=5
+                        )
+                        if is_accessible == "yes":
+                            console.print(f"[green]✅ {guest_path} (copied)[/]")
+                        else:
+                            console.print(f"[red]❌ {guest_path} (copy missing)[/]")
                     except Exception:
                         console.print(f"[yellow]⚠️  {guest_path} (could not check)[/]")
         else:
@@ -2521,14 +2535,22 @@ def cmd_clone(args):
             console.print("  [cyan]clonebox-health[/]  # Re-run health check")
 
             # Show mount instructions
-            all_paths = config.get("paths", {}).copy()
-            all_paths.update(config.get("app_data_paths", {}))
-            if all_paths:
-                console.print("\n[bold]📁 Mounted paths (automatic):[/]")
-                for idx, (host, guest) in enumerate(list(all_paths.items())[:5]):
+            paths = config.get("paths", {})
+            app_data_paths = config.get("app_data_paths", {})
+
+            if paths:
+                console.print("\n[bold]📁 Mounted paths (shared live):[/]")
+                for idx, (host, guest) in enumerate(list(paths.items())[:5]):
                     console.print(f"  [dim]{host}[/] → [cyan]{guest}[/]")
-                if len(all_paths) > 5:
-                    console.print(f"  [dim]... and {len(all_paths) - 5} more paths[/]")
+                if len(paths) > 5:
+                    console.print(f"  [dim]... and {len(paths) - 5} more paths[/]")
+
+            if app_data_paths:
+                console.print("\n[bold]📥 Copied paths (one-time import):[/]")
+                for idx, (host, guest) in enumerate(list(app_data_paths.items())[:5]):
+                    console.print(f"  [dim]{host}[/] → [cyan]{guest}[/]")
+                if len(app_data_paths) > 5:
+                    console.print(f"  [dim]... and {len(app_data_paths) - 5} more paths[/]")
         except PermissionError as e:
             console.print(f"[red]❌ Permission Error:[/]\n{e}")
             console.print("\n[yellow]💡 Try running with --user flag:[/]")

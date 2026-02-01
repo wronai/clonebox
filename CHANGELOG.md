@@ -1,3 +1,18 @@
+## [1.1.12] - 2026-02-01
+
+### Summary
+
+refactor(goal): CLI interface improvements
+
+### Core
+
+- update src/clonebox/cli.py
+
+### Other
+
+- update verify_cloudinit.py
+
+
 ## [1.1.11] - 2026-02-01
 
 ### Summary
