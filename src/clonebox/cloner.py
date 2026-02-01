@@ -452,7 +452,7 @@ class SelectiveVMCloner:
 
                     if config.base_image and Path(config.base_image).exists():
                         # Use backing file for faster creation
-                        log.debug(f"Creating disk with backing file: {config.base_image}")
+                        log.info(f"Creating root disk ({config.disk_size_gb}GB) using backing file: {config.base_image}")
                         cmd = [
                             "qemu-img",
                             "create",
@@ -467,7 +467,7 @@ class SelectiveVMCloner:
                         ]
                     else:
                         # Create empty disk
-                        log.debug(f"Creating empty {config.disk_size_gb}GB disk...")
+                        log.info(f"Creating empty {config.disk_size_gb}GB root disk...")
                         cmd = ["qemu-img", "create", "-f", "qcow2", str(root_disk), f"{config.disk_size_gb}G"]
 
                     subprocess.run(cmd, check=True, capture_output=True)
