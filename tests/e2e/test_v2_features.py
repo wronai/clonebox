@@ -47,14 +47,14 @@ class TestSnapshotManagement:
         snapshot = Snapshot(
             name="test-snapshot",
             vm_name="test-vm",
-            snapshot_type=SnapshotType.INTERNAL,
+            snapshot_type=SnapshotType.DISK_ONLY,
             state=SnapshotState.READY,
             created_at=datetime.now(),
         )
 
         assert snapshot.name == "test-snapshot"
         assert snapshot.vm_name == "test-vm"
-        assert snapshot.snapshot_type == SnapshotType.INTERNAL
+        assert snapshot.snapshot_type == SnapshotType.DISK_ONLY
         assert snapshot.state == SnapshotState.READY
 
     def test_snapshot_manager_initialization(self):
@@ -271,14 +271,10 @@ class TestRemoteManagement:
 
     def test_remote_cloner_initialization(self):
         """Test remote cloner initialization."""
-        from clonebox.remote import RemoteConnection, RemoteCloner
+        from clonebox.remote import RemoteCloner
 
-        conn = RemoteConnection(
-            uri="user@host",
-            ssh_user="user",
-            ssh_host="host"
-        )
-        cloner = RemoteCloner(conn)
+        # RemoteCloner accepts connection string or RemoteConnection
+        cloner = RemoteCloner(connection="user@host", verify=False)
         assert cloner is not None
 
     def test_remote_cli_commands_exist(self):
@@ -348,14 +344,14 @@ class TestAuditLogging:
 
     def test_audit_context_manager(self, tmp_path):
         """Test audit logger context manager."""
-        from clonebox.audit import AuditLogger, AuditEventType
+        from clonebox.audit import AuditLogger
 
         log_path = tmp_path / "audit.log"
         logger = AuditLogger(log_path=log_path, enabled=True)
 
-        # Verify logger has audit_operation method
-        assert hasattr(logger, 'audit_operation')
-        assert hasattr(logger, 'log_event')
+        # Verify logger has operation method (context manager)
+        assert hasattr(logger, 'operation')
+        assert hasattr(logger, 'log')
         
         # Verify log path is set
         assert logger.log_path == log_path

@@ -717,6 +717,9 @@ class SelectiveVMCloner:
             for snap, ifaces in SNAP_INTERFACES.items()
         )
 
+        mount_points_bash = "\n".join(str(p) for p in (config.paths or {}).values())
+        copy_paths_bash = "\n".join(str(p) for p in (config.copy_paths or {}).values())
+
         script = f"""#!/bin/bash
 set -uo pipefail
 LOG="/var/log/clonebox-boot.log"
@@ -1011,12 +1014,23 @@ for app in "${{APPS_TO_TEST[@]}}"; do
     fi
 done
 
-section "5/7" "Checking mount points..."
-write_status "checking_mounts" "checking mount points"
-while IFS= read -r line; do
-    tag=$(echo "$line" | awk '{{print $1}}')
-    mp=$(echo "$line" | awk '{{print $2}}')
-    if [[ "$tag" =~ ^mount[0-9]+$ ]] && [[ "$mp" == /* ]]; then
+section "5/7" "Checking mounts & imported paths..."
+write_status "checking_mounts" "checking mounts & imported paths"
+
+MOUNT_POINTS=$(cat <<'EOF'
+{mount_points_bash}
+EOF
+)
+
+COPIED_PATHS=$(cat <<'EOF'
+{copy_paths_bash}
+EOF
+)
+
+# Bind mounts (shared live)
+if [ -n "$(echo "$MOUNT_POINTS" | tr -d '[:space:]')" ]; then
+    while IFS= read -r mp; do
+        [ -z "$mp" ] && continue
         if mountpoint -q "$mp" 2>/dev/null; then
             ok "$mp mounted"
         else
@@ -1029,8 +1043,28 @@ while IFS= read -r line; do
                 fail "$mp mount FAILED"
             fi
         fi
-    fi
-done < /etc/fstab
+    done <<< "$MOUNT_POINTS"
+else
+    log "    (no bind mounts configured)"
+fi
+
+# Imported/copied paths (one-time import)
+if [ -n "$(echo "$COPIED_PATHS" | tr -d '[:space:]')" ]; then
+    while IFS= read -r p; do
+        [ -z "$p" ] && continue
+        if [ -d "$p" ]; then
+            if [ "$(ls -A "$p" 2>/dev/null | wc -l)" -gt 0 ]; then
+                ok "$p copied"
+            else
+                ok "$p copied (empty)"
+            fi
+        else
+            fail "$p missing (copy)"
+        fi
+    done <<< "$COPIED_PATHS"
+else
+    log "    (no copied paths configured)"
+fi
 
 section "6/7" "Checking services..."
 write_status "checking_services" "checking services"

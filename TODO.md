@@ -4,8 +4,8 @@
 
 ### Core Features
 - [x] Add `clonebox exec` command for executing commands in VM via QEMU Guest Agent ✅ v1.1.2
-- [ ] Implement VM snapshot functionality (save/restore state)
-- [ ] Add support for multiple VMs in single project (docker-compose style)
+- [x] Implement VM snapshot functionality (save/restore state) ✅ v2.0.0 (`snapshots/`)
+- [x] Add support for multiple VMs in single project (docker-compose style) ✅ v2.0.0 (`orchestrator.py`)
 - [x] Create web-based dashboard for VM management ✅ v1.1.0
 - [ ] Add automatic port forwarding configuration
 - [x] P2P secure transfer with AES-256 encryption ✅ v1.1.2
@@ -13,7 +13,7 @@
 ### Monitoring & Diagnostics
 - [x] Add real-time resource usage monitoring (CPU, RAM, disk) ✅ v1.1.2 (`clonebox monitor`)
 - [ ] Implement alert system for failed services/apps
-- [ ] Create health check API endpoint
+- [x] Create health check API endpoint ✅ v2.0.0 (`health/`)
 - [ ] Add performance benchmarks for VM operations
 - [ ] Implement log rotation for monitor logs
 
@@ -44,9 +44,9 @@
 
 ### Advanced Features
 - [ ] VM templates marketplace
-- [ ] Plugin system for custom providers
+- [x] Plugin system for custom providers ✅ v2.0.0 (`plugins/`)
 - [ ] Multi-user support with permissions
-- [ ] Audit logging for all operations
+- [x] Audit logging for all operations ✅ v2.0.0 (`audit.py`)
 - [ ] Backup/restore automation
 
 ### Performance
@@ -119,7 +119,7 @@
 
 ## 📊 Progress Tracking
 
-### Current Version: 1.1.2
+### Current Version: 2.0.0
 
 ### Completed in v1.1.x:
 - [x] `clonebox exec` command ✅
@@ -130,17 +130,30 @@
 - [x] Real-time resource monitoring ✅
 - [x] Bash/Zsh auto-completion ✅
 
-### Next Release (1.2.0) Goals:
-- [ ] VM snapshots (save/restore state)
+### Completed in v2.0.0:
+- [x] VM snapshots (save/restore state) - `snapshots/` ✅
+- [x] Health check system - `health/` ✅
+- [x] Multi-VM orchestration - `orchestrator.py` ✅
+- [x] Plugin system - `plugins/` ✅
+- [x] Audit logging - `audit.py` ✅
+- [x] Secrets management - `secrets.py` ✅
+- [x] Rollback on errors - `rollback.py` ✅
+- [x] Remote VM management - `remote.py` ✅
+- [x] Resource limits - `resources.py` ✅
+- [x] Dependency injection - `di.py` ✅
+- [x] Structured logging - `logging.py` ✅
+- [x] Strong typing - `models.py` ✅
+
+### Next Release (2.1.0) Goals:
 - [ ] Progress bars for long operations
-- [ ] Health check API endpoint
-- [ ] Improved error handling
 - [ ] Alert system for failed services
+- [ ] Improved error handling
+- [ ] Performance benchmarks
 
 ### Roadmap
-- **v1.2.0**: VM snapshots, progress bars, health API
-- **v1.3.0**: Multi-VM orchestration, cluster mode
-- **v2.0.0**: Cloud provider support (AWS, GCP, Azure), Windows WSL2
+- **v2.1.0**: Progress bars, alerts, improved errors
+- **v2.2.0**: Kubernetes cluster mode
+- **v3.0.0**: Cloud provider support (AWS, GCP, Azure), Windows WSL2
 
 ---
 
