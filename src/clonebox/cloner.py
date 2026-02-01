@@ -263,13 +263,21 @@ class SelectiveVMCloner:
 
             return cached_path
 
+    def _default_network_state(self) -> str:
+        try:
+            active = self.conn.listNetworks() or []
+            if "default" in active:
+                return "active"
+            defined = self.conn.listDefinedNetworks() or []
+            if "default" in defined:
+                return "inactive"
+            return "missing"
+        except Exception:
+            return "unknown"
+
     def _default_network_active(self) -> bool:
         """Check if libvirt default network is active."""
-        try:
-            net = self.conn.networkLookupByName("default")
-            return net.isActive() == 1
-        except Exception:
-            return False
+        return self._default_network_state() == "active"
 
     def resolve_network_mode(self, config: VMConfig) -> str:
         """Resolve network mode based on config and session type."""
@@ -310,10 +318,9 @@ class SelectiveVMCloner:
             )
 
         # Check default network
-        try:
-            net = self.conn.networkLookupByName("default")
-            checks["default_network"] = net.isActive() == 1
-        except libvirt.libvirtError:
+        default_net_state = self._default_network_state()
+        checks["default_network"] = default_net_state == "active"
+        if default_net_state in {"inactive", "missing", "unknown"}:
             checks["network_error"] = (
                 "Default network not found or inactive.\n"
                 "  For user session, CloneBox can use user-mode networking (slirp) automatically.\n"
@@ -1404,7 +1411,6 @@ fi
                     "  - chown -R 1000:1000 /home/ubuntu/.config /home/ubuntu/.cache /home/ubuntu/.local",
                     "  - chmod 700 /home/ubuntu/.config /home/ubuntu/.cache",
                     "  - systemctl set-default graphical.target",
-                    "  - systemctl enable gdm3 || systemctl enable gdm || true",
                 ]
             )
 
@@ -1495,6 +1501,14 @@ Comment=CloneBox autostart
             runcmd_lines.append("  - echo 'Running post-setup commands...'")
             for cmd in config.post_commands:
                 runcmd_lines.append(f"  - {cmd}")
+
+        if config.gui:
+            runcmd_lines.extend(
+                [
+                    "  - systemctl enable --now gdm3 || systemctl enable --now gdm || true",
+                    "  - systemctl start display-manager || true",
+                ]
+            )
 
         # Generate health check script
         health_script = self._generate_health_check_script(config)

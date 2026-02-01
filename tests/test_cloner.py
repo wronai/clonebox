@@ -167,7 +167,8 @@ class TestSelectiveVMClonerMethods:
     def test_check_prerequisites_returns_dict(self, mock_libvirt):
         mock_conn = MagicMock()
         mock_conn.isAlive.return_value = True
-        mock_conn.networkLookupByName.return_value.isActive.return_value = 1
+        mock_conn.listNetworks.return_value = ["default"]
+        mock_conn.listDefinedNetworks.return_value = []
         mock_libvirt.open.return_value = mock_conn
         mock_libvirt.openAuth.return_value = mock_conn
 

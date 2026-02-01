@@ -54,10 +54,8 @@ class TestNetworkMode:
         mock_conn = MagicMock()
         mock_libvirt.open.return_value = mock_conn
         mock_libvirt.openAuth.return_value = mock_conn
-        mock_net = MagicMock()
-        mock_net.isActive.return_value = 1
-        mock_conn.networkLookupByName.return_value = mock_net
-        mock_libvirt.open.return_value = mock_conn
+        mock_conn.listNetworks.return_value = ["default"]
+        mock_conn.listDefinedNetworks.return_value = []
 
         cloner = SelectiveVMCloner(user_session=True)
         config = VMConfig(network_mode="auto")
@@ -68,18 +66,9 @@ class TestNetworkMode:
     @patch("clonebox.cloner.libvirt")
     def test_resolve_network_mode_auto_user_no_default(self, mock_libvirt):
         """Test auto mode with user session and no default network falls back to user."""
-        # Handle missing libvirt module in test environment
-        try:
-            import libvirt as real_libvirt
-
-            libvirt_error = real_libvirt.libvirtError
-        except ImportError:
-
-            class libvirt_error(Exception):
-                pass
-
         mock_conn = MagicMock()
-        mock_conn.networkLookupByName.side_effect = libvirt_error("No network")
+        mock_conn.listNetworks.return_value = []
+        mock_conn.listDefinedNetworks.return_value = []
         mock_libvirt.open.return_value = mock_conn
         mock_libvirt.openAuth.return_value = mock_conn
 
@@ -134,10 +123,8 @@ class TestNetworkMode:
         mock_conn = MagicMock()
         mock_libvirt.open.return_value = mock_conn
         mock_libvirt.openAuth.return_value = mock_conn
-        mock_net = MagicMock()
-        mock_net.isActive.return_value = 1
-        mock_conn.networkLookupByName.return_value = mock_net
-        mock_libvirt.open.return_value = mock_conn
+        mock_conn.listNetworks.return_value = ["default"]
+        mock_conn.listDefinedNetworks.return_value = []
 
         cloner = SelectiveVMCloner()
         assert cloner._default_network_active() is True
@@ -149,10 +136,8 @@ class TestNetworkMode:
         mock_conn = MagicMock()
         mock_libvirt.open.return_value = mock_conn
         mock_libvirt.openAuth.return_value = mock_conn
-        mock_net = MagicMock()
-        mock_net.isActive.return_value = 0
-        mock_conn.networkLookupByName.return_value = mock_net
-        mock_libvirt.open.return_value = mock_conn
+        mock_conn.listNetworks.return_value = []
+        mock_conn.listDefinedNetworks.return_value = ["default"]
 
         cloner = SelectiveVMCloner()
         assert cloner._default_network_active() is False
@@ -160,18 +145,9 @@ class TestNetworkMode:
     @patch("clonebox.cloner.libvirt")
     def test_default_network_active_not_found(self, mock_libvirt):
         """Test _default_network_active returns False when network not found."""
-        # Handle missing libvirt module in test environment
-        try:
-            import libvirt as real_libvirt
-
-            libvirt_error = real_libvirt.libvirtError
-        except ImportError:
-
-            class libvirt_error(Exception):
-                pass
-
         mock_conn = MagicMock()
-        mock_conn.networkLookupByName.side_effect = libvirt_error("Not found")
+        mock_conn.listNetworks.return_value = []
+        mock_conn.listDefinedNetworks.return_value = []
         mock_libvirt.open.return_value = mock_conn
         mock_libvirt.openAuth.return_value = mock_conn
 
