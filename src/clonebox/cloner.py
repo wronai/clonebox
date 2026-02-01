@@ -1095,6 +1095,10 @@ REPORT_FILE="/var/log/clonebox-health.log"
 PASSED=0
 FAILED=0
 WARNINGS=0
+SETUP_IN_PROGRESS=0
+if [ ! -f /var/lib/cloud/instance/boot-finished ]; then
+    SETUP_IN_PROGRESS=1
+fi
 
 # Colors for output
 RED='\\033[0;31m'
@@ -1113,22 +1117,36 @@ check_apt_package() {{
         ((PASSED++))
         return 0
     else
-        log "[FAIL] APT package '$pkg' is NOT installed"
-        ((FAILED++))
-        return 1
+        if [ $SETUP_IN_PROGRESS -eq 1 ]; then
+            log "[WARN] APT package '$pkg' is not installed yet"
+            ((WARNINGS++))
+            return 1
+        else
+            log "[FAIL] APT package '$pkg' is NOT installed"
+            ((FAILED++))
+            return 1
+        fi
     fi
 }}
 
 check_snap_package() {{
     local pkg="$1"
-    if snap list "$pkg" &>/dev/null; then
+    local out
+    out=$(snap list "$pkg" 2>&1)
+    if [ $? -eq 0 ]; then
         log "[PASS] Snap package '$pkg' is installed"
         ((PASSED++))
         return 0
     else
-        log "[FAIL] Snap package '$pkg' is NOT installed"
-        ((FAILED++))
-        return 1
+        if [ $SETUP_IN_PROGRESS -eq 1 ]; then
+            log "[WARN] Snap package '$pkg' is not installed yet"
+            ((WARNINGS++))
+            return 1
+        else
+            log "[FAIL] Snap package '$pkg' is NOT installed"
+            ((FAILED++))
+            return 1
+        fi
     fi
 }}
 
@@ -1221,13 +1239,23 @@ log "Warnings: $WARNINGS"
 if [ $FAILED -eq 0 ]; then
     log ""
     log "[SUCCESS] All critical checks passed!"
-    echo "HEALTH_STATUS=OK" > /var/log/clonebox-health-status
-    exit 0
+    if [ $SETUP_IN_PROGRESS -eq 1 ]; then
+        echo "HEALTH_STATUS=PENDING" > /var/log/clonebox-health-status
+        exit 0
+    else
+        echo "HEALTH_STATUS=OK" > /var/log/clonebox-health-status
+        exit 0
+    fi
 else
     log ""
     log "[ERROR] Some checks failed. Review log for details."
-    echo "HEALTH_STATUS=FAILED" > /var/log/clonebox-health-status
-    exit 1
+    if [ $SETUP_IN_PROGRESS -eq 1 ]; then
+        echo "HEALTH_STATUS=PENDING" > /var/log/clonebox-health-status
+        exit 0
+    else
+        echo "HEALTH_STATUS=FAILED" > /var/log/clonebox-health-status
+        exit 1
+    fi
 fi
 """
         # Encode script to base64 for safe embedding in cloud-init
@@ -1411,6 +1439,8 @@ fi
                     "  - chown -R 1000:1000 /home/ubuntu/.config /home/ubuntu/.cache /home/ubuntu/.local",
                     "  - chmod 700 /home/ubuntu/.config /home/ubuntu/.cache",
                     "  - systemctl set-default graphical.target",
+                    "  - systemctl enable --now gdm3 || systemctl enable --now gdm || true",
+                    "  - systemctl start display-manager || true",
                 ]
             )
 
@@ -1502,14 +1532,6 @@ Comment=CloneBox autostart
             for cmd in config.post_commands:
                 runcmd_lines.append(f"  - {cmd}")
 
-        if config.gui:
-            runcmd_lines.extend(
-                [
-                    "  - systemctl enable --now gdm3 || systemctl enable --now gdm || true",
-                    "  - systemctl start display-manager || true",
-                ]
-            )
-
         # Generate health check script
         health_script = self._generate_health_check_script(config)
         runcmd_lines.append(
@@ -1517,7 +1539,7 @@ Comment=CloneBox autostart
         )
         runcmd_lines.append("  - chmod +x /usr/local/bin/clonebox-health")
         runcmd_lines.append(
-            "  - /usr/local/bin/clonebox-health >> /var/log/clonebox-health.log 2>&1"
+            "  - /usr/local/bin/clonebox-health >> /var/log/clonebox-health.log 2>&1 || true"
         )
         runcmd_lines.append("  - echo 'CloneBox VM ready!' > /var/log/clonebox-ready")
 

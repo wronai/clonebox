@@ -458,6 +458,9 @@ def run_vm_diagnostics(
         if health_status and "HEALTH_STATUS=OK" in health_status:
             result["health"]["status"] = "ok"
             console.print("[green]✅ Health: All checks passed[/]")
+        elif health_status and "HEALTH_STATUS=PENDING" in health_status:
+            result["health"]["status"] = "pending"
+            console.print("[yellow]⏳ Health: Setup in progress[/]")
         elif health_status and "HEALTH_STATUS=FAILED" in health_status:
             result["health"]["status"] = "failed"
             console.print("[red]❌ Health: Some checks failed[/]")
@@ -1800,6 +1803,8 @@ def cmd_test(args):
     console.print()
 
     # Test 3: Check cloud-init status (if running)
+    cloud_init_complete: Optional[bool] = None
+    cloud_init_running: bool = False
     if not quick and state == "running":
         console.print("[bold]3. Cloud-init Status[/]")
         try:
@@ -1809,16 +1814,23 @@ def cmd_test(args):
                 status = _qga_exec(vm_name, conn_uri, "cloud-init status 2>/dev/null || true", timeout=15)
                 if status is None:
                     console.print("[yellow]⚠️  Could not check cloud-init (QGA command failed)[/]")
+                    cloud_init_complete = None
                 elif "done" in status.lower():
                     console.print("[green]✅ Cloud-init completed[/]")
+                    cloud_init_complete = True
                 elif "running" in status.lower():
                     console.print("[yellow]⚠️  Cloud-init still running[/]")
+                    cloud_init_complete = False
+                    cloud_init_running = True
                 elif status.strip():
                     console.print(f"[yellow]⚠️  Cloud-init status: {status.strip()}[/]")
+                    cloud_init_complete = None
                 else:
                     console.print("[yellow]⚠️  Cloud-init status: unknown[/]")
+                    cloud_init_complete = None
         except Exception:
             console.print("[yellow]⚠️  Could not check cloud-init (QEMU agent may not be running)[/]")
+            cloud_init_complete = None
 
     console.print()
 
@@ -1877,17 +1889,33 @@ def cmd_test(args):
                     timeout=10,
                 )
                 if exists and exists.strip() == "yes":
-                    out = _qga_exec(
+                    _qga_exec(
                         vm_name,
                         conn_uri,
-                        "/usr/local/bin/clonebox-health >/dev/null 2>&1 && echo yes || echo no",
+                        "/usr/local/bin/clonebox-health >/dev/null 2>&1 || true",
                         timeout=60,
                     )
-                    if out and out.strip() == "yes":
-                        console.print("[green]✅ Health check ran successfully[/]")
+                    health_status = _qga_exec(
+                        vm_name,
+                        conn_uri,
+                        "cat /var/log/clonebox-health-status 2>/dev/null || true",
+                        timeout=10,
+                    )
+                    if health_status and "HEALTH_STATUS=OK" in health_status:
+                        console.print("[green]✅ Health check passed[/]")
                         console.print("   View results in VM: cat /var/log/clonebox-health.log")
+                    elif health_status and "HEALTH_STATUS=PENDING" in health_status:
+                        console.print("[yellow]⚠️  Health check pending (setup in progress)[/]")
+                        if cloud_init_running:
+                            console.print("   Cloud-init is still running; re-check after it completes")
+                        console.print("   View logs in VM: cat /var/log/clonebox-health.log")
+                    elif health_status and "HEALTH_STATUS=FAILED" in health_status:
+                        console.print("[yellow]⚠️  Health check reports failures[/]")
+                        if cloud_init_running:
+                            console.print("   Cloud-init is still running; some failures may be transient")
+                        console.print("   View logs in VM: cat /var/log/clonebox-health.log")
                     else:
-                        console.print("[yellow]⚠️  Health check did not report success[/]")
+                        console.print("[yellow]⚠️  Health check status not available yet[/]")
                         console.print("   View logs in VM: cat /var/log/clonebox-health.log")
                 else:
                     console.print("[yellow]⚠️  Health check script not found[/]")
