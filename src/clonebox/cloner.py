@@ -476,7 +476,7 @@ class SelectiveVMCloner:
 
                     subprocess.run(cmd, check=True, capture_output=True)
 
-                    # Create cloud-init ISO if packages/services specified
+                    # Create cloud-init ISO if packages/services/paths specified
                     cloudinit_iso = None
                     if (
                         config.packages
@@ -484,9 +484,11 @@ class SelectiveVMCloner:
                         or config.snap_packages
                         or config.post_commands
                         or config.gui
+                        or config.paths
+                        or config.copy_paths
                     ):
                         cloudinit_iso = ctx.add_file(self._create_cloudinit_iso(vm_dir, config, self.user_session))
-                        log.info(f"Created cloud-init ISO with {len(config.packages)} packages")
+                        log.info(f"Created cloud-init ISO for VM setup")
 
                     # Generate VM XML
                     vm_xml = self._generate_vm_xml(config, root_disk, cloudinit_iso)
