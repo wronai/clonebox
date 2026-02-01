@@ -2455,12 +2455,32 @@ def create_vm_from_config(
     replace: bool = False,
 ) -> str:
     """Create VM from YAML config dict."""
-    # Merge paths and app_data_paths
-    all_paths = config.get("paths", {}).copy()
-    all_paths.update(config.get("app_data_paths", {}))
+    paths = config.get("paths", {})
+    # Backwards compatible: v1 uses app_data_paths, newer configs may use copy_paths
+    copy_paths = config.get("copy_paths", None)
+    if not isinstance(copy_paths, dict) or not copy_paths:
+        copy_paths = config.get("app_data_paths", {})
 
     vm_section = config.get("vm") or {}
-    auth_method = vm_section.get("auth_method") or "ssh_key"
+    
+    # Support both v1 (auth_method) and v2 (auth.method) config formats
+    auth_section = vm_section.get("auth") or {}
+    auth_method = auth_section.get("method") or vm_section.get("auth_method") or "ssh_key"
+    
+    # v2 config: secrets provider
+    secrets_section = config.get("secrets") or {}
+    secrets_provider = secrets_section.get("provider", "auto")
+    
+    # v2 config: resource limits
+    limits_section = config.get("limits") or {}
+    resources = {
+        "memory_limit": limits_section.get("memory_limit"),
+        "cpu_shares": limits_section.get("cpu_shares"),
+        "disk_limit": limits_section.get("disk_limit"),
+        "network_limit": limits_section.get("network_limit"),
+    }
+    # Remove None values
+    resources = {k: v for k, v in resources.items() if v is not None}
 
     vm_config = VMConfig(
         name=config["vm"]["name"],
@@ -2469,7 +2489,8 @@ def create_vm_from_config(
         disk_size_gb=config["vm"].get("disk_size_gb", 10),
         gui=config["vm"].get("gui", True),
         base_image=config["vm"].get("base_image"),
-        paths=all_paths,
+        paths=paths,
+        copy_paths=copy_paths,
         packages=config.get("packages", []),
         snap_packages=config.get("snap_packages", []),
         services=config.get("services", []),
@@ -2479,7 +2500,8 @@ def create_vm_from_config(
         username=config["vm"].get("username", "ubuntu"),
         password=config["vm"].get("password", "ubuntu"),
         auth_method=auth_method,
-        ssh_public_key=vm_section.get("ssh_public_key"),
+        ssh_public_key=vm_section.get("ssh_public_key") or auth_section.get("ssh_public_key"),
+        resources=resources if resources else config["vm"].get("resources", {}),
     )
 
     cloner = SelectiveVMCloner(user_session=user_session)

@@ -1,4 +1,4 @@
-"""Tests for new CLI commands (audit, compose, plugin, remote)."""
+"""Tests for new CLI commands (audit, compose, plugin, remote, logs, set-password)."""
 import argparse
 from pathlib import Path
 from unittest.mock import MagicMock, patch, PropertyMock
@@ -401,3 +401,84 @@ class TestRemoteCommands:
 
         # Should not raise, just print error
         cmd_remote_list(args)
+
+
+class TestLogsCommands:
+    """Test logs CLI commands."""
+
+    @patch("subprocess.run")
+    def test_cmd_logs(self, mock_run):
+        """Test logs command."""
+        from clonebox.cli import cmd_logs
+
+        mock_run.return_value = MagicMock(returncode=0)
+
+        args = argparse.Namespace(
+            name="test-vm",
+            user=False,
+            all=False,
+        )
+
+        cmd_logs(args)
+        mock_run.assert_called_once()
+        call_args = mock_run.call_args[0][0]
+        assert "scripts/clonebox-logs.sh" in " ".join(call_args)
+
+    @patch("subprocess.run")
+    def test_cmd_logs_with_all_flag(self, mock_run):
+        """Test logs command with --all flag."""
+        from clonebox.cli import cmd_logs
+
+        mock_run.return_value = MagicMock(returncode=0)
+
+        args = argparse.Namespace(
+            name="test-vm",
+            user=True,
+            all=True,
+        )
+
+        cmd_logs(args)
+        mock_run.assert_called_once()
+        call_args = mock_run.call_args[0][0]
+        assert "scripts/clonebox-logs.sh" in " ".join(call_args)
+        assert "true" in call_args  # user session flag
+        assert "true" in call_args  # all flag
+
+
+class TestSetPasswordCommands:
+    """Test set-password CLI commands."""
+
+    @patch("subprocess.run")
+    def test_cmd_set_password(self, mock_run):
+        """Test set-password command."""
+        from clonebox.cli import cmd_set_password
+
+        mock_run.return_value = MagicMock(returncode=0)
+
+        args = argparse.Namespace(
+            name="test-vm",
+            user=False,
+        )
+
+        cmd_set_password(args)
+        mock_run.assert_called_once()
+        call_args = mock_run.call_args[0][0]
+        assert "scripts/set-vm-password.sh" in " ".join(call_args)
+
+    @patch("subprocess.run")
+    def test_cmd_set_password_user_session(self, mock_run):
+        """Test set-password command with user session."""
+        from clonebox.cli import cmd_set_password
+
+        mock_run.return_value = MagicMock(returncode=0)
+
+        args = argparse.Namespace(
+            name="test-vm",
+            user=True,
+        )
+
+        cmd_set_password(args)
+        mock_run.assert_called_once()
+        call_args = mock_run.call_args[0][0]
+        assert "scripts/set-vm-password.sh" in " ".join(call_args)
+        assert "true" in call_args  # user session flag

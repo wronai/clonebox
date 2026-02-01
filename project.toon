@@ -1,6 +1,6 @@
-# clonebox | 63f 21974L | python:63
+# clonebox | 64f 22250L | python:64
 # Keys: M=modules, D=details, i=imports, c=classes, f=functions, m=methods
-M[63]:
+M[64]:
   tests/test_orchestrator.py,228
   tests/conftest.py,345
   tests/test_profiles.py,39
@@ -20,6 +20,7 @@ M[63]:
   tests/test_remote.py,283
   tests/test_detector.py,183
   tests/test_cli.py,373
+  scripts/fetch-logs.py,81
   tests/e2e/test_p2p_workflow.py,286
   tests/e2e/test_full_workflow.py,243
   tests/e2e/__init__.py,1
@@ -29,7 +30,7 @@ M[63]:
   src/clonebox/dashboard.py,136
   src/clonebox/validator.py,893
   src/clonebox/p2p.py,140
-  src/clonebox/cli.py,3645
+  src/clonebox/cli.py,3713
   src/clonebox/importer.py,167
   src/clonebox/detector.py,589
   src/clonebox/exporter.py,145
@@ -40,7 +41,7 @@ M[63]:
   src/clonebox/container.py,154
   src/clonebox/logging.py,99
   src/clonebox/orchestrator.py,444
-  src/clonebox/cloner.py,2066
+  src/clonebox/cloner.py,2067
   src/clonebox/rollback.py,137
   src/clonebox/monitor.py,218
   src/clonebox/models.py,180
@@ -55,7 +56,7 @@ M[63]:
   src/clonebox/health/models.py,152
   src/clonebox/health/probes.py,286
   src/clonebox/plugins/base.py,245
-  src/clonebox/plugins/manager.py,326
+  src/clonebox/plugins/manager.py,392
   src/clonebox/plugins/__init__.py,22
   src/clonebox/snapshots/manager.py,278
   src/clonebox/snapshots/__init__.py,10
@@ -204,6 +205,11 @@ D:
     TestLoadCloneboxConfig: test_load_config_from_file(1),test_load_config_from_directory(1),test_load_config_not_found(1)  # Test loading .clonebox.yaml configs.
     TestCLIConstants: test_config_file_name(0)  # Test CLI constants.
     TestCLIIntegration: test_cli_help_commands(2),test_detect_json_output(3),test_detect_yaml_output(2),test_clone_creates_config_file(6),test_create_vm_from_config_propagates_disk_size(2)  # Integration tests for CLI commands.
+  scripts/fetch-logs.py:
+    i: subprocess,json,sys,base64,time
+    e: qga_exec,main
+    qga_exec(vm_name;conn_uri;command;timeout=10)->None
+    main()->None
   tests/e2e/test_p2p_workflow.py:
     i: os,shutil,subprocess,tempfile,pytest,clonebox.exporter.{SecureExporter,VMExporter},pathlib.Path,unittest.mock.{MagicMock,patch}
     e: TestKeyGeneration,TestSecureExporter,TestSecureImporter,TestP2PManager,TestCLICommands,TestVMExporter,TestVMImporter
@@ -259,7 +265,7 @@ D:
     P2PManager: __init__(1),_run_ssh(2),_run_scp(3),export_remote(6),import_remote(5)  # Manage P2P VM transfers between works...
   src/clonebox/cli.py:
     i: argparse,json,os,re,sys,time,typing.{Any,Dict,Optional,Tuple}
-    e: print_banner,run_vm_diagnostics,cmd_watch,cmd_repair,cmd_logs,interactive_mode,cmd_create,cmd_start
+    e: print_banner,run_vm_diagnostics,cmd_watch,cmd_repair,cmd_logs,cmd_set_password,interactive_mode,cmd_create
     print_banner()->None
     _resolve_vm_name_and_config_file(name:Optional[str])->Tuple[str, Optional[Path]]
     _qga_ping(vm_name:str;conn_uri:str)->bool

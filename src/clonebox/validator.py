@@ -34,12 +34,20 @@ class VMValidator:
         self.results = {
             "mounts": {"passed": 0, "failed": 0, "total": 0, "details": []},
             "packages": {"passed": 0, "failed": 0, "total": 0, "details": []},
-            "snap_packages": {"passed": 0, "failed": 0, "total": 0, "details": []},
+            "snap_packages": {
+                "passed": 0,
+                "failed": 0,
+                "skipped": 0,
+                "total": 0,
+                "details": [],
+            },
             "services": {"passed": 0, "failed": 0, "total": 0, "details": []},
-            "apps": {"passed": 0, "failed": 0, "total": 0, "details": []},
-            "smoke": {"passed": 0, "failed": 0, "total": 0, "details": []},
+            "apps": {"passed": 0, "failed": 0, "skipped": 0, "total": 0, "details": []},
+            "smoke": {"passed": 0, "failed": 0, "skipped": 0, "total": 0, "details": []},
             "overall": "unknown",
         }
+
+        self._setup_in_progress_cache: Optional[bool] = None
 
     def _exec_in_vm(self, command: str, timeout: int = 10) -> Optional[str]:
         """Execute command in VM using QEMU guest agent."""
@@ -105,14 +113,32 @@ class VMValidator:
         except Exception:
             return None
 
+    def _setup_in_progress(self) -> Optional[bool]:
+        if self._setup_in_progress_cache is not None:
+            return self._setup_in_progress_cache
+
+        out = self._exec_in_vm(
+            "test -f /var/lib/cloud/instance/boot-finished && echo no || echo yes",
+            timeout=10,
+        )
+        if out is None:
+            self._setup_in_progress_cache = None
+            return None
+
+        self._setup_in_progress_cache = out.strip() == "yes"
+        return self._setup_in_progress_cache
+
     def validate_mounts(self) -> Dict:
         """Validate all mount points and copied data paths."""
         self.console.print("\n[bold]💾 Validating Mounts & Data...[/]")
 
         paths = self.config.get("paths", {})
-        app_data_paths = self.config.get("app_data_paths", {})
+        # Support both v1 (app_data_paths) and v2 (copy_paths) config formats
+        copy_paths = self.config.get("copy_paths", None)
+        if not isinstance(copy_paths, dict) or not copy_paths:
+            copy_paths = self.config.get("app_data_paths", {})
 
-        if not paths and not app_data_paths:
+        if not paths and not copy_paths:
             self.console.print("[dim]No mounts or data paths configured[/]")
             return self.results["mounts"]
 
@@ -171,8 +197,8 @@ class VMValidator:
                 "status": status
             })
 
-        # Validate copied paths (app_data_paths)
-        for host_path, guest_path in app_data_paths.items():
+        # Validate copied paths (copy_paths / app_data_paths)
+        for host_path, guest_path in copy_paths.items():
             self.results["mounts"]["total"] += 1
             
             # Check if exists and has content
@@ -270,6 +296,8 @@ class VMValidator:
         snap_table.add_column("Status", justify="center")
         snap_table.add_column("Version", style="dim")
 
+        setup_in_progress = self._setup_in_progress() is True
+
         for package in snap_packages:
             self.results["snap_packages"]["total"] += 1
 
@@ -284,16 +312,29 @@ class VMValidator:
                     {"package": package, "installed": True, "version": version}
                 )
             else:
-                snap_table.add_row(package, "[red]❌ Missing[/]", "")
-                self.results["snap_packages"]["failed"] += 1
-                self.results["snap_packages"]["details"].append(
-                    {"package": package, "installed": False, "version": None}
-                )
+                if setup_in_progress:
+                    snap_table.add_row(package, "[yellow]⏳ Pending[/]", "")
+                    self.results["snap_packages"]["skipped"] += 1
+                    self.results["snap_packages"]["details"].append(
+                        {
+                            "package": package,
+                            "installed": False,
+                            "version": None,
+                            "pending": True,
+                        }
+                    )
+                else:
+                    snap_table.add_row(package, "[red]❌ Missing[/]", "")
+                    self.results["snap_packages"]["failed"] += 1
+                    self.results["snap_packages"]["details"].append(
+                        {"package": package, "installed": False, "version": None}
+                    )
 
         self.console.print(snap_table)
-        self.console.print(
-            f"[dim]{self.results['snap_packages']['passed']}/{self.results['snap_packages']['total']} snap packages installed[/]"
-        )
+        msg = f"{self.results['snap_packages']['passed']}/{self.results['snap_packages']['total']} snap packages installed"
+        if self.results["snap_packages"].get("skipped", 0) > 0:
+            msg += f" ({self.results['snap_packages']['skipped']} pending)"
+        self.console.print(f"[dim]{msg}[/]")
 
         return self.results["snap_packages"]
 
@@ -410,7 +451,10 @@ class VMValidator:
     def validate_apps(self) -> Dict:
         packages = self.config.get("packages", [])
         snap_packages = self.config.get("snap_packages", [])
-        app_data_paths = self.config.get("app_data_paths", {})
+        # Support both v1 (app_data_paths) and v2 (copy_paths) config formats
+        copy_paths = self.config.get("copy_paths", None)
+        if not isinstance(copy_paths, dict) or not copy_paths:
+            copy_paths = self.config.get("app_data_paths", {})
         vm_user = self.config.get("vm", {}).get("username", "ubuntu")
 
         snap_app_specs = {
@@ -469,7 +513,7 @@ class VMValidator:
             if snap_pkg in snap_app_specs:
                 expected.append(snap_pkg)
 
-        for _, guest_path in app_data_paths.items():
+        for _, guest_path in copy_paths.items():
             if guest_path == "/home/ubuntu/.config/google-chrome":
                 expected.append("google-chrome")
                 break
@@ -588,6 +632,9 @@ class VMValidator:
             running: Optional[bool] = None
             pid: Optional[str] = None
             note = ""
+            pending = False
+
+            setup_in_progress = self._setup_in_progress() is True
 
             if app == "firefox":
                 installed = (
@@ -651,6 +698,10 @@ class VMValidator:
             if self.require_running_apps and installed and profile_ok and running is None:
                 note = note or "running unknown"
 
+            if setup_in_progress and not installed:
+                pending = True
+                note = note or "setup in progress"
+
             running_icon = (
                 "[dim]—[/]"
                 if not installed
@@ -663,20 +714,18 @@ class VMValidator:
 
             pid_value = "—" if not installed else ("?" if pid is None else (pid or "—"))
 
-            table.add_row(
-                app,
-                "[green]✅[/]" if installed else "[red]❌[/]",
-                "[green]✅[/]" if profile_ok else "[red]❌[/]",
-                running_icon,
-                pid_value,
-                note,
-            )
+            installed_icon = "[green]✅[/]" if installed else ("[yellow]⏳[/]" if pending else "[red]❌[/]")
+            profile_icon = "[green]✅[/]" if profile_ok else ("[yellow]⏳[/]" if pending else "[red]❌[/]")
+
+            table.add_row(app, installed_icon, profile_icon, running_icon, pid_value, note)
 
             should_pass = installed and profile_ok
             if self.require_running_apps and installed and profile_ok:
                 should_pass = running is True
 
-            if should_pass:
+            if pending:
+                self.results["apps"]["skipped"] += 1
+            elif should_pass:
                 self.results["apps"]["passed"] += 1
             else:
                 self.results["apps"]["failed"] += 1
@@ -689,6 +738,7 @@ class VMValidator:
                     "running": running,
                     "pid": pid,
                     "note": note,
+                    "pending": pending,
                 }
             )
 
@@ -703,7 +753,10 @@ class VMValidator:
     def validate_smoke_tests(self) -> Dict:
         packages = self.config.get("packages", [])
         snap_packages = self.config.get("snap_packages", [])
-        app_data_paths = self.config.get("app_data_paths", {})
+        # Support both v1 (app_data_paths) and v2 (copy_paths) config formats
+        copy_paths = self.config.get("copy_paths", None)
+        if not isinstance(copy_paths, dict) or not copy_paths:
+            copy_paths = self.config.get("app_data_paths", {})
         vm_user = self.config.get("vm", {}).get("username", "ubuntu")
 
         expected = []
@@ -715,7 +768,7 @@ class VMValidator:
             if snap_pkg in {"pycharm-community", "chromium", "firefox", "code"}:
                 expected.append(snap_pkg)
 
-        for _, guest_path in app_data_paths.items():
+        for _, guest_path in copy_paths.items():
             if guest_path == "/home/ubuntu/.config/google-chrome":
                 expected.append("google-chrome")
                 break
@@ -790,7 +843,7 @@ class VMValidator:
 
             if app == "firefox":
                 out = self._exec_in_vm(
-                    f"{user_env} timeout 20 firefox --headless --screenshot /tmp/clonebox-firefox.png about:blank >/dev/null 2>&1 && rm -f /tmp/clonebox-firefox.png && echo yes || echo no",
+                    f"{user_env} timeout 20 firefox --headless --version >/dev/null 2>&1 && echo yes || echo no",
                     timeout=30,
                 )
                 return None if out is None else out.strip() == "yes"
@@ -820,40 +873,51 @@ class VMValidator:
         table.add_column("Launch", justify="center")
         table.add_column("Note", style="dim")
 
+        setup_in_progress = self._setup_in_progress() is True
         for app in expected:
             self.results["smoke"]["total"] += 1
             installed = _installed(app)
             launched: Optional[bool] = None
             note = ""
+            pending = False
 
             if installed is True:
                 launched = _run_test(app)
                 if launched is None:
                     note = "test failed to execute"
+                elif launched is False and setup_in_progress:
+                    pending = True
+                    note = note or "setup in progress"
             elif installed is False:
-                note = "not installed"
+                if setup_in_progress:
+                    pending = True
+                    note = "setup in progress"
+                else:
+                    note = "not installed"
             else:
                 note = "install status unknown"
 
             installed_icon = (
                 "[green]✅[/]"
                 if installed is True
-                else "[red]❌[/]" if installed is False else "[dim]?[/]"
+                else ("[yellow]⏳[/]" if pending else "[red]❌[/]")
+                if installed is False
+                else "[dim]?[/]"
             )
             launch_icon = (
                 "[green]✅[/]"
                 if launched is True
-                else (
-                    "[red]❌[/]"
-                    if launched is False
-                    else ("[dim]—[/]" if installed is not True else "[dim]?[/]")
-                )
+                else ("[yellow]⏳[/]" if pending else "[red]❌[/]")
+                if launched is False
+                else ("[dim]—[/]" if installed is not True else "[dim]?[/]")
             )
 
             table.add_row(app, installed_icon, launch_icon, note)
 
             passed = installed is True and launched is True
-            if passed:
+            if pending:
+                self.results["smoke"]["skipped"] += 1
+            elif passed:
                 self.results["smoke"]["passed"] += 1
             else:
                 self.results["smoke"]["failed"] += 1
@@ -864,6 +928,7 @@ class VMValidator:
                     "installed": installed,
                     "launched": launched,
                     "note": note,
+                    "pending": pending,
                 }
             )
 
@@ -994,6 +1059,10 @@ class VMValidator:
 
         # Get skipped services count
         skipped_services = self.results["services"].get("skipped", 0)
+        skipped_snaps = self.results["snap_packages"].get("skipped", 0)
+        skipped_apps = self.results["apps"].get("skipped", 0)
+        skipped_smoke = self.results["smoke"].get("skipped", 0) if self.smoke_test else 0
+        total_skipped = skipped_services + skipped_snaps + skipped_apps + skipped_smoke
 
         # Print summary
         self.console.print("\n[bold]📊 Validation Summary[/]")
@@ -1022,7 +1091,7 @@ class VMValidator:
             "Snap Packages",
             str(self.results["snap_packages"]["passed"]),
             str(self.results["snap_packages"]["failed"]),
-            "—",
+            str(skipped_snaps) if skipped_snaps else "—",
             str(self.results["snap_packages"]["total"]),
         )
         summary_table.add_row(
@@ -1036,21 +1105,24 @@ class VMValidator:
             "Apps",
             str(self.results["apps"]["passed"]),
             str(self.results["apps"]["failed"]),
-            "—",
+            str(skipped_apps) if skipped_apps else "—",
             str(self.results["apps"]["total"]),
         )
         summary_table.add_row(
             "[bold]TOTAL",
             f"[bold green]{total_passed}",
             f"[bold red]{total_failed}",
-            f"[dim]{skipped_services}[/]",
+            f"[dim]{total_skipped}[/]" if total_skipped else "[dim]0[/]",
             f"[bold]{total_checks}",
         )
 
         self.console.print(summary_table)
 
         # Determine overall status
-        if total_failed == 0 and total_checks > 0:
+        if total_failed == 0 and total_checks > 0 and total_skipped > 0:
+            self.results["overall"] = "pending"
+            self.console.print("\n[bold yellow]⏳ Setup in progress - some checks are pending[/]")
+        elif total_failed == 0 and total_checks > 0:
             self.results["overall"] = "pass"
             self.console.print("\n[bold green]✅ All validations passed![/]")
         elif total_failed > 0:

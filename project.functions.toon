@@ -1,6 +1,6 @@
 project: clonebox
-generated: "2026-02-01T17:10:53.898243"
-modules[63]{path,lang,items}:
+generated: "2026-02-01T19:37:25.370992"
+modules[64]{path,lang,items}:
   tests/test_orchestrator.py,python,19
   tests/conftest.py,python,17
   tests/test_profiles.py,python,5
@@ -20,6 +20,7 @@ modules[63]{path,lang,items}:
   tests/test_remote.py,python,37
   tests/test_detector.py,python,15
   tests/test_cli.py,python,27
+  scripts/fetch-logs.py,python,2
   tests/e2e/test_p2p_workflow.py,python,29
   tests/e2e/test_full_workflow.py,python,10
   tests/e2e/__init__.py,python,0
@@ -29,7 +30,7 @@ modules[63]{path,lang,items}:
   src/clonebox/dashboard.py,python,8
   src/clonebox/validator.py,python,10
   src/clonebox/p2p.py,python,8
-  src/clonebox/cli.py,python,72
+  src/clonebox/cli.py,python,75
   src/clonebox/importer.py,python,11
   src/clonebox/detector.py,python,13
   src/clonebox/exporter.py,python,11
@@ -55,7 +56,7 @@ modules[63]{path,lang,items}:
   src/clonebox/health/models.py,python,6
   src/clonebox/health/probes.py,python,7
   src/clonebox/plugins/base.py,python,36
-  src/clonebox/plugins/manager.py,python,21
+  src/clonebox/plugins/manager.py,python,23
   src/clonebox/plugins/__init__.py,python,0
   src/clonebox/snapshots/manager.py,python,15
   src/clonebox/snapshots/__init__.py,python,0
@@ -408,6 +409,10 @@ function_details:
       TestCLIIntegration.test_create_vm_from_config_propagates_disk_size,method,"(mock_cloner_class, tmp_path) -> None",371-397,false,27,1,checks create vm from config propagates disk size
       TestCLIParametrized.test_generate_yaml_custom_vm_names,method,"(vm_name, expected) -> None",411-430,false,20,1,Test YAML generation with various VM names.
       TestCLIParametrized.test_generate_yaml_services_count,method,"(services, expected_count) -> None",441-459,false,19,2,Test YAML generation with various service configurations.
+  scripts/fetch-logs.py:
+    functions[2]{name,kind,sig,loc,async,lines,cc,does}:
+      qga_exec,function,"(vm_name, conn_uri, command, timeout=10) -> None",10-62,false,53,8,Execute command via QEMU Guest Agent
+      main,function,() -> None,64-97,false,34,4,main
   tests/e2e/test_p2p_workflow.py:
     functions[29]{name,kind,sig,loc,async,lines,cc,does}:
       TestKeyGeneration.test_keygen_command,method,"(tmp_path, monkeypatch) -> None",29-41,false,13,1,Test clonebox keygen command creates key file.
@@ -511,7 +516,7 @@ function_details:
       P2PManager.list_remote_vms,method,"(host:str) -> list",167-181,false,15,4,List VMs on remote host.
       P2PManager.check_clonebox_installed,method,"(host:str) -> bool",183-186,false,4,1,Check if clonebox is installed on remote host.
   src/clonebox/cli.py:
-    functions[72]{name,kind,sig,loc,async,lines,cc,does}:
+    functions[75]{name,kind,sig,loc,async,lines,cc,does}:
       print_banner,function,() -> None,59-73,false,15,1,Print the CloneBox banner.
       _resolve_vm_name_and_config_file,function,"(name:Optional[str]) -> Tuple[str, Optional[Path]]",76-94,false,19,9,resolve vm name and config file
       _qga_ping,function,"(vm_name:str, conn_uri:str) -> bool",97-125,false,29,5,qga ping
@@ -519,71 +524,74 @@ function_details:
       run_vm_diagnostics,function,"(vm_name:str, conn_uri:str, config_file:Optional[Path]) -> dict",199-479,false,281,59,starts vm diagnostics
       cmd_watch,function,(args) -> None,482-562,false,81,21,cmd watch
       cmd_repair,function,(args) -> None,565-602,false,38,7,cmd repair
-      cmd_logs,function,(args) -> None,605-638,false,34,6,View logs from VM.
-      interactive_mode,function,() -> None,641-938,false,298,51,Run the interactive VM creation wizard.
-      cmd_create,function,(args) -> None,941-963,false,23,2,Create VM from JSON config.
-      cmd_start,function,(args) -> None,966-1032,false,67,15,Start a VM or create from .clonebox.yaml.
-      cmd_open,function,(args) -> None,1035-1097,false,63,16,Open VM viewer window.
-      cmd_stop,function,(args) -> None,1100-1116,false,17,7,Stop a VM.
-      cmd_restart,function,(args) -> None,1119-1149,false,31,8,Restart a VM (stop and start).
-      cmd_delete,function,(args) -> None,1152-1172,false,21,9,Delete a VM.
-      cmd_list,function,(args) -> None,1175-1197,false,23,5,List all VMs.
-      cmd_container_up,function,(args) -> None,1200-1231,false,32,10,Start a container sandbox.
-      cmd_container_ps,function,(args) -> None,1234-1261,false,28,4,List containers.
-      cmd_container_stop,function,(args) -> None,1264-1267,false,4,1,Stop a container.
-      cmd_container_rm,function,(args) -> None,1270-1273,false,4,1,Remove a container.
-      cmd_container_down,function,(args) -> None,1276-1280,false,5,1,Stop and remove a container.
-      cmd_dashboard,function,(args) -> None,1283-1293,false,11,2,Run the local CloneBox dashboard.
-      cmd_diagnose,function,(args) -> None,1296-1314,false,19,3,Run detailed VM diagnostics (standalone).
-      cmd_status,function,(args) -> None,1317-1367,false,51,5,Check VM installation status and health from workstation.
-      cmd_export,function,(args) -> None,1370-1558,false,189,38,Export VM and data for migration to another workstation.
-      cmd_import,function,(args) -> None,1561-1703,false,143,23,Import VM from export archive.
-      cmd_test,function,(args) -> None,1706-1992,false,287,68,Test VM configuration and health.
-      load_env_file,function,"(env_path:Path) -> dict",1999-2014,false,16,6,Load environment variables from .env file.
-      expand_env_vars,function,"(value, env_vars:dict) -> None",2017-2030,false,14,6,"Expand environment variables in string values like ${VAR_NAME}."
-      _find_unexpanded_env_placeholders,function,(value) -> set,2033-2046,false,14,6,retrieves unexpanded env placeholders
-      deduplicate_list,function,"(items:list, key=None) -> list",2049-2058,false,10,4,"Remove duplicates from list, preserving order."
-      generate_clonebox_yaml,function,"(snapshot, detector, deduplicate:bool=True, target_path:str=None, vm_name:str=None, network_mode:str='auto', base_image:Optional[str]=None, disk_size_gb:Optional[int]=None) -> str",2061-2283,false,223,47,Generate YAML config from system snapshot.
-      load_clonebox_config,function,"(path:Path) -> dict",2286-2313,false,28,4,Load .clonebox.yaml config file and expand environment variables from .env.
-      monitor_cloud_init_status,function,"(vm_name:str, user_session:bool=False, timeout:int=900) -> None",2316-2412,false,97,19,Monitor cloud-init status in VM and show progress.
-      create_vm_from_config,function,"(config:dict, start:bool=False, user_session:bool=False, replace:bool=False) -> str",2415-2479,false,65,9,Create VM from YAML config dict.
-      cmd_clone,function,(args) -> None,2482-2659,false,178,27,Generate clone config from path and optionally create VM.
-      cmd_detect,function,(args) -> None,2662-2746,false,85,18,Detect and show system state.
-      cmd_monitor,function,(args) -> None,2749-2840,false,92,17,Real-time resource monitoring for VMs and containers.
-      cmd_exec,function,(args) -> None,2843-2926,false,84,23,Execute command in VM via QEMU Guest Agent.
-      cmd_snapshot_create,function,(args) -> None,2929-2951,false,23,4,Create VM snapshot.
-      cmd_snapshot_list,function,(args) -> None,2954-2985,false,32,6,List VM snapshots.
-      cmd_snapshot_restore,function,(args) -> None,2988-3002,false,15,3,Restore VM to snapshot.
-      cmd_snapshot_delete,function,(args) -> None,3005-3019,false,15,3,Delete VM snapshot.
-      cmd_health,function,(args) -> None,3022-3074,false,53,11,Run health checks for VM.
-      cmd_keygen,function,(args) -> None,3077-3081,false,5,1,Generate encryption key for secure P2P transfers.
-      cmd_export_encrypted,function,(args) -> None,3084-3105,false,22,4,Export VM with AES-256 encryption.
-      cmd_import_encrypted,function,(args) -> None,3108-3127,false,20,3,Import VM with AES-256 decryption.
-      cmd_export_remote,function,(args) -> None,3130-3148,false,19,2,Export VM from remote host.
-      cmd_import_remote,function,(args) -> None,3151-3168,false,18,2,Import VM to remote host.
-      cmd_sync_key,function,(args) -> None,3171-3181,false,11,2,Sync encryption key to remote host.
-      cmd_list_remote,function,(args) -> None,3184-3195,false,12,3,List VMs on remote host.
-      cmd_audit_list,function,(args) -> None,3201-3265,false,65,12,List audit events.
-      cmd_audit_show,function,(args) -> None,3268-3278,false,11,3,Show audit event details.
-      cmd_audit_failures,function,(args) -> None,3281-3304,false,24,5,Show recent failures.
-      cmd_audit_search,function,(args) -> None,3307-3362,false,56,16,Search audit events.
-      cmd_audit_export,function,(args) -> None,3365-3402,false,38,8,Export audit events to file.
-      cmd_compose_up,function,(args) -> None,3408-3435,false,28,9,Start VMs from compose file.
-      cmd_compose_down,function,(args) -> None,3438-3464,false,27,9,Stop VMs from compose file.
-      cmd_compose_status,function,(args) -> None,3467-3517,false,51,9,Show status of VMs from compose file.
-      cmd_compose_logs,function,(args) -> None,3520-3553,false,34,9,Show aggregated logs from VMs.
-      cmd_plugin_list,function,(args) -> None,3559-3591,false,33,7,List installed plugins.
-      cmd_plugin_enable,function,(args) -> None,3594-3602,false,9,2,Enable a plugin.
-      cmd_plugin_disable,function,(args) -> None,3605-3613,false,9,2,Disable a plugin.
-      cmd_plugin_discover,function,(args) -> None,3616-3630,false,15,4,Discover available plugins.
-      cmd_remote_list,function,(args) -> None,3636-3670,false,35,6,List VMs on remote host.
-      cmd_remote_status,function,(args) -> None,3673-3692,false,20,4,Get VM status on remote host.
-      cmd_remote_start,function,(args) -> None,3695-3709,false,15,2,Start VM on remote host.
-      cmd_remote_stop,function,(args) -> None,3712-3727,false,16,2,Stop VM on remote host.
-      cmd_remote_delete,function,(args) -> None,3730-3755,false,26,4,Delete VM on remote host.
-      cmd_remote_exec,function,(args) -> None,3758-3772,false,15,3,Execute command in VM on remote host.
-      cmd_remote_health,function,(args) -> None,3775-3796,false,22,4,Run health check on remote VM.
-      main,function,() -> None,3799-4544,false,746,4,Main entry point.
+      cmd_logs,function,(args) -> None,605-639,false,35,7,View logs from VM.
+      cmd_set_password,function,(args) -> None,642-674,false,33,6,Set password for VM user.
+      interactive_mode,function,() -> None,677-974,false,298,51,Run the interactive VM creation wizard.
+      cmd_create,function,(args) -> None,977-999,false,23,2,Create VM from JSON config.
+      cmd_start,function,(args) -> None,1002-1068,false,67,15,Start a VM or create from .clonebox.yaml.
+      cmd_open,function,(args) -> None,1071-1133,false,63,16,Open VM viewer window.
+      cmd_stop,function,(args) -> None,1136-1152,false,17,7,Stop a VM.
+      cmd_restart,function,(args) -> None,1155-1185,false,31,8,Restart a VM (stop and start).
+      cmd_delete,function,(args) -> None,1188-1208,false,21,9,Delete a VM.
+      cmd_list,function,(args) -> None,1211-1233,false,23,5,List all VMs.
+      cmd_container_up,function,(args) -> None,1236-1267,false,32,10,Start a container sandbox.
+      cmd_container_ps,function,(args) -> None,1270-1297,false,28,4,List containers.
+      cmd_container_stop,function,(args) -> None,1300-1303,false,4,1,Stop a container.
+      cmd_container_rm,function,(args) -> None,1306-1309,false,4,1,Remove a container.
+      cmd_container_down,function,(args) -> None,1312-1316,false,5,1,Stop and remove a container.
+      cmd_dashboard,function,(args) -> None,1319-1329,false,11,2,Run the local CloneBox dashboard.
+      cmd_diagnose,function,(args) -> None,1332-1350,false,19,3,Run detailed VM diagnostics (standalone).
+      cmd_status,function,(args) -> None,1353-1403,false,51,5,Check VM installation status and health from workstation.
+      cmd_export,function,(args) -> None,1406-1594,false,189,38,Export VM and data for migration to another workstation.
+      cmd_import,function,(args) -> None,1597-1739,false,143,23,Import VM from export archive.
+      cmd_test,function,(args) -> None,1742-2028,false,287,68,Test VM configuration and health.
+      load_env_file,function,"(env_path:Path) -> dict",2035-2050,false,16,6,Load environment variables from .env file.
+      expand_env_vars,function,"(value, env_vars:dict) -> None",2053-2066,false,14,6,"Expand environment variables in string values like ${VAR_NAME}."
+      _find_unexpanded_env_placeholders,function,(value) -> set,2069-2082,false,14,6,retrieves unexpanded env placeholders
+      deduplicate_list,function,"(items:list, key=None) -> list",2085-2094,false,10,4,"Remove duplicates from list, preserving order."
+      generate_clonebox_yaml,function,"(snapshot, detector, deduplicate:bool=True, target_path:str=None, vm_name:str=None, network_mode:str='auto', base_image:Optional[str]=None, disk_size_gb:Optional[int]=None) -> str",2097-2319,false,223,47,Generate YAML config from system snapshot.
+      load_clonebox_config,function,"(path:Path) -> dict",2322-2349,false,28,4,Load .clonebox.yaml config file and expand environment variables from .env.
+      monitor_cloud_init_status,function,"(vm_name:str, user_session:bool=False, timeout:int=900) -> None",2352-2448,false,97,19,Monitor cloud-init status in VM and show progress.
+      create_vm_from_config,function,"(config:dict, start:bool=False, user_session:bool=False, replace:bool=False) -> str",2451-2515,false,65,9,Create VM from YAML config dict.
+      cmd_clone,function,(args) -> None,2518-2695,false,178,27,Generate clone config from path and optionally create VM.
+      cmd_detect,function,(args) -> None,2698-2782,false,85,18,Detect and show system state.
+      cmd_monitor,function,(args) -> None,2785-2876,false,92,17,Real-time resource monitoring for VMs and containers.
+      cmd_exec,function,(args) -> None,2879-2962,false,84,23,Execute command in VM via QEMU Guest Agent.
+      cmd_snapshot_create,function,(args) -> None,2965-2987,false,23,4,Create VM snapshot.
+      cmd_snapshot_list,function,(args) -> None,2990-3021,false,32,6,List VM snapshots.
+      cmd_snapshot_restore,function,(args) -> None,3024-3038,false,15,3,Restore VM to snapshot.
+      cmd_snapshot_delete,function,(args) -> None,3041-3055,false,15,3,Delete VM snapshot.
+      cmd_health,function,(args) -> None,3058-3110,false,53,11,Run health checks for VM.
+      cmd_keygen,function,(args) -> None,3113-3117,false,5,1,Generate encryption key for secure P2P transfers.
+      cmd_export_encrypted,function,(args) -> None,3120-3141,false,22,4,Export VM with AES-256 encryption.
+      cmd_import_encrypted,function,(args) -> None,3144-3163,false,20,3,Import VM with AES-256 decryption.
+      cmd_export_remote,function,(args) -> None,3166-3184,false,19,2,Export VM from remote host.
+      cmd_import_remote,function,(args) -> None,3187-3204,false,18,2,Import VM to remote host.
+      cmd_sync_key,function,(args) -> None,3207-3217,false,11,2,Sync encryption key to remote host.
+      cmd_list_remote,function,(args) -> None,3220-3231,false,12,3,List VMs on remote host.
+      cmd_audit_list,function,(args) -> None,3237-3301,false,65,12,List audit events.
+      cmd_audit_show,function,(args) -> None,3304-3314,false,11,3,Show audit event details.
+      cmd_audit_failures,function,(args) -> None,3317-3340,false,24,5,Show recent failures.
+      cmd_audit_search,function,(args) -> None,3343-3398,false,56,16,Search audit events.
+      cmd_audit_export,function,(args) -> None,3401-3438,false,38,8,Export audit events to file.
+      cmd_compose_up,function,(args) -> None,3444-3471,false,28,9,Start VMs from compose file.
+      cmd_compose_down,function,(args) -> None,3474-3500,false,27,9,Stop VMs from compose file.
+      cmd_compose_status,function,(args) -> None,3503-3553,false,51,9,Show status of VMs from compose file.
+      cmd_compose_logs,function,(args) -> None,3556-3589,false,34,9,Show aggregated logs from VMs.
+      cmd_plugin_list,function,(args) -> None,3595-3627,false,33,7,List installed plugins.
+      cmd_plugin_enable,function,(args) -> None,3630-3638,false,9,2,Enable a plugin.
+      cmd_plugin_disable,function,(args) -> None,3641-3649,false,9,2,Disable a plugin.
+      cmd_plugin_discover,function,(args) -> None,3652-3666,false,15,4,Discover available plugins.
+      cmd_plugin_install,function,(args) -> None,3669-3680,false,12,2,Install a plugin.
+      cmd_plugin_uninstall,function,(args) -> None,3683-3693,false,11,2,Uninstall a plugin.
+      cmd_remote_list,function,(args) -> None,3699-3733,false,35,6,List VMs on remote host.
+      cmd_remote_status,function,(args) -> None,3736-3755,false,20,4,Get VM status on remote host.
+      cmd_remote_start,function,(args) -> None,3758-3772,false,15,2,Start VM on remote host.
+      cmd_remote_stop,function,(args) -> None,3775-3790,false,16,2,Stop VM on remote host.
+      cmd_remote_delete,function,(args) -> None,3793-3818,false,26,4,Delete VM on remote host.
+      cmd_remote_exec,function,(args) -> None,3821-3835,false,15,3,Execute command in VM on remote host.
+      cmd_remote_health,function,(args) -> None,3838-3859,false,22,4,Run health check on remote VM.
+      main,function,() -> None,3862-4633,false,772,4,Main entry point.
   src/clonebox/importer.py:
     functions[11]{name,kind,sig,loc,async,lines,cc,does}:
       VMImporter.__init__,method,"(conn_uri:str='qemu:///system') -> None",27-29,false,3,1,creates
@@ -719,14 +727,14 @@ function_details:
       SelectiveVMCloner._generate_vm_xml,method,"(config:VMConfig=None, root_disk:Path=None, cloudinit_iso:Optional[Path]=None) -> str",495-689,false,195,37,Generate libvirt XML for the VM.
       SelectiveVMCloner._generate_boot_diagnostic_script,method,"(config:VMConfig) -> str",691-1069,false,379,17,Generate boot diagnostic script with self-healing capabilities.
       SelectiveVMCloner._generate_health_check_script,method,"(config:VMConfig) -> str",1071-1274,false,204,9,Generate a health check script that validates all installed components.
-      SelectiveVMCloner._create_cloudinit_iso,method,"(vm_dir:Path, config:VMConfig, user_session:bool=False) -> Path",1276-2399,false,1124,73,Create cloud-init ISO with secure credential handling.
-      SelectiveVMCloner.start_vm,method,"(vm_name:str, open_viewer:bool=True, console=None) -> bool",2401-2431,false,31,4,Start a VM and optionally open virt-viewer.
-      SelectiveVMCloner.stop_vm,method,"(vm_name:str, force:bool=False, console=None) -> bool",2433-2484,false,52,9,Stop a VM.
-      SelectiveVMCloner.delete_vm,method,"(vm_name:str, delete_storage:bool=True, console=None, ignore_not_found:bool=False) -> bool",2486-2524,false,39,5,Delete a VM and optionally its storage.
-      SelectiveVMCloner.list_vms,method,() -> list,2526-2537,false,12,3,List all VMs.
-      SelectiveVMCloner.close,method,() -> None,2539-2542,false,4,2,Close libvirt connection.
-      SelectiveVMCloner._get_base_image_info,method,"(image_path:str) -> dict",2545-2550,false,6,2,Get base image information - backward compatibility shim.
-      SelectiveVMCloner.get_vm_info,method,"(vm_name:str) -> dict",2552-2565,false,14,4,Get VM information - backward compatibility shim.
+      SelectiveVMCloner._create_cloudinit_iso,method,"(vm_dir:Path, config:VMConfig, user_session:bool=False) -> Path",1276-2400,false,1125,73,Create cloud-init ISO with secure credential handling.
+      SelectiveVMCloner.start_vm,method,"(vm_name:str, open_viewer:bool=True, console=None) -> bool",2402-2432,false,31,4,Start a VM and optionally open virt-viewer.
+      SelectiveVMCloner.stop_vm,method,"(vm_name:str, force:bool=False, console=None) -> bool",2434-2485,false,52,9,Stop a VM.
+      SelectiveVMCloner.delete_vm,method,"(vm_name:str, delete_storage:bool=True, console=None, ignore_not_found:bool=False) -> bool",2487-2525,false,39,5,Delete a VM and optionally its storage.
+      SelectiveVMCloner.list_vms,method,() -> list,2527-2538,false,12,3,List all VMs.
+      SelectiveVMCloner.close,method,() -> None,2540-2543,false,4,2,Close libvirt connection.
+      SelectiveVMCloner._get_base_image_info,method,"(image_path:str) -> dict",2546-2551,false,6,2,Get base image information - backward compatibility shim.
+      SelectiveVMCloner.get_vm_info,method,"(vm_name:str) -> dict",2553-2566,false,14,4,Get VM information - backward compatibility shim.
   src/clonebox/rollback.py:
     functions[9]{name,kind,sig,loc,async,lines,cc,does}:
       vm_creation_transaction,function,"(cloner:Any, config:Any, console:Optional[Any]=None) -> None",147-172,false,26,3,Context manager for VM creation with automatic rollback.
@@ -921,10 +929,10 @@ function_details:
       Plugin.on_shutdown,method,"(ctx:PluginContext) -> None",281-283,false,3,1,Called on CloneBox shutdown.
       Plugin.handle_hook,method,"(hook:PluginHook, ctx:PluginContext) -> None",285-319,false,35,2,Dispatch hook to appropriate handler method.
   src/clonebox/plugins/manager.py:
-    functions[21]{name,kind,sig,loc,async,lines,cc,does}:
-      get_plugin_manager,function,() -> PluginManager,416-421,false,6,2,Get the global plugin manager.
-      set_plugin_manager,function,"(manager:PluginManager) -> None",424-427,false,4,1,Set the global plugin manager (useful for testing).
-      trigger_hook,function,"(hook:PluginHook) -> PluginContext",430-438,false,9,1,Convenience function to trigger a hook.
+    functions[23]{name,kind,sig,loc,async,lines,cc,does}:
+      get_plugin_manager,function,() -> PluginManager,501-506,false,6,2,Get the global plugin manager.
+      set_plugin_manager,function,"(manager:PluginManager) -> None",509-512,false,4,1,Set the global plugin manager (useful for testing).
+      trigger_hook,function,"(hook:PluginHook) -> PluginContext",515-523,false,9,1,Convenience function to trigger a hook.
       PluginManager.__init__,method,"(plugin_dirs:Optional[List[Path]]=None, config_path:Optional[Path]=None) -> None",52-67,false,16,4,creates
       PluginManager._load_config,method,"() -> Dict[str, Any]",69-77,false,9,4,Load plugin configuration.
       PluginManager._save_config,method,() -> None,79-83,false,5,1,Save plugin configuration.
@@ -940,9 +948,11 @@ function_details:
       PluginManager.trigger,method,"(hook:PluginHook, ctx:PluginContext) -> PluginContext",329-353,false,25,6,Trigger a hook on all registered plugins.
       PluginManager.enable,method,"(plugin_name:str) -> bool",355-371,false,17,2,Enable a plugin.
       PluginManager.disable,method,"(plugin_name:str) -> bool",373-389,false,17,2,Disable a plugin.
-      PluginManager.list_plugins,method,"() -> List[Dict[str, Any]]",391-400,false,10,2,List all loaded plugins.
-      PluginManager.get_plugin,method,"(name:str) -> Optional[Plugin]",402-405,false,4,2,Get a loaded plugin by name.
-      PluginManager.has_plugin,method,"(name:str) -> bool",407-409,false,3,1,Check if a plugin is loaded.
+      PluginManager.install,method,"(source:str) -> bool",391-433,false,43,7,Install a plugin from a source.
+      PluginManager.uninstall,method,"(name:str) -> bool",435-474,false,40,7,Uninstall a plugin.
+      PluginManager.list_plugins,method,"() -> List[Dict[str, Any]]",476-485,false,10,2,List all loaded plugins.
+      PluginManager.get_plugin,method,"(name:str) -> Optional[Plugin]",487-490,false,4,2,Get a loaded plugin by name.
+      PluginManager.has_plugin,method,"(name:str) -> bool",492-494,false,3,1,Check if a plugin is loaded.
   src/clonebox/snapshots/manager.py:
     functions[15]{name,kind,sig,loc,async,lines,cc,does}:
       SnapshotManager.__init__,method,"(conn_uri:str='qemu:///session') -> None",21-25,false,5,1,creates

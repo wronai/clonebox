@@ -1,3 +1,29 @@
+## [1.1.15] - 2026-02-01
+
+### Summary
+
+feat(goal): CLI interface improvements
+
+### Core
+
+- update src/clonebox/cli.py
+- update src/clonebox/validator.py
+
+### Docs
+
+- docs: update QUICK_REFERENCE.md
+
+### Test
+
+- update tests/e2e/test_v2_features.py
+- update tests/test_cli_new_commands.py
+
+### Other
+
+- update project.functions.toon
+- update project.toon
+
+
 ## [1.1.14] - 2026-02-01
 
 ### Summary
