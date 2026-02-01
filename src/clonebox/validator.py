@@ -897,6 +897,23 @@ class VMValidator:
             self.results["overall"] = "qga_not_ready"
             return self.results
 
+        ci_status = self._exec_in_vm("cloud-init status --long 2>/dev/null || cloud-init status 2>/dev/null || true", timeout=20)
+        if ci_status:
+            ci_lower = ci_status.lower()
+            if "running" in ci_lower:
+                self.console.print("[yellow]⏳ Cloud-init still running - skipping deep validation for now[/]")
+                self.results["overall"] = "cloud_init_running"
+                return self.results
+
+        ready_msg = self._exec_in_vm(
+            "cat /var/log/clonebox-ready 2>/dev/null || true",
+            timeout=10,
+        )
+        if not (ready_msg and "clonebox vm ready" in ready_msg.lower()):
+            self.console.print(
+                "[yellow]⚠️  CloneBox ready marker not found - provisioning may not have completed[/]"
+            )
+
         # Run all validations
         self.validate_mounts()
         self.validate_packages()
