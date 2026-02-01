@@ -42,6 +42,7 @@ class VMValidator:
                 "details": [],
             },
             "services": {"passed": 0, "failed": 0, "total": 0, "details": []},
+            "disk": {"usage_pct": 0, "avail": "0", "total": "0"},
             "apps": {"passed": 0, "failed": 0, "skipped": 0, "total": 0, "details": []},
             "smoke": {"passed": 0, "failed": 0, "skipped": 0, "total": 0, "details": []},
             "overall": "unknown",
@@ -718,6 +719,9 @@ class VMValidator:
             if setup_in_progress and not installed:
                 pending = True
                 note = note or "setup in progress"
+            elif setup_in_progress and not profile_ok:
+                pending = True
+                note = note or "profile import in progress"
 
             running_icon = (
                 "[dim]—[/]"
@@ -1180,8 +1184,10 @@ class VMValidator:
                 )
 
         # Calculate overall status
+        disk_failed = 1 if self.results.get("disk", {}).get("usage_pct", 0) > 95 else 0
         total_checks = (
-            self.results["mounts"]["total"]
+            1 # Disk space check
+            + self.results["mounts"]["total"]
             + self.results["packages"]["total"]
             + self.results["snap_packages"]["total"]
             + self.results["services"]["total"]
@@ -1190,7 +1196,8 @@ class VMValidator:
         )
 
         total_passed = (
-            self.results["mounts"]["passed"]
+            (1 - disk_failed)
+            + self.results["mounts"]["passed"]
             + self.results["packages"]["passed"]
             + self.results["snap_packages"]["passed"]
             + self.results["services"]["passed"]
@@ -1199,7 +1206,8 @@ class VMValidator:
         )
 
         total_failed = (
-            self.results["mounts"]["failed"]
+            disk_failed
+            + self.results["mounts"]["failed"]
             + self.results["packages"]["failed"]
             + self.results["snap_packages"]["failed"]
             + self.results["services"]["failed"]
@@ -1223,13 +1231,18 @@ class VMValidator:
         summary_table.add_column("Skipped", justify="right", style="dim")
         summary_table.add_column("Total", justify="right")
 
+        # Add Disk Space row
+        disk_usage = self.results.get("disk", {}).get("usage_pct", 0)
+        disk_total = self.results.get("disk", {}).get("total", "?")
+        
         summary_table.add_row(
             "Disk Space",
-            "[green]OK[/]" if self.results.get("disk", {}).get("usage_pct", 0) <= 90 else "[red]FULL[/]",
-            str(self.results.get("disk", {}).get("usage_pct", "?")) + "%",
+            "[green]OK[/]" if disk_usage <= 90 else "—",
+            f"[red]{disk_usage}%[/]" if disk_usage > 90 else "—",
             "—",
-            str(self.results.get("disk", {}).get("total", "?")),
+            f"{disk_usage}% of {disk_total}",
         )
+        
         summary_table.add_row(
             "Mounts",
             str(self.results["mounts"]["passed"]),

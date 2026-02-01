@@ -1,5 +1,5 @@
 project: clonebox
-generated: "2026-02-01T21:26:21.950074"
+generated: "2026-02-01T21:51:16.198318"
 modules[65]{path,lang,items}:
   tests/test_orchestrator.py,python,19
   tests/conftest.py,python,17
@@ -538,19 +538,19 @@ function_details:
       run_dashboard,function,"(port:int=8080) -> None",164-167,false,4,1,starts dashboard
   src/clonebox/validator.py:
     functions[13]{name,kind,sig,loc,async,lines,cc,does}:
-      VMValidator.__init__,method,"(config:dict, vm_name:str, conn_uri:str, console:Console=None, require_running_apps:bool=False, smoke_test:bool=False) -> None",19-50,false,32,2,creates
-      VMValidator._exec_in_vm,method,"(command:str, timeout:int=10) -> Optional[str]",52-113,false,62,10,Execute command in VM using QEMU guest agent.
-      VMValidator._setup_in_progress,method,"() -> Optional[bool]",115-128,false,14,3,initializes in progress
-      VMValidator.validate_mounts,method,() -> Dict,130-248,false,119,24,Validate all mount points and copied data paths.
-      VMValidator.validate_packages,method,() -> Dict,250-297,false,48,5,Validate APT packages are installed.
-      VMValidator.validate_snap_packages,method,() -> Dict,299-353,false,55,6,Validate snap packages are installed.
-      VMValidator.validate_services,method,() -> Dict,380-466,false,87,17,Validate services are enabled and running.
-      VMValidator.validate_apps,method,() -> Dict,468-768,false,301,53,validates apps
-      VMValidator.validate_smoke_tests,method,() -> Dict,770-953,false,184,30,validates smoke tests
-      VMValidator._check_qga_ready,method,() -> bool,955-973,false,19,2,Check if QEMU guest agent is responding.
-      VMValidator.validate_disk_space,method,() -> Dict,975-1014,false,40,6,Validate disk space on root filesystem.
-      VMValidator._print_disk_usage_breakdown,method,() -> None,1016-1105,false,90,16,logs disk usage breakdown
-      VMValidator.validate_all,method,() -> Dict,1107-1288,false,182,25,Run all validations and return comprehensive results.
+      VMValidator.__init__,method,"(config:dict, vm_name:str, conn_uri:str, console:Console=None, require_running_apps:bool=False, smoke_test:bool=False) -> None",19-51,false,33,2,creates
+      VMValidator._exec_in_vm,method,"(command:str, timeout:int=10) -> Optional[str]",53-114,false,62,10,Execute command in VM using QEMU guest agent.
+      VMValidator._setup_in_progress,method,"() -> Optional[bool]",116-129,false,14,3,initializes in progress
+      VMValidator.validate_mounts,method,() -> Dict,131-249,false,119,24,Validate all mount points and copied data paths.
+      VMValidator.validate_packages,method,() -> Dict,251-298,false,48,5,Validate APT packages are installed.
+      VMValidator.validate_snap_packages,method,() -> Dict,300-354,false,55,6,Validate snap packages are installed.
+      VMValidator.validate_services,method,() -> Dict,381-467,false,87,17,Validate services are enabled and running.
+      VMValidator.validate_apps,method,() -> Dict,469-772,false,304,56,validates apps
+      VMValidator.validate_smoke_tests,method,() -> Dict,774-957,false,184,30,validates smoke tests
+      VMValidator._check_qga_ready,method,() -> bool,959-977,false,19,2,Check if QEMU guest agent is responding.
+      VMValidator.validate_disk_space,method,() -> Dict,979-1018,false,40,6,Validate disk space on root filesystem.
+      VMValidator._print_disk_usage_breakdown,method,() -> None,1020-1109,false,90,16,logs disk usage breakdown
+      VMValidator.validate_all,method,() -> Dict,1111-1308,false,198,28,Run all validations and return comprehensive results.
   src/clonebox/p2p.py:
     functions[8]{name,kind,sig,loc,async,lines,cc,does}:
       P2PManager.__init__,method,"(ssh_options:Optional[list]=None) -> None",15-21,false,7,2,creates
@@ -590,55 +590,55 @@ function_details:
       cmd_status,function,(args) -> None,1353-1403,false,51,5,Check VM installation status and health from workstation.
       cmd_export,function,(args) -> None,1406-1594,false,189,38,Export VM and data for migration to another workstation.
       cmd_import,function,(args) -> None,1597-1739,false,143,23,Import VM from export archive.
-      cmd_test,function,(args) -> None,1742-2034,false,293,70,Test VM configuration and health.
-      load_env_file,function,"(env_path:Path) -> dict",2041-2056,false,16,6,Load environment variables from .env file.
-      expand_env_vars,function,"(value, env_vars:dict) -> None",2059-2072,false,14,6,"Expand environment variables in string values like ${VAR_NAME}."
-      _find_unexpanded_env_placeholders,function,(value) -> set,2075-2088,false,14,6,retrieves unexpanded env placeholders
-      deduplicate_list,function,"(items:list, key=None) -> list",2091-2100,false,10,4,"Remove duplicates from list, preserving order."
-      generate_clonebox_yaml,function,"(snapshot, detector, deduplicate:bool=True, target_path:str=None, vm_name:str=None, network_mode:str='auto', base_image:Optional[str]=None, disk_size_gb:Optional[int]=None) -> str",2103-2325,false,223,47,Generate YAML config from system snapshot.
-      load_clonebox_config,function,"(path:Path) -> dict",2328-2355,false,28,4,Load .clonebox.yaml config file and expand environment variables from .env.
-      _exec_in_vm_qga,function,"(vm_name:str, conn_uri:str, command:str) -> Optional[str]",2358-2417,false,60,8,Internal helper to execute command via QGA and get output.
-      monitor_cloud_init_status,function,"(vm_name:str, user_session:bool=False, timeout:int=900) -> None",2420-2547,false,128,28,Monitor cloud-init status in VM and show progress.
-      create_vm_from_config,function,"(config:dict, start:bool=False, user_session:bool=False, replace:bool=False) -> str",2550-2636,false,87,19,Create VM from YAML config dict.
-      cmd_clone,function,(args) -> None,2639-2816,false,178,27,Generate clone config from path and optionally create VM.
-      cmd_detect,function,(args) -> None,2819-2903,false,85,18,Detect and show system state.
-      cmd_monitor,function,(args) -> None,2906-2997,false,92,17,Real-time resource monitoring for VMs and containers.
-      cmd_exec,function,(args) -> None,3000-3083,false,84,23,Execute command in VM via QEMU Guest Agent.
-      cmd_snapshot_create,function,(args) -> None,3086-3108,false,23,4,Create VM snapshot.
-      cmd_snapshot_list,function,(args) -> None,3111-3142,false,32,6,List VM snapshots.
-      cmd_snapshot_restore,function,(args) -> None,3145-3159,false,15,3,Restore VM to snapshot.
-      cmd_snapshot_delete,function,(args) -> None,3162-3176,false,15,3,Delete VM snapshot.
-      cmd_health,function,(args) -> None,3179-3231,false,53,11,Run health checks for VM.
-      cmd_keygen,function,(args) -> None,3234-3238,false,5,1,Generate encryption key for secure P2P transfers.
-      cmd_export_encrypted,function,(args) -> None,3241-3262,false,22,4,Export VM with AES-256 encryption.
-      cmd_import_encrypted,function,(args) -> None,3265-3284,false,20,3,Import VM with AES-256 decryption.
-      cmd_export_remote,function,(args) -> None,3287-3305,false,19,2,Export VM from remote host.
-      cmd_import_remote,function,(args) -> None,3308-3325,false,18,2,Import VM to remote host.
-      cmd_sync_key,function,(args) -> None,3328-3338,false,11,2,Sync encryption key to remote host.
-      cmd_list_remote,function,(args) -> None,3341-3352,false,12,3,List VMs on remote host.
-      cmd_audit_list,function,(args) -> None,3358-3422,false,65,12,List audit events.
-      cmd_audit_show,function,(args) -> None,3425-3435,false,11,3,Show audit event details.
-      cmd_audit_failures,function,(args) -> None,3438-3461,false,24,5,Show recent failures.
-      cmd_audit_search,function,(args) -> None,3464-3519,false,56,16,Search audit events.
-      cmd_audit_export,function,(args) -> None,3522-3559,false,38,8,Export audit events to file.
-      cmd_compose_up,function,(args) -> None,3565-3592,false,28,9,Start VMs from compose file.
-      cmd_compose_down,function,(args) -> None,3595-3621,false,27,9,Stop VMs from compose file.
-      cmd_compose_status,function,(args) -> None,3624-3674,false,51,9,Show status of VMs from compose file.
-      cmd_compose_logs,function,(args) -> None,3677-3710,false,34,9,Show aggregated logs from VMs.
-      cmd_plugin_list,function,(args) -> None,3716-3748,false,33,7,List installed plugins.
-      cmd_plugin_enable,function,(args) -> None,3751-3759,false,9,2,Enable a plugin.
-      cmd_plugin_disable,function,(args) -> None,3762-3770,false,9,2,Disable a plugin.
-      cmd_plugin_discover,function,(args) -> None,3773-3787,false,15,4,Discover available plugins.
-      cmd_plugin_install,function,(args) -> None,3790-3801,false,12,2,Install a plugin.
-      cmd_plugin_uninstall,function,(args) -> None,3804-3814,false,11,2,Uninstall a plugin.
-      cmd_remote_list,function,(args) -> None,3820-3854,false,35,6,List VMs on remote host.
-      cmd_remote_status,function,(args) -> None,3857-3876,false,20,4,Get VM status on remote host.
-      cmd_remote_start,function,(args) -> None,3879-3893,false,15,2,Start VM on remote host.
-      cmd_remote_stop,function,(args) -> None,3896-3911,false,16,2,Stop VM on remote host.
-      cmd_remote_delete,function,(args) -> None,3914-3939,false,26,4,Delete VM on remote host.
-      cmd_remote_exec,function,(args) -> None,3942-3956,false,15,3,Execute command in VM on remote host.
-      cmd_remote_health,function,(args) -> None,3959-3980,false,22,4,Run health check on remote VM.
-      main,function,() -> None,3983-4754,false,772,4,Main entry point.
+      cmd_test,function,(args) -> None,1742-2035,false,294,70,Test VM configuration and health.
+      load_env_file,function,"(env_path:Path) -> dict",2042-2057,false,16,6,Load environment variables from .env file.
+      expand_env_vars,function,"(value, env_vars:dict) -> None",2060-2073,false,14,6,"Expand environment variables in string values like ${VAR_NAME}."
+      _find_unexpanded_env_placeholders,function,(value) -> set,2076-2089,false,14,6,retrieves unexpanded env placeholders
+      deduplicate_list,function,"(items:list, key=None) -> list",2092-2101,false,10,4,"Remove duplicates from list, preserving order."
+      generate_clonebox_yaml,function,"(snapshot, detector, deduplicate:bool=True, target_path:str=None, vm_name:str=None, network_mode:str='auto', base_image:Optional[str]=None, disk_size_gb:Optional[int]=None) -> str",2104-2326,false,223,47,Generate YAML config from system snapshot.
+      load_clonebox_config,function,"(path:Path) -> dict",2329-2356,false,28,4,Load .clonebox.yaml config file and expand environment variables from .env.
+      _exec_in_vm_qga,function,"(vm_name:str, conn_uri:str, command:str) -> Optional[str]",2359-2418,false,60,8,Internal helper to execute command via QGA and get output.
+      monitor_cloud_init_status,function,"(vm_name:str, user_session:bool=False, timeout:int=1800) -> None",2421-2571,false,151,35,Monitor cloud-init status in VM and show progress.
+      create_vm_from_config,function,"(config:dict, start:bool=False, user_session:bool=False, replace:bool=False) -> str",2574-2660,false,87,19,Create VM from YAML config dict.
+      cmd_clone,function,(args) -> None,2663-2840,false,178,27,Generate clone config from path and optionally create VM.
+      cmd_detect,function,(args) -> None,2843-2927,false,85,18,Detect and show system state.
+      cmd_monitor,function,(args) -> None,2930-3021,false,92,17,Real-time resource monitoring for VMs and containers.
+      cmd_exec,function,(args) -> None,3024-3107,false,84,23,Execute command in VM via QEMU Guest Agent.
+      cmd_snapshot_create,function,(args) -> None,3110-3132,false,23,4,Create VM snapshot.
+      cmd_snapshot_list,function,(args) -> None,3135-3166,false,32,6,List VM snapshots.
+      cmd_snapshot_restore,function,(args) -> None,3169-3183,false,15,3,Restore VM to snapshot.
+      cmd_snapshot_delete,function,(args) -> None,3186-3200,false,15,3,Delete VM snapshot.
+      cmd_health,function,(args) -> None,3203-3255,false,53,11,Run health checks for VM.
+      cmd_keygen,function,(args) -> None,3258-3262,false,5,1,Generate encryption key for secure P2P transfers.
+      cmd_export_encrypted,function,(args) -> None,3265-3286,false,22,4,Export VM with AES-256 encryption.
+      cmd_import_encrypted,function,(args) -> None,3289-3308,false,20,3,Import VM with AES-256 decryption.
+      cmd_export_remote,function,(args) -> None,3311-3329,false,19,2,Export VM from remote host.
+      cmd_import_remote,function,(args) -> None,3332-3349,false,18,2,Import VM to remote host.
+      cmd_sync_key,function,(args) -> None,3352-3362,false,11,2,Sync encryption key to remote host.
+      cmd_list_remote,function,(args) -> None,3365-3376,false,12,3,List VMs on remote host.
+      cmd_audit_list,function,(args) -> None,3382-3446,false,65,12,List audit events.
+      cmd_audit_show,function,(args) -> None,3449-3459,false,11,3,Show audit event details.
+      cmd_audit_failures,function,(args) -> None,3462-3485,false,24,5,Show recent failures.
+      cmd_audit_search,function,(args) -> None,3488-3543,false,56,16,Search audit events.
+      cmd_audit_export,function,(args) -> None,3546-3583,false,38,8,Export audit events to file.
+      cmd_compose_up,function,(args) -> None,3589-3616,false,28,9,Start VMs from compose file.
+      cmd_compose_down,function,(args) -> None,3619-3645,false,27,9,Stop VMs from compose file.
+      cmd_compose_status,function,(args) -> None,3648-3698,false,51,9,Show status of VMs from compose file.
+      cmd_compose_logs,function,(args) -> None,3701-3734,false,34,9,Show aggregated logs from VMs.
+      cmd_plugin_list,function,(args) -> None,3740-3772,false,33,7,List installed plugins.
+      cmd_plugin_enable,function,(args) -> None,3775-3783,false,9,2,Enable a plugin.
+      cmd_plugin_disable,function,(args) -> None,3786-3794,false,9,2,Disable a plugin.
+      cmd_plugin_discover,function,(args) -> None,3797-3811,false,15,4,Discover available plugins.
+      cmd_plugin_install,function,(args) -> None,3814-3825,false,12,2,Install a plugin.
+      cmd_plugin_uninstall,function,(args) -> None,3828-3838,false,11,2,Uninstall a plugin.
+      cmd_remote_list,function,(args) -> None,3844-3878,false,35,6,List VMs on remote host.
+      cmd_remote_status,function,(args) -> None,3881-3900,false,20,4,Get VM status on remote host.
+      cmd_remote_start,function,(args) -> None,3903-3917,false,15,2,Start VM on remote host.
+      cmd_remote_stop,function,(args) -> None,3920-3935,false,16,2,Stop VM on remote host.
+      cmd_remote_delete,function,(args) -> None,3938-3963,false,26,4,Delete VM on remote host.
+      cmd_remote_exec,function,(args) -> None,3966-3980,false,15,3,Execute command in VM on remote host.
+      cmd_remote_health,function,(args) -> None,3983-4004,false,22,4,Run health check on remote VM.
+      main,function,() -> None,4007-4778,false,772,4,Main entry point.
   src/clonebox/importer.py:
     functions[11]{name,kind,sig,loc,async,lines,cc,does}:
       VMImporter.__init__,method,"(conn_uri:str='qemu:///system') -> None",27-29,false,3,1,creates
@@ -774,14 +774,14 @@ function_details:
       SelectiveVMCloner._generate_vm_xml,method,"(config:VMConfig=None, root_disk:Path=None, cloudinit_iso:Optional[Path]=None) -> str",495-689,false,195,37,Generate libvirt XML for the VM.
       SelectiveVMCloner._generate_boot_diagnostic_script,method,"(config:VMConfig) -> str",691-1103,false,413,21,Generate boot diagnostic script with self-healing capabilities.
       SelectiveVMCloner._generate_health_check_script,method,"(config:VMConfig) -> str",1105-1364,false,260,12,Generate a health check script that validates all installed components.
-      SelectiveVMCloner._create_cloudinit_iso,method,"(vm_dir:Path, config:VMConfig, user_session:bool=False) -> Path",1366-2582,false,1217,82,Create cloud-init ISO with secure credential handling.
-      SelectiveVMCloner.start_vm,method,"(vm_name:str, open_viewer:bool=True, console=None) -> bool",2584-2614,false,31,4,Start a VM and optionally open virt-viewer.
-      SelectiveVMCloner.stop_vm,method,"(vm_name:str, force:bool=False, console=None) -> bool",2616-2667,false,52,9,Stop a VM.
-      SelectiveVMCloner.delete_vm,method,"(vm_name:str, delete_storage:bool=True, console=None, ignore_not_found:bool=False) -> bool",2669-2707,false,39,5,Delete a VM and optionally its storage.
-      SelectiveVMCloner.list_vms,method,() -> list,2709-2720,false,12,3,List all VMs.
-      SelectiveVMCloner.close,method,() -> None,2722-2725,false,4,2,Close libvirt connection.
-      SelectiveVMCloner._get_base_image_info,method,"(image_path:str) -> dict",2728-2733,false,6,2,Get base image information - backward compatibility shim.
-      SelectiveVMCloner.get_vm_info,method,"(vm_name:str) -> dict",2735-2748,false,14,4,Get VM information - backward compatibility shim.
+      SelectiveVMCloner._create_cloudinit_iso,method,"(vm_dir:Path, config:VMConfig, user_session:bool=False) -> Path",1366-2602,false,1237,83,Create cloud-init ISO with secure credential handling.
+      SelectiveVMCloner.start_vm,method,"(vm_name:str, open_viewer:bool=True, console=None) -> bool",2604-2634,false,31,4,Start a VM and optionally open virt-viewer.
+      SelectiveVMCloner.stop_vm,method,"(vm_name:str, force:bool=False, console=None) -> bool",2636-2687,false,52,9,Stop a VM.
+      SelectiveVMCloner.delete_vm,method,"(vm_name:str, delete_storage:bool=True, console=None, ignore_not_found:bool=False) -> bool",2689-2727,false,39,5,Delete a VM and optionally its storage.
+      SelectiveVMCloner.list_vms,method,() -> list,2729-2740,false,12,3,List all VMs.
+      SelectiveVMCloner.close,method,() -> None,2742-2745,false,4,2,Close libvirt connection.
+      SelectiveVMCloner._get_base_image_info,method,"(image_path:str) -> dict",2748-2753,false,6,2,Get base image information - backward compatibility shim.
+      SelectiveVMCloner.get_vm_info,method,"(vm_name:str) -> dict",2755-2768,false,14,4,Get VM information - backward compatibility shim.
   src/clonebox/rollback.py:
     functions[9]{name,kind,sig,loc,async,lines,cc,does}:
       vm_creation_transaction,function,"(cloner:Any, config:Any, console:Optional[Any]=None) -> None",147-172,false,26,3,Context manager for VM creation with automatic rollback.

@@ -1859,8 +1859,9 @@ def cmd_test(args):
                                 timeout=5,
                             )
                             if ip_out and ip_out.strip():
+                                ip_clean = ip_out.strip().replace("\n", ", ")
                                 console.print(
-                                    f"[green]✅ VM has network access (IP via QGA: {ip_out.strip()})[/]"
+                                    f"[green]✅ VM has network access (IP via QGA: {ip_clean})[/]"
                                 )
                             else:
                                 console.print("[yellow]⚠️  IP not available via QGA[/]")
@@ -2417,7 +2418,7 @@ def _exec_in_vm_qga(vm_name: str, conn_uri: str, command: str) -> Optional[str]:
         return None
 
 
-def monitor_cloud_init_status(vm_name: str, user_session: bool = False, timeout: int = 900):
+def monitor_cloud_init_status(vm_name: str, user_session: bool = False, timeout: int = 1800):
     """Monitor cloud-init status in VM and show progress."""
     import subprocess
     import time
@@ -2478,14 +2479,14 @@ def monitor_cloud_init_status(vm_name: str, user_session: bool = False, timeout:
                     time.sleep(2)
                     break
 
-                # Estimate remaining time (total ~12-15 minutes for full desktop install)
+                # Estimate remaining time (total ~15-20 minutes for full desktop install)
                 if elapsed < 60:
-                    remaining = "~12-15 minutes"
+                    remaining = "~15-20 minutes"
                 elif elapsed < 300:
-                    remaining = f"~{12 - minutes} minutes"
-                elif elapsed < 600:
-                    remaining = f"~{10 - minutes} minutes"
-                elif elapsed < 800:
+                    remaining = f"~{20 - minutes} minutes"
+                elif elapsed < 900:
+                    remaining = f"~{25 - minutes} minutes"
+                elif elapsed < 1500:
                     remaining = "finishing soon..."
                 else:
                     remaining = "almost done"
@@ -2495,7 +2496,7 @@ def monitor_cloud_init_status(vm_name: str, user_session: bool = False, timeout:
                 raw_info = _exec_in_vm_qga(
                     vm_name, 
                     conn_uri, 
-                    "grep -E '\\[[0-9]/[0-9]\\]|→' /var/log/cloud-init-output.log 2>/dev/null | tail -n 5"
+                    "grep -E '\\[[0-9]+/10\\]|→' /var/log/cloud-init-output.log 2>/dev/null | tail -n 5"
                 )
                 
                 # Check disk space in real-time
@@ -2516,9 +2517,18 @@ def monitor_cloud_init_status(vm_name: str, user_session: bool = False, timeout:
                     lines = [l.strip() for l in raw_info.strip().split('\n') if l.strip()]
                     for line in lines:
                         if line not in seen_lines:
-                            # If it's a new phase line, we can log it to console above the progress bar
-                            if "[" in line and "/9]" in line:
-                                console.print(f"[dim]  {line}[/]")
+                            # Print phase markers and sub-steps to console above the progress bar
+                            if "[" in line and "/10]" in line:
+                                console.print(f"[bold cyan]  {line}[/]")
+                            elif "→" in line:
+                                console.print(f"[dim]    {line}[/]")
+                            
+                            # Critical error detection
+                            if "No space left on device" in line or "disk space" in line.lower():
+                                if "WARNING" not in line:
+                                    console.print(f"[bold red]❌ CRITICAL ERROR: {line}[/]")
+                                    console.print("[red]   The VM has run out of disk space. Rebuild with a larger --disk-size-gb.[/]")
+
                             seen_lines.add(line)
                             last_phases.append(line)
                     

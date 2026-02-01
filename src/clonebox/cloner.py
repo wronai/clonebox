@@ -1524,11 +1524,21 @@ fi
         runcmd_lines.append("  - echo '           CloneBox VM Installation Progress'")
         runcmd_lines.append("  - echo '═══════════════════════════════════════════════════════════'")
         runcmd_lines.append("  - echo ''")
+
+        # Phase 0: System Optimization (Pre-install)
+        runcmd_lines.append("  - echo '[1/10] 🛠️  Optimizing system resources...'")
+        runcmd_lines.append("  - echo '  → Limiting journal size to 50M'")
+        runcmd_lines.append("  - sed -i 's/^#SystemMaxUse=/SystemMaxUse=50M/' /etc/systemd/journald.conf || true")
+        runcmd_lines.append("  - systemctl restart systemd-journald || true")
+        runcmd_lines.append("  - echo ''")
         
         # Phase 1: APT Packages
         if all_packages:
-            runcmd_lines.append(f"  - echo '[1/9] 📦 Installing APT packages ({len(all_packages)} total)...'")
+            runcmd_lines.append(f"  - echo '[2/10] 📦 Installing APT packages ({len(all_packages)} total)...'")
             runcmd_lines.append("  - export DEBIAN_FRONTEND=noninteractive")
+            # Check space before starting
+            runcmd_lines.append("  - if [ $(df / --output=avail | tail -n 1) -lt 524288 ]; then echo '    ⚠️  WARNING: Low disk space (<512MB) before APT install'; fi")
+            runcmd_lines.append("  - echo '  → Updating package repositories...'")
             runcmd_lines.append("  - apt-get update")
             for i, pkg in enumerate(all_packages, 1):
                 runcmd_lines.append(f"  - echo '  → [{i}/{len(all_packages)}] Installing {pkg}...'")
@@ -1537,14 +1547,11 @@ fi
             runcmd_lines.append("  - echo '  ✓ APT packages installed and cache cleaned'")
             runcmd_lines.append("  - echo ''")
         else:
-            runcmd_lines.append("  - echo '[1/9] 📦 No APT packages to install'")
+            runcmd_lines.append("  - echo '[2/10] 📦 No APT packages to install'")
             runcmd_lines.append("  - echo ''")
 
         # Phase 2: Core services
-        runcmd_lines.append("  - echo '[2/9] 🔧 Enabling core services...'")
-        runcmd_lines.append("  - echo '  → limiting journal size to 50M'")
-        runcmd_lines.append("  - sed -i 's/^#SystemMaxUse=/SystemMaxUse=50M/' /etc/systemd/journald.conf || true")
-        runcmd_lines.append("  - systemctl restart systemd-journald || true")
+        runcmd_lines.append("  - echo '[3/10] 🔧 Enabling core services...'")
         runcmd_lines.append("  - echo '  → qemu-guest-agent'")
         runcmd_lines.append("  - systemctl enable --now qemu-guest-agent || true")
         runcmd_lines.append("  - echo '  → snapd'")
@@ -1555,7 +1562,7 @@ fi
         runcmd_lines.append("  - echo ''")
 
         # Phase 3: User services
-        runcmd_lines.append(f"  - echo '[3/9] 🔧 Enabling user services ({len(config.services)} total)...'")
+        runcmd_lines.append(f"  - echo '[4/10] 🔧 Enabling user services ({len(config.services)} total)...'")
         for i, svc in enumerate(config.services, 1):
             runcmd_lines.append(f"  - echo '  → [{i}/{len(config.services)}] {svc}'")
             runcmd_lines.append(f"  - systemctl enable --now {svc} || true")
@@ -1563,7 +1570,7 @@ fi
         runcmd_lines.append("  - echo ''")
 
         # Phase 4: Filesystem mounts
-        runcmd_lines.append(f"  - echo '[4/9] 📁 Mounting shared directories ({len(existing_bind_paths)} mounts)...'")
+        runcmd_lines.append(f"  - echo '[5/10] 📁 Mounting shared directories ({len(existing_bind_paths)} mounts)...'")
         if bind_mount_commands:
             mount_idx = 0
             for cmd in bind_mount_commands:
@@ -1589,7 +1596,9 @@ fi
 
         # Phase 5: Data Import (copied paths)
         if existing_copy_paths:
-            runcmd_lines.append(f"  - echo '[5/9] 📥 Importing data ({len(existing_copy_paths)} paths)...'")
+            runcmd_lines.append(f"  - echo '[6/10] 📥 Importing data ({len(existing_copy_paths)} paths)...'")
+            # Check space before starting large import
+            runcmd_lines.append("  - if [ $(df / --output=avail | tail -n 1) -lt 1048576 ]; then echo '    ⚠️  WARNING: Low disk space (<1GB) before data import'; fi")
             # Add import commands with progress
             import_count = 0
             for cmd in import_mount_commands:
@@ -1601,12 +1610,12 @@ fi
             runcmd_lines.append("  - echo '  ✓ Data import completed'")
             runcmd_lines.append("  - echo ''")
         else:
-            runcmd_lines.append("  - echo '[5/9] 📥 No data to import'")
+            runcmd_lines.append("  - echo '[6/10] 📥 No data to import'")
             runcmd_lines.append("  - echo ''")
 
         # Phase 6: GUI Environment Setup
         if config.gui:
-            runcmd_lines.append("  - echo '[6/9] 🖥️  Setting up GUI environment...'")
+            runcmd_lines.append("  - echo '[7/10] 🖥️  Setting up GUI environment...'")
             runcmd_lines.append("  - echo '  → Creating user directories'")
             # Create directories that GNOME services need
             runcmd_lines.extend(
@@ -1625,7 +1634,7 @@ fi
             runcmd_lines.append("  - echo '  ✓ GUI environment ready'")
             runcmd_lines.append("  - echo ''")
         else:
-            runcmd_lines.append("  - echo '[6/9] 🖥️  No GUI requested'")
+            runcmd_lines.append("  - echo '[7/10] 🖥️  No GUI requested'")
             runcmd_lines.append("  - echo ''")
 
         runcmd_lines.append("  - chown -R 1000:1000 /home/ubuntu || true")
@@ -1633,7 +1642,9 @@ fi
 
         # Phase 7: Snap packages
         if config.snap_packages:
-            runcmd_lines.append(f"  - echo '[7/9] 📦 Installing snap packages ({len(config.snap_packages)} packages)...'")
+            runcmd_lines.append(f"  - echo '[8/10] 📦 Installing snap packages ({len(config.snap_packages)} packages)...'")
+            # Check space before starting snap installation
+            runcmd_lines.append("  - if [ $(df / --output=avail | tail -n 1) -lt 2097152 ]; then echo '    ⚠️  WARNING: Low disk space (<2GB) before Snap install'; fi")
             for i, snap_pkg in enumerate(config.snap_packages, 1):
                 runcmd_lines.append(f"  - echo '  → [{i}/{len(config.snap_packages)}] {snap_pkg}'")
                 # Try classic first, then strict, with retries
@@ -1663,7 +1674,7 @@ fi
             runcmd_lines.append("  - snap set system refresh.retain=2")
             runcmd_lines.append("  - echo ''")
         else:
-            runcmd_lines.append("  - echo '[7/9] 📦 No snap packages to install'")
+            runcmd_lines.append("  - echo '[8/10] 📦 No snap packages to install'")
             runcmd_lines.append("  - echo ''")
 
         # Add remaining GUI setup if enabled
@@ -1681,9 +1692,12 @@ fi
                 "google-chrome": ("Google Chrome", "google-chrome-stable", "google-chrome"),
             }
 
+            autostart_idx = 0
             for snap_pkg in config.snap_packages:
                 if snap_pkg in autostart_apps:
+                    autostart_idx += 1
                     name, exec_cmd, icon = autostart_apps[snap_pkg]
+                    runcmd_lines.append(f"  - echo '    → [{autostart_idx}] Creating autostart for {name}...'")
                     desktop_entry = f"""[Desktop Entry]
 Type=Application
 Name={name}
@@ -1703,7 +1717,9 @@ Comment=CloneBox autostart
             # Check if google-chrome is in paths (app_data_paths)
             wants_chrome = any("/google-chrome" in str(p) for p in (config.paths or {}).values())
             if wants_chrome:
+                autostart_idx += 1
                 name, exec_cmd, icon = autostart_apps["google-chrome"]
+                runcmd_lines.append(f"  - echo '    → [{autostart_idx}] Creating autostart for {name}...'")
                 desktop_entry = f"""[Desktop Entry]
 Type=Application
 Name={name}
@@ -1725,17 +1741,17 @@ Comment=CloneBox autostart
 
         # Phase 8: Post commands
         if config.post_commands:
-            runcmd_lines.append(f"  - echo '[8/9] ⚙️  Running post-setup commands ({len(config.post_commands)} commands)...'")
+            runcmd_lines.append(f"  - echo '[9/10] ⚙️  Running post-setup commands ({len(config.post_commands)} total)...'")
             for i, cmd in enumerate(config.post_commands, 1):
                 # Truncate long commands for display
                 display_cmd = cmd[:60] + '...' if len(cmd) > 60 else cmd
                 runcmd_lines.append(f"  - echo '  → [{i}/{len(config.post_commands)}] {display_cmd}'")
-                runcmd_lines.append(f"  - {cmd}")
+                runcmd_lines.append(f"  - {cmd} || echo '    ⚠️  Command {i} failed'")
                 runcmd_lines.append(f"  - echo '    ✓ Command {i} completed'")
-            runcmd_lines.append("  - echo '  ✓ Post-setup commands completed'")
+            runcmd_lines.append("  - echo '  ✓ Post-setup commands finished'")
             runcmd_lines.append("  - echo ''")
         else:
-            runcmd_lines.append("  - echo '[8/9] ⚙️  No post-setup commands'")
+            runcmd_lines.append("  - echo '[9/10] ⚙️  No post-setup commands'")
             runcmd_lines.append("  - echo ''")
 
         # Generate health check script
@@ -1743,7 +1759,7 @@ Comment=CloneBox autostart
         # Phase 9: Health checks and finalization
         runcmd_lines.append("  - echo '  🧹 Vacuuming system logs to save space...'")
         runcmd_lines.append("  - journalctl --vacuum-size=50M")
-        runcmd_lines.append("  - echo '[9/9] 🏥 Running health checks...'")
+        runcmd_lines.append("  - echo '[10/10] 🏥 Running health checks...'")
         runcmd_lines.append(
             f"  - echo '{health_script}' | base64 -d > /usr/local/bin/clonebox-health"
         )
