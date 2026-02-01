@@ -1,4 +1,4 @@
-# clonebox | 65f 23502L | python:65
+# clonebox | 65f 23519L | python:65
 # Keys: M=modules, D=details, i=imports, c=classes, f=functions, m=methods
 M[65]:
   tests/test_orchestrator.py,228
@@ -29,7 +29,7 @@ M[65]:
   src/clonebox/resources.py,167
   src/clonebox/resource_monitor.py,124
   src/clonebox/dashboard.py,136
-  src/clonebox/validator.py,1104
+  src/clonebox/validator.py,1108
   src/clonebox/p2p.py,140
   src/clonebox/cli.py,3823
   src/clonebox/importer.py,167
@@ -42,7 +42,7 @@ M[65]:
   src/clonebox/container.py,154
   src/clonebox/logging.py,99
   src/clonebox/orchestrator.py,444
-  src/clonebox/cloner.py,2240
+  src/clonebox/cloner.py,2248
   src/clonebox/rollback.py,137
   src/clonebox/monitor.py,218
   src/clonebox/models.py,180

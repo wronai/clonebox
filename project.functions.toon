@@ -1,5 +1,5 @@
 project: clonebox
-generated: "2026-02-01T21:51:16.198318"
+generated: "2026-02-01T21:58:06.856674"
 modules[65]{path,lang,items}:
   tests/test_orchestrator.py,python,19
   tests/conftest.py,python,17
@@ -544,13 +544,13 @@ function_details:
       VMValidator.validate_mounts,method,() -> Dict,131-249,false,119,24,Validate all mount points and copied data paths.
       VMValidator.validate_packages,method,() -> Dict,251-298,false,48,5,Validate APT packages are installed.
       VMValidator.validate_snap_packages,method,() -> Dict,300-354,false,55,6,Validate snap packages are installed.
-      VMValidator.validate_services,method,() -> Dict,381-467,false,87,17,Validate services are enabled and running.
-      VMValidator.validate_apps,method,() -> Dict,469-772,false,304,56,validates apps
-      VMValidator.validate_smoke_tests,method,() -> Dict,774-957,false,184,30,validates smoke tests
-      VMValidator._check_qga_ready,method,() -> bool,959-977,false,19,2,Check if QEMU guest agent is responding.
-      VMValidator.validate_disk_space,method,() -> Dict,979-1018,false,40,6,Validate disk space on root filesystem.
-      VMValidator._print_disk_usage_breakdown,method,() -> None,1020-1109,false,90,16,logs disk usage breakdown
-      VMValidator.validate_all,method,() -> Dict,1111-1308,false,198,28,Run all validations and return comprehensive results.
+      VMValidator.validate_services,method,() -> Dict,381-468,false,88,17,Validate services are enabled and running.
+      VMValidator.validate_apps,method,() -> Dict,470-773,false,304,56,validates apps
+      VMValidator.validate_smoke_tests,method,() -> Dict,775-958,false,184,30,validates smoke tests
+      VMValidator._check_qga_ready,method,() -> bool,960-978,false,19,2,Check if QEMU guest agent is responding.
+      VMValidator.validate_disk_space,method,() -> Dict,980-1019,false,40,6,Validate disk space on root filesystem.
+      VMValidator._print_disk_usage_breakdown,method,() -> None,1021-1110,false,90,16,logs disk usage breakdown
+      VMValidator.validate_all,method,() -> Dict,1112-1315,false,204,29,Run all validations and return comprehensive results.
   src/clonebox/p2p.py:
     functions[8]{name,kind,sig,loc,async,lines,cc,does}:
       P2PManager.__init__,method,"(ssh_options:Optional[list]=None) -> None",15-21,false,7,2,creates
@@ -773,15 +773,15 @@ function_details:
       SelectiveVMCloner.create_vm,method,"(config:VMConfig, console=None, replace:bool=False) -> str",358-493,false,136,20,Create a VM with only selected applications/paths.
       SelectiveVMCloner._generate_vm_xml,method,"(config:VMConfig=None, root_disk:Path=None, cloudinit_iso:Optional[Path]=None) -> str",495-689,false,195,37,Generate libvirt XML for the VM.
       SelectiveVMCloner._generate_boot_diagnostic_script,method,"(config:VMConfig) -> str",691-1103,false,413,21,Generate boot diagnostic script with self-healing capabilities.
-      SelectiveVMCloner._generate_health_check_script,method,"(config:VMConfig) -> str",1105-1364,false,260,12,Generate a health check script that validates all installed components.
-      SelectiveVMCloner._create_cloudinit_iso,method,"(vm_dir:Path, config:VMConfig, user_session:bool=False) -> Path",1366-2602,false,1237,83,Create cloud-init ISO with secure credential handling.
-      SelectiveVMCloner.start_vm,method,"(vm_name:str, open_viewer:bool=True, console=None) -> bool",2604-2634,false,31,4,Start a VM and optionally open virt-viewer.
-      SelectiveVMCloner.stop_vm,method,"(vm_name:str, force:bool=False, console=None) -> bool",2636-2687,false,52,9,Stop a VM.
-      SelectiveVMCloner.delete_vm,method,"(vm_name:str, delete_storage:bool=True, console=None, ignore_not_found:bool=False) -> bool",2689-2727,false,39,5,Delete a VM and optionally its storage.
-      SelectiveVMCloner.list_vms,method,() -> list,2729-2740,false,12,3,List all VMs.
-      SelectiveVMCloner.close,method,() -> None,2742-2745,false,4,2,Close libvirt connection.
-      SelectiveVMCloner._get_base_image_info,method,"(image_path:str) -> dict",2748-2753,false,6,2,Get base image information - backward compatibility shim.
-      SelectiveVMCloner.get_vm_info,method,"(vm_name:str) -> dict",2755-2768,false,14,4,Get VM information - backward compatibility shim.
+      SelectiveVMCloner._generate_health_check_script,method,"(config:VMConfig) -> str",1105-1366,false,262,12,Generate a health check script that validates all installed components.
+      SelectiveVMCloner._create_cloudinit_iso,method,"(vm_dir:Path, config:VMConfig, user_session:bool=False) -> Path",1368-2612,false,1245,84,Create cloud-init ISO with secure credential handling.
+      SelectiveVMCloner.start_vm,method,"(vm_name:str, open_viewer:bool=True, console=None) -> bool",2614-2644,false,31,4,Start a VM and optionally open virt-viewer.
+      SelectiveVMCloner.stop_vm,method,"(vm_name:str, force:bool=False, console=None) -> bool",2646-2697,false,52,9,Stop a VM.
+      SelectiveVMCloner.delete_vm,method,"(vm_name:str, delete_storage:bool=True, console=None, ignore_not_found:bool=False) -> bool",2699-2737,false,39,5,Delete a VM and optionally its storage.
+      SelectiveVMCloner.list_vms,method,() -> list,2739-2750,false,12,3,List all VMs.
+      SelectiveVMCloner.close,method,() -> None,2752-2755,false,4,2,Close libvirt connection.
+      SelectiveVMCloner._get_base_image_info,method,"(image_path:str) -> dict",2758-2763,false,6,2,Get base image information - backward compatibility shim.
+      SelectiveVMCloner.get_vm_info,method,"(vm_name:str) -> dict",2765-2778,false,14,4,Get VM information - backward compatibility shim.
   src/clonebox/rollback.py:
     functions[9]{name,kind,sig,loc,async,lines,cc,does}:
       vm_creation_transaction,function,"(cloner:Any, config:Any, console:Optional[Any]=None) -> None",147-172,false,26,3,Context manager for VM creation with automatic rollback.

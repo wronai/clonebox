@@ -1108,26 +1108,28 @@ fi
 
         # Build package check commands
         apt_checks = []
-        for pkg in config.packages:
-            apt_checks.append(f'check_apt_package "{pkg}"')
+        for i, pkg in enumerate(config.packages, 1):
+            apt_checks.append(f'check_apt_package "{pkg}" "{i}/{len(config.packages)}"')
 
         snap_checks = []
-        for pkg in config.snap_packages:
-            snap_checks.append(f'check_snap_package "{pkg}"')
+        for i, pkg in enumerate(config.snap_packages, 1):
+            snap_checks.append(f'check_snap_package "{pkg}" "{i}/{len(config.snap_packages)}"')
 
         service_checks = []
-        for svc in config.services:
-            service_checks.append(f'check_service "{svc}"')
+        for i, svc in enumerate(config.services, 1):
+            service_checks.append(f'check_service "{svc}" "{i}/{len(config.services)}"')
 
         mount_checks = []
-        for idx, (host_path, guest_path) in enumerate(config.paths.items()):
-            mount_checks.append(f'check_mount "{guest_path}" "mount{idx}"')
+        bind_paths = list(config.paths.items())
+        for i, (host_path, guest_path) in enumerate(bind_paths, 1):
+            mount_checks.append(f'check_mount "{guest_path}" "mount{i-1}" "{i}/{len(bind_paths)}"')
         
         # Add copied paths checks
         copy_paths = config.copy_paths or getattr(config, "app_data_paths", {})
         if copy_paths:
-            for idx, (host_path, guest_path) in enumerate(copy_paths.items()):
-                mount_checks.append(f'check_copy_path "{guest_path}"')
+            copy_list = list(copy_paths.items())
+            for i, (host_path, guest_path) in enumerate(copy_list, 1):
+                mount_checks.append(f'check_copy_path "{guest_path}" "{i}/{len(copy_list)}"')
 
         apt_checks_str = "\n".join(apt_checks) if apt_checks else "echo 'No apt packages to check'"
         snap_checks_str = (
@@ -1159,6 +1161,10 @@ NC='\\033[0m'
 
 log() {{
     echo "[$(date '+%Y-%m-%d %H:%M:%S')] $1" | tee -a "$REPORT_FILE"
+    # If it's a PASS/FAIL/INFO/WARN line, also echo with prefix for the monitor
+    if [[ "$1" =~ ^\[(PASS|FAIL|WARN|INFO)\] ]]; then
+        echo "  → $1"
+    fi
 }}
 
 check_disk_space() {{
@@ -1184,17 +1190,18 @@ check_disk_space() {{
 
 check_apt_package() {{
     local pkg="$1"
+    local progress="$2"
     if dpkg -l "$pkg" 2>/dev/null | grep -q "^ii"; then
-        log "[PASS] APT package '$pkg' is installed"
+        log "[PASS] [$progress] APT package '$pkg' is installed"
         ((PASSED++))
         return 0
     else
         if [ $SETUP_IN_PROGRESS -eq 1 ]; then
-            log "[WARN] APT package '$pkg' is not installed yet"
+            log "[WARN] [$progress] APT package '$pkg' is not installed yet"
             ((WARNINGS++))
             return 1
         else
-            log "[FAIL] APT package '$pkg' is NOT installed"
+            log "[FAIL] [$progress] APT package '$pkg' is NOT installed"
             ((FAILED++))
             return 1
         fi
@@ -1203,19 +1210,20 @@ check_apt_package() {{
 
 check_snap_package() {{
     local pkg="$1"
+    local progress="$2"
     local out
     out=$(snap list "$pkg" 2>&1)
     if [ $? -eq 0 ]; then
-        log "[PASS] Snap package '$pkg' is installed"
+        log "[PASS] [$progress] Snap package '$pkg' is installed"
         ((PASSED++))
         return 0
     else
         if [ $SETUP_IN_PROGRESS -eq 1 ]; then
-            log "[WARN] Snap package '$pkg' is not installed yet"
+            log "[WARN] [$progress] Snap package '$pkg' is not installed yet"
             ((WARNINGS++))
             return 1
         else
-            log "[FAIL] Snap package '$pkg' is NOT installed"
+            log "[FAIL] [$progress] Snap package '$pkg' is NOT installed"
             ((FAILED++))
             return 1
         fi
@@ -1224,18 +1232,19 @@ check_snap_package() {{
 
 check_service() {{
     local svc="$1"
+    local progress="$2"
     if systemctl is-enabled "$svc" &>/dev/null; then
         if systemctl is-active "$svc" &>/dev/null; then
-            log "[PASS] Service '$svc' is enabled and running"
+            log "[PASS] [$progress] Service '$svc' is enabled and running"
             ((PASSED++))
             return 0
         else
-            log "[WARN] Service '$svc' is enabled but not running"
+            log "[WARN] [$progress] Service '$svc' is enabled but not running"
             ((WARNINGS++))
             return 1
         fi
     else
-        log "[INFO] Service '$svc' is not enabled (may be optional)"
+        log "[INFO] [$progress] Service '$svc' is not enabled (may be optional)"
         return 0
     fi
 }}
@@ -1243,38 +1252,40 @@ check_service() {{
 check_mount() {{
     local path="$1"
     local tag="$2"
+    local progress="$3"
     if mountpoint -q "$path" 2>/dev/null; then
-        log "[PASS] Mount '$path' ($tag) is active"
+        log "[PASS] [$progress] Mount '$path' ($tag) is active"
         ((PASSED++))
         return 0
     elif [ -d "$path" ]; then
-        log "[WARN] Directory '$path' exists but not mounted"
+        log "[WARN] [$progress] Directory '$path' exists but not mounted"
         ((WARNINGS++))
         return 1
     else
-        log "[INFO] Mount point '$path' does not exist yet"
+        log "[INFO] [$progress] Mount point '$path' does not exist yet"
         return 0
     fi
 }}
 
 check_copy_path() {{
     local path="$1"
+    local progress="$2"
     if [ -d "$path" ]; then
         if [ "$(ls -A "$path" 2>/dev/null | wc -l)" -gt 0 ]; then
-            log "[PASS] Path '$path' exists and contains data"
+            log "[PASS] [$progress] Path '$path' exists and contains data"
             ((PASSED++))
             return 0
         else
-            log "[WARN] Path '$path' exists but is EMPTY"
+            log "[WARN] [$progress] Path '$path' exists but is EMPTY"
             ((WARNINGS++))
             return 1
         fi
     else
         if [ $SETUP_IN_PROGRESS -eq 1 ]; then
-            log "[INFO] Path '$path' not imported yet"
+            log "[INFO] [$progress] Path '$path' not imported yet"
             return 0
         else
-            log "[FAIL] Path '$path' MISSING"
+            log "[FAIL] [$progress] Path '$path' MISSING"
             ((FAILED++))
             return 1
         fi
@@ -1577,8 +1588,13 @@ fi
                 if "mount -t 9p" in cmd:
                     mount_idx += 1
                     # Extract mount point for logging
-                    parts = cmd.split()
-                    mp = parts[-2] if len(parts) > 2 else "path"
+                    parts = cmd.strip().split()
+                    # Look for the path before '||'
+                    try:
+                        sep_idx = parts.index("||")
+                        mp = parts[sep_idx - 1]
+                    except ValueError:
+                        mp = parts[-1]
                     runcmd_lines.append(f"  - echo '  → [{mount_idx}/{len(existing_bind_paths)}] Mounting {mp}...'")
                 runcmd_lines.append(cmd)
         
@@ -1692,12 +1708,16 @@ fi
                 "google-chrome": ("Google Chrome", "google-chrome-stable", "google-chrome"),
             }
 
+            # Generate list of autostart apps to count them
+            target_autostart_snaps = [pkg for pkg in config.snap_packages if pkg in autostart_apps]
+            total_autostart = len(target_autostart_snaps) + (1 if wants_chrome else 0)
+
             autostart_idx = 0
             for snap_pkg in config.snap_packages:
                 if snap_pkg in autostart_apps:
                     autostart_idx += 1
                     name, exec_cmd, icon = autostart_apps[snap_pkg]
-                    runcmd_lines.append(f"  - echo '    → [{autostart_idx}] Creating autostart for {name}...'")
+                    runcmd_lines.append(f"  - echo '    → [{autostart_idx}/{total_autostart}] Creating autostart for {name}...'")
                     desktop_entry = f"""[Desktop Entry]
 Type=Application
 Name={name}
@@ -1715,11 +1735,10 @@ Comment=CloneBox autostart
                     )
 
             # Check if google-chrome is in paths (app_data_paths)
-            wants_chrome = any("/google-chrome" in str(p) for p in (config.paths or {}).values())
             if wants_chrome:
                 autostart_idx += 1
                 name, exec_cmd, icon = autostart_apps["google-chrome"]
-                runcmd_lines.append(f"  - echo '    → [{autostart_idx}] Creating autostart for {name}...'")
+                runcmd_lines.append(f"  - echo '    → [{autostart_idx}/{total_autostart}] Creating autostart for {name}...'")
                 desktop_entry = f"""[Desktop Entry]
 Type=Application
 Name={name}

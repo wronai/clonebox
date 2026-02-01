@@ -397,6 +397,7 @@ class VMValidator:
         svc_table.add_column("PID", justify="right", style="dim")
         svc_table.add_column("Note", style="dim")
 
+        # Define here to avoid NameError in loop
         setup_in_progress = self._setup_in_progress() is True
 
         for service in services:
@@ -1232,15 +1233,21 @@ class VMValidator:
         summary_table.add_column("Total", justify="right")
 
         # Add Disk Space row
-        disk_usage = self.results.get("disk", {}).get("usage_pct", 0)
+        disk_usage_pct = self.results.get("disk", {}).get("usage_pct", 0)
+        disk_avail = self.results.get("disk", {}).get("avail", "?")
         disk_total = self.results.get("disk", {}).get("total", "?")
         
+        # Calculate used space if possible
+        disk_status = "[green]OK[/]" if disk_usage_pct <= 90 else "[red]FULL[/]"
+        disk_passed = "✅" if disk_usage_pct <= 90 else "—"
+        disk_failed = "—" if disk_usage_pct <= 90 else f"{disk_usage_pct}%"
+
         summary_table.add_row(
             "Disk Space",
-            "[green]OK[/]" if disk_usage <= 90 else "—",
-            f"[red]{disk_usage}%[/]" if disk_usage > 90 else "—",
+            disk_passed,
+            disk_failed,
             "—",
-            f"{disk_usage}% of {disk_total}",
+            f"{disk_usage_pct}% of {disk_total} ({disk_avail} free)",
         )
         
         summary_table.add_row(
