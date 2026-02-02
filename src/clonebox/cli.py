@@ -7,8 +7,10 @@ import argparse
 import json
 import os
 import re
+import secrets
 import sys
 import time
+from dataclasses import asdict
 from typing import Any, Dict, Optional, Tuple
 from datetime import datetime
 from pathlib import Path
@@ -348,7 +350,7 @@ def run_vm_diagnostics(
     if not guest_agent_ready:
         result["cloud_init"] = {"status": "unknown", "reason": "qga_not_ready"}
         console.print(
-            "[yellow]⏳ Cloud-init status: Unknown (QEMU guest agent not connected yet)[/]"
+            "[yellow]⏳ Cloud-init status: Unknown (QEMU Guest Agent not connected yet)[/]"
         )
     else:
         ready_msg = _qga_exec(
@@ -452,7 +454,7 @@ def run_vm_diagnostics(
     console.print("\n[bold]🏥 Health Check Status...[/]")
     if not guest_agent_ready:
         result["health"]["status"] = "unknown"
-        console.print("[dim]Health status: Not available yet (QEMU guest agent not ready)[/]")
+        console.print("[dim]Health status: Not available yet (QEMU Guest Agent not ready)[/]")
     else:
         health_status = _qga_exec(
             vm_name, conn_uri, "cat /var/log/clonebox-health-status 2>/dev/null || true", timeout=10
@@ -1190,12 +1192,26 @@ def cmd_delete(args):
     # If name is a path, load config
     if name and (name.startswith(".") or name.startswith("/") or name.startswith("~")):
         target_path = Path(name).expanduser().resolve()
-        config_file = target_path / ".clonebox.yaml" if target_path.is_dir() else target_path
+
+        if target_path.is_dir():
+            config_file = target_path / CLONEBOX_CONFIG_FILE
+        else:
+            config_file = target_path
+
         if config_file.exists():
             config = load_clonebox_config(config_file)
             name = config["vm"]["name"]
         else:
             console.print(f"[red]❌ Config not found: {config_file}[/]")
+            return
+    elif not name or name == ".":
+        config_file = Path.cwd() / ".clonebox.yaml"
+        if config_file.exists():
+            config = load_clonebox_config(config_file)
+            name = config["vm"]["name"]
+        else:
+            console.print("[red]❌ No .clonebox.yaml found in current directory[/]")
+            console.print("[dim]Usage: clonebox delete . or clonebox delete <vm-name>[/]")
             return
 
     policy_start = None
@@ -1224,7 +1240,9 @@ def cmd_delete(args):
     delete_storage = not getattr(args, "keep_storage", False)
     console.print(f"[cyan]🗑️ Deleting VM: {name}[/]")
     try:
-        ok = cloner.delete_vm(name, delete_storage=delete_storage, console=console)
+        ok = cloner.delete_vm(
+            name, delete_storage=delete_storage, console=console, approved=getattr(args, "approve", False)
+        )
         if not ok:
             sys.exit(1)
     except Exception as e:
@@ -1678,6 +1696,16 @@ def cmd_import(args):
                     f"[red]❌ VM '{vm_name}' already exists. Use --replace to overwrite.[/]"
                 )
                 return
+            policy = PolicyEngine.load_effective(start=vm_storage)
+            if policy is not None:
+                try:
+                    policy.assert_operation_approved(
+                        AuditEventType.VM_DELETE.value,
+                        approved=getattr(args, "approve", False),
+                    )
+                except PolicyViolationError as e:
+                    console.print(f"[red]❌ {e}[/]")
+                    sys.exit(1)
             shutil.rmtree(vm_storage)
 
         vm_storage.mkdir(parents=True)
@@ -1840,7 +1868,6 @@ def cmd_test(args):
     console.print()
 
     # Test 2: Check VM state
-    console.print("[bold]2. VM State Check[/]")
     cloud_init_running = False
     try:
         result = subprocess.run(
@@ -1850,6 +1877,7 @@ def cmd_test(args):
             timeout=10,
         )
         state = result.stdout.strip()
+
         if state == "running":
             console.print("[green]✅ VM is running[/]")
 
@@ -2008,23 +2036,14 @@ def cmd_test(args):
                 console.print("[yellow]⚠️  QEMU Guest Agent not connected - cannot run health check[/]")
             else:
                 exists = _qga_exec(
-                    vm_name,
-                    conn_uri,
-                    "test -x /usr/local/bin/clonebox-health && echo yes || echo no",
-                    timeout=10,
+                    vm_name, conn_uri, "test -x /usr/local/bin/clonebox-health && echo yes || echo no", timeout=10
                 )
                 if exists and exists.strip() == "yes":
                     _qga_exec(
-                        vm_name,
-                        conn_uri,
-                        "/usr/local/bin/clonebox-health >/dev/null 2>&1 || true",
-                        timeout=60,
+                        vm_name, conn_uri, "/usr/local/bin/clonebox-health >/dev/null 2>&1 || true", timeout=60
                     )
                     health_status = _qga_exec(
-                        vm_name,
-                        conn_uri,
-                        "cat /var/log/clonebox-health-status 2>/dev/null || true",
-                        timeout=10,
+                        vm_name, conn_uri, "cat /var/log/clonebox-health-status 2>/dev/null || true", timeout=10
                     )
                     if health_status and "HEALTH_STATUS=OK" in health_status:
                         console.print("[green]✅ Health check passed[/]")
@@ -2191,7 +2210,7 @@ def generate_clonebox_yaml(
 
     if deduplicate:
         for ptype in paths_by_type:
-            paths_by_type[ptype] = deduplicate_list(paths_by_type[ptype])
+            paths_by_type[ptype] = deduplicate_list(paths_by_type[ptype], key=lambda x: x.path)
 
     # Collect working directories from running apps
     working_dirs = []
@@ -2212,7 +2231,8 @@ def generate_clonebox_yaml(
     # Build paths mapping
     paths_mapping = {}
     idx = 0
-    for host_path in paths_by_type["project"][:5]:  # Limit projects
+    for host_path_obj in paths_by_type["project"][:5]:  # Limit projects
+        host_path = host_path_obj.path if hasattr(host_path_obj, 'path') else host_path_obj
         paths_mapping[host_path] = f"/mnt/project{idx}"
         idx += 1
 
@@ -2294,10 +2314,6 @@ def generate_clonebox_yaml(
     if deduplicate:
         all_snap_packages = deduplicate_list(all_snap_packages)
 
-    if chrome_profile.exists() and "google-chrome" not in [d.get("app", "") for d in app_data_dirs]:
-        if "chromium" not in all_snap_packages:
-            all_snap_packages.append("chromium")
-
     if "pycharm-community" in all_snap_packages:
         remapped = {}
         for host_path, guest_path in app_data_mapping.items():
@@ -2355,9 +2371,9 @@ def generate_clonebox_yaml(
                 for d in app_data_dirs[:15]
             ],
             "all_paths": {
-                "projects": list(paths_by_type["project"]),
-                "configs": list(paths_by_type["config"][:5]),
-                "data": list(paths_by_type["data"][:5]),
+                "projects": [{"path": p.path if hasattr(p, 'path') else p, "type": p.type if hasattr(p, 'type') else 'project', "size_mb": p.size_mb if hasattr(p, 'size_mb') else 0} for p in paths_by_type["project"]],
+                "configs": [{"path": p.path, "type": p.type, "size_mb": p.size_mb} for p in paths_by_type["config"][:5]],
+                "data": [{"path": p.path, "type": p.type, "size_mb": p.size_mb} for p in paths_by_type["data"][:5]],
             },
         },
     }
@@ -2564,6 +2580,359 @@ def monitor_cloud_init_status(vm_name: str, user_session: bool = False, timeout:
 
     except KeyboardInterrupt:
         console.print("\n[yellow]Monitoring stopped.[/]")
+    finally:
+        monitor.close()
+
+
+def create_vm_from_config(config, start=False, user_session=False, replace=False, approved=False):
+    """Create VM from configuration dict."""
+    vm_config_dict = config.get("vm", {})
+    
+    # Create VMConfig object
+    vm_config = VMConfig(
+        name=vm_config_dict.get("name", "clonebox-vm"),
+        ram_mb=vm_config_dict.get("ram_mb", 8192),
+        vcpus=vm_config_dict.get("vcpus", 4),
+        disk_size_gb=vm_config_dict.get("disk_size_gb", 20),
+        gui=vm_config_dict.get("gui", True),
+        base_image=vm_config_dict.get("base_image"),
+        network_mode=vm_config_dict.get("network_mode", "auto"),
+        username=vm_config_dict.get("username", "ubuntu"),
+        password=vm_config_dict.get("password", "ubuntu"),
+        user_session=user_session,
+        paths=config.get("paths", {}),
+        packages=config.get("packages", []),
+        snap_packages=config.get("snap_packages", []),
+        services=config.get("services", []),
+        post_commands=config.get("post_commands", []),
+        copy_paths=(config.get("copy_paths") or config.get("app_data_paths") or {}),
+        resources=config.get("resources", {}),
+    )
+    
+    cloner = SelectiveVMCloner(user_session=user_session)
+    
+    # Check prerequisites
+    checks = cloner.check_prerequisites()
+    if not all(checks.values()):
+        console.print("[yellow]⚠️  Prerequisites check:[/]")
+        for check, passed in checks.items():
+            icon = "✅" if passed else "❌"
+            console.print(f"   {icon} {check}")
+    
+    # Create VM
+    vm_uuid = cloner.create_vm(
+        vm_config,
+        replace=replace,
+        console=console,
+        approved=approved,
+    )
+    
+    if start:
+        cloner.start_vm(vm_config.name, open_viewer=True, console=console)
+    
+    return vm_uuid
+
+
+def cmd_clone(args) -> None:
+    """Generate clone config from path and optionally create VM."""
+    from clonebox.detector import SystemDetector
+    
+    target_path = Path(args.path).expanduser().resolve() if args.path else Path.cwd()
+    
+    if not target_path.exists():
+        console.print(f"[red]❌ Path does not exist: {target_path}[/]")
+        return
+    
+    console.print(f"[cyan]🔍 Analyzing system for cloning...[/]")
+    
+    # Detect system state
+    detector = SystemDetector()
+    
+    with Progress(
+        SpinnerColumn(),
+        TextColumn("[progress.description]{task.description}"),
+        console=console,
+    ) as progress:
+        task = progress.add_task("Scanning system...", total=None)
+        
+        # Take snapshot
+        snapshot = detector.detect_all()
+        
+        # Detect Docker containers
+        containers = detector.detect_docker_containers()
+        
+        progress.update(task, description="Finalizing...")
+    
+    # Generate config
+    yaml_content = generate_clonebox_yaml(
+        snapshot,
+        detector,
+        deduplicate=args.dedupe,
+        target_path=str(target_path) if args.path else None,
+        vm_name=args.name,
+        network_mode=args.network,
+        base_image=args.base_image,
+        disk_size_gb=args.disk_size_gb,
+    )
+    
+    # Save config file
+    config_file = target_path / CLONEBOX_CONFIG_FILE
+    
+    if config_file.exists() and not args.replace:
+        console.print(f"[yellow]⚠️  Config file already exists: {config_file}[/]")
+        if not questionary.confirm(
+            "Overwrite existing config?", default=False, style=custom_style
+        ).ask():
+            console.print("[dim]Cancelled.[/]")
+            return
+    
+    with open(config_file, "w") as f:
+        f.write(yaml_content)
+    
+    console.print(f"[green]✅ Config saved to: {config_file}[/]")
+    
+    # Edit if requested
+    if args.edit:
+        editor = os.environ.get("EDITOR", "nano")
+        os.system(f"{editor} {config_file}")
+    
+    # Run VM if requested
+    if args.run:
+        console.print("[cyan]🚀 Creating VM from config...[/]")
+        config = load_clonebox_config(config_file)
+        vm_uuid = create_vm_from_config(
+            config, start=True, user_session=args.user, replace=args.replace, approved=args.approve
+        )
+        console.print(f"[green]✅ VM created: {vm_uuid}[/]")
+
+
+def cmd_detect(args) -> None:
+    """Detect and show system state."""
+    from clonebox.detector import SystemDetector
+    
+    console.print("[cyan]🔍 Detecting system state...[/]")
+    
+    try:
+        detector = SystemDetector()
+        
+        # Detect system info
+        sys_info = detector.get_system_info()
+        
+        # Detect all services, apps, and paths
+        snapshot = detector.detect_all()
+        
+        # Detect Docker containers
+        containers = detector.detect_docker_containers()
+        
+        # Prepare output
+        output = {
+            "system": sys_info,
+            "services": [
+                {
+                    "name": s.name,
+                    "status": s.status,
+                    "enabled": s.enabled,
+                    "description": s.description,
+                }
+                for s in snapshot.running_services
+            ],
+            "applications": [
+                {
+                    "name": a.name,
+                    "pid": a.pid,
+                    "memory_mb": round(a.memory_mb, 2),
+                    "working_dir": a.working_dir or "",
+                }
+                for a in snapshot.applications
+            ],
+            "paths": [
+                {"path": p.path, "type": p.type, "size_mb": p.size_mb}
+                for p in snapshot.paths
+            ],
+            "docker_containers": [
+                {
+                    "name": c["name"],
+                    "status": c["status"],
+                    "image": c["image"],
+                    "ports": c.get("ports", ""),
+                }
+                for c in containers
+            ],
+        }
+        
+        # Apply deduplication if requested
+        if args.dedupe:
+            output["services"] = deduplicate_list(output["services"], key=lambda x: x["name"])
+            output["applications"] = deduplicate_list(output["applications"], key=lambda x: (x["name"], x["pid"]))
+            output["paths"] = deduplicate_list(output["paths"], key=lambda x: x["path"])
+        
+        # Format output
+        if args.json:
+            content = json.dumps(output, indent=2)
+        elif args.yaml:
+            content = yaml.dump(output, default_flow_style=False, allow_unicode=True)
+        else:
+            # Pretty print
+            content = format_detection_output(output, sys_info)
+        
+        # Save to file or print
+        if args.output:
+            with open(args.output, "w") as f:
+                f.write(content)
+            console.print(f"[green]✅ Output saved to: {args.output}[/]")
+        else:
+            console.print(content)
+    
+    except Exception as e:
+        console.print(f"[red]Error: {e}[/]")
+        import traceback
+        traceback.print_exc()
+
+
+def format_detection_output(output, sys_info):
+    """Format detection output for console display."""
+    from rich.table import Table
+    from rich.text import Text
+    
+    # System info
+    system_text = Text()
+    system_text.append(f"Hostname: {sys_info['hostname']}\n", style="bold")
+    system_text.append(f"User: {sys_info['user']}\n")
+    system_text.append(f"CPU: {sys_info['cpu_count']} cores\n")
+    system_text.append(
+        f"Memory: {sys_info['memory_total_gb']:.1f} GB total, {sys_info['memory_available_gb']:.1f} GB available\n"
+    )
+    system_text.append(
+        f"Disk: {sys_info['disk_total_gb']:.1f} GB total, {sys_info['disk_free_gb']:.1f} GB free"
+    )
+    
+    # Services table
+    services_table = Table(title="Services", show_header=True, header_style="bold magenta")
+    services_table.add_column("Name", style="cyan")
+    services_table.add_column("Status", style="green")
+    services_table.add_column("Enabled", style="yellow")
+    services_table.add_column("Description", style="dim")
+    
+    for svc in output["services"]:
+        status_style = "green" if svc["status"] == "running" else "red"
+        enabled_text = "✓" if svc["enabled"] else "✗"
+        services_table.add_row(
+            svc["name"],
+            Text(svc["status"], style=status_style),
+            enabled_text,
+            svc["description"] or "-",
+        )
+    
+    # Applications table
+    apps_table = Table(title="Applications", show_header=True, header_style="bold magenta")
+    apps_table.add_column("Name", style="cyan")
+    apps_table.add_column("PID", justify="right")
+    apps_table.add_column("Memory (MB)", justify="right")
+    apps_table.add_column("Working Dir", style="dim")
+    
+    for app in output["applications"]:
+        apps_table.add_row(
+            app["name"],
+            str(app["pid"]),
+            f"{app['memory_mb']:.1f}",
+            app["working_dir"] or "-",
+        )
+    
+    # Combine output
+    result = Panel(system_text, title="System Information", border_style="blue")
+    result += "\n\n"
+    result += services_table
+    result += "\n\n"
+    result += apps_table
+    
+    return result
+
+
+def cmd_monitor(args) -> None:
+    """Real-time resource monitoring."""
+    from clonebox.cloner import SelectiveVMCloner
+    
+    user_session = getattr(args, "user", False)
+    refresh = getattr(args, "refresh", 2.0)
+    once = getattr(args, "once", False)
+    
+    cloner = SelectiveVMCloner(user_session=user_session)
+    
+    try:
+        vms = cloner.list_vms()
+        
+        if not vms:
+            console.print("[dim]No VMs found.[/]")
+            return
+        
+        # Create monitor
+        monitor = ResourceMonitor(conn_uri="qemu:///session" if user_session else "qemu:///system")
+        
+        if once:
+            # Show stats once
+            table = Table(title="VM Resource Usage", show_header=True, header_style="bold magenta")
+            table.add_column("VM Name", style="cyan")
+            table.add_column("CPU %", justify="right")
+            table.add_column("Memory", justify="right")
+            table.add_column("Disk I/O", justify="right")
+            table.add_column("Network I/O", justify="right")
+            
+            for vm in vms:
+                if vm["state"] == "running":
+                    stats = monitor.get_vm_stats(vm["name"])
+                    table.add_row(
+                        vm["name"],
+                        f"{stats.get('cpu_percent', 0):.1f}%",
+                        format_bytes(stats.get("memory_usage", 0)),
+                        f"{stats.get('disk_read', 0)}/{stats.get('disk_write', 0)} MB/s",
+                        f"{stats.get('net_rx', 0)}/{stats.get('net_tx', 0)} MB/s",
+                    )
+                else:
+                    table.add_row(vm["name"], "[dim]not running[/]", "-", "-", "-")
+            
+            console.print(table)
+        else:
+            # Continuous monitoring
+            console.print(f"[cyan]Monitoring VMs (refresh every {refresh}s). Press Ctrl+C to exit.[/]\n")
+            
+            try:
+                while True:
+                    # Clear screen
+                    console.clear()
+                    
+                    # Create table
+                    table = Table(
+                        title=f"VM Resource Usage - {datetime.now().strftime('%H:%M:%S')}",
+                        show_header=True,
+                        header_style="bold magenta",
+                    )
+                    table.add_column("VM Name", style="cyan")
+                    table.add_column("State", style="green")
+                    table.add_column("CPU %", justify="right")
+                    table.add_column("Memory", justify="right")
+                    table.add_column("Disk I/O", justify="right")
+                    table.add_column("Network I/O", justify="right")
+                    
+                    for vm in vms:
+                        if vm["state"] == "running":
+                            stats = monitor.get_vm_stats(vm["name"])
+                            table.add_row(
+                                vm["name"],
+                                vm["state"],
+                                f"{stats.get('cpu_percent', 0):.1f}%",
+                                format_bytes(stats.get("memory_usage", 0)),
+                                f"{stats.get('disk_read', 0):.1f}/{stats.get('disk_write', 0):.1f} MB/s",
+                                f"{stats.get('net_rx', 0):.1f}/{stats.get('net_tx', 0):.1f} MB/s",
+                            )
+                        else:
+                            table.add_row(vm["name"], f"[dim]{vm['state']}[/]", "-", "-", "-", "-")
+                    
+                    console.print(table)
+                    time.sleep(refresh)
+                    
+            except KeyboardInterrupt:
+                console.print("\n[yellow]Monitoring stopped.[/]")
+    
     finally:
         monitor.close()
 
@@ -3901,6 +4270,11 @@ def main():
         help="If VM already exists, stop+undefine it and recreate (also deletes its storage)",
     )
     clone_parser.add_argument(
+        "--approve",
+        action="store_true",
+        help="Approve policy-gated operation (required for --replace if policy demands)",
+    )
+    clone_parser.add_argument(
         "--dry-run",
         action="store_true",
         help="Show what would be created without making any changes",
@@ -4044,7 +4418,7 @@ def main():
         "--include-data",
         "-d",
         action="store_true",
-        help="Include shared data (browser profiles, configs) in export",
+        help="Include shared data (browser profiles, configs)",
     )
     export_parser.set_defaults(func=cmd_export)
 
@@ -4056,6 +4430,11 @@ def main():
     )
     import_parser.add_argument(
         "--replace", action="store_true", help="Replace existing VM if exists"
+    )
+    import_parser.add_argument(
+        "--approve",
+        action="store_true",
+        help="Approve policy-gated operation (required for --replace if policy demands)",
     )
     import_parser.set_defaults(func=cmd_import)
 

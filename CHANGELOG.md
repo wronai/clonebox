@@ -1,3 +1,17 @@
+## [1.1.19] - 2026-02-02
+
+### Summary
+
+feat(goal): CLI interface improvements
+
+### Core
+
+- update src/clonebox/backends/libvirt_backend.py
+- update src/clonebox/cli.py
+- update src/clonebox/cloner.py
+- update src/clonebox/validator.py
+
+
 ## [1.1.18] - 2026-02-01
 
 ### Summary

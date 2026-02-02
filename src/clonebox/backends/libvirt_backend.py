@@ -50,8 +50,10 @@ class LibvirtBackend(HypervisorBackend):
             self._conn = None
 
     @property
-    def conn(self) -> libvirt.virConnect:
+    def conn(self) -> Optional["libvirt.virConnect"]:
         """Get active libvirt connection."""
+        if libvirt is None:
+            raise RuntimeError("libvirt is not available")
         if self._conn is None:
             self.connect()
         return self._conn

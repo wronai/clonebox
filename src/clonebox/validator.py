@@ -130,6 +130,7 @@ class VMValidator:
 
     def validate_mounts(self) -> Dict:
         """Validate all mount points and copied data paths."""
+        setup_in_progress = self._setup_in_progress_cache is True
         self.console.print("\n[bold]💾 Validating Mounts & Data...[/]")
 
         paths = self.config.get("paths", {})
@@ -146,7 +147,13 @@ class VMValidator:
         mount_output = self._exec_in_vm("mount | grep 9p")
         mounted_paths = []
         if mount_output:
-            mounted_paths = [line.split()[2] for line in mount_output.split("\n") if line.strip()]
+            for line in mount_output.split("\n"):
+                line = line.strip()
+                if not line:
+                    continue
+                parts = line.split()
+                if len(parts) >= 3:
+                    mounted_paths.append(parts[2])
 
         mount_table = Table(title="Data Validation", border_style="cyan")
         mount_table.add_column("Guest Path", style="bold")
@@ -155,7 +162,6 @@ class VMValidator:
         mount_table.add_column("Files", justify="right")
 
         # Validate bind mounts (paths)
-        setup_in_progress = self._setup_in_progress() is True
         for host_path, guest_path in paths.items():
             self.results["mounts"]["total"] += 1
             
@@ -252,6 +258,7 @@ class VMValidator:
 
     def validate_packages(self) -> Dict:
         """Validate APT packages are installed."""
+        setup_in_progress = self._setup_in_progress() is True
         self.console.print("\n[bold]📦 Validating APT Packages...[/]")
 
         packages = self.config.get("packages", [])
@@ -263,8 +270,6 @@ class VMValidator:
         pkg_table.add_column("Package", style="bold")
         pkg_table.add_column("Status", justify="center")
         pkg_table.add_column("Version", style="dim")
-
-        setup_in_progress = self._setup_in_progress() is True
 
         for package in packages:
             self.results["packages"]["total"] += 1
@@ -302,6 +307,7 @@ class VMValidator:
 
     def validate_snap_packages(self) -> Dict:
         """Validate snap packages are installed."""
+        setup_in_progress = self._setup_in_progress() is True
         self.console.print("\n[bold]📦 Validating Snap Packages...[/]")
 
         snap_packages = self.config.get("snap_packages", [])
@@ -313,8 +319,6 @@ class VMValidator:
         snap_table.add_column("Package", style="bold")
         snap_table.add_column("Status", justify="center")
         snap_table.add_column("Version", style="dim")
-
-        setup_in_progress = self._setup_in_progress() is True
 
         for package in snap_packages:
             self.results["snap_packages"]["total"] += 1
@@ -383,6 +387,7 @@ class VMValidator:
 
     def validate_services(self) -> Dict:
         """Validate services are enabled and running."""
+        setup_in_progress = self._setup_in_progress() is True
         self.console.print("\n[bold]⚙️  Validating Services...[/]")
 
         services = self.config.get("services", [])
@@ -400,9 +405,6 @@ class VMValidator:
         svc_table.add_column("PID", justify="right", style="dim")
         svc_table.add_column("Note", style="dim")
 
-        # Define setup_in_progress once here to avoid NameError in branches or loops
-        setup_in_progress = self._setup_in_progress() is True
-
         for service in services:
             if service in self.VM_EXCLUDED_SERVICES:
                 svc_table.add_row(service, "[dim]—[/]", "[dim]—[/]", "[dim]—[/]", "host-only")
@@ -419,7 +421,6 @@ class VMValidator:
                 continue
 
             self.results["services"]["total"] += 1
-            setup_in_progress = self._setup_in_progress() is True
 
             enabled_cmd = f"systemctl is-enabled {service} 2>/dev/null"
             enabled_status = self._exec_in_vm(enabled_cmd)
@@ -473,6 +474,7 @@ class VMValidator:
         return self.results["services"]
 
     def validate_apps(self) -> Dict:
+        setup_in_progress = self._setup_in_progress() is True
         packages = self.config.get("packages", [])
         snap_packages = self.config.get("snap_packages", [])
         # Support both v1 (app_data_paths) and v2 (copy_paths) config formats
@@ -658,8 +660,6 @@ class VMValidator:
             note = ""
             pending = False
 
-            setup_in_progress = self._setup_in_progress() is True
-
             if app == "firefox":
                 installed = (
                     self._exec_in_vm("command -v firefox >/dev/null 2>&1 && echo yes || echo no")
@@ -778,6 +778,7 @@ class VMValidator:
         return self.results["apps"]
 
     def validate_smoke_tests(self) -> Dict:
+        setup_in_progress = self._setup_in_progress() is True
         packages = self.config.get("packages", [])
         snap_packages = self.config.get("snap_packages", [])
         # Support both v1 (app_data_paths) and v2 (copy_paths) config formats
@@ -900,7 +901,6 @@ class VMValidator:
         table.add_column("Launch", justify="center")
         table.add_column("Note", style="dim")
 
-        setup_in_progress = self._setup_in_progress() is True
         for app in expected:
             self.results["smoke"]["total"] += 1
             installed = _installed(app)
@@ -984,6 +984,7 @@ class VMValidator:
 
     def validate_disk_space(self) -> Dict:
         """Validate disk space on root filesystem."""
+        setup_in_progress = self._setup_in_progress() is True
         self.console.print("\n[bold]💾 Validating Disk Space...[/]")
         
         df_output = self._exec_in_vm("df -h / --output=pcent,avail,size | tail -n 1", timeout=20)
@@ -1116,6 +1117,7 @@ class VMValidator:
 
     def validate_all(self) -> Dict:
         """Run all validations and return comprehensive results."""
+        setup_in_progress = self._setup_in_progress() is True
         self.console.print("[bold cyan]🔍 Running Full Validation...[/]")
 
         # Check if VM is running
@@ -1140,6 +1142,14 @@ class VMValidator:
 
         # Check QEMU Guest Agent
         if not self._check_qga_ready():
+            wait_deadline = time.time() + 180
+            self.console.print("[yellow]⏳ Waiting for QEMU Guest Agent (up to 180s)...[/]")
+            while time.time() < wait_deadline:
+                time.sleep(5)
+                if self._check_qga_ready():
+                    break
+
+        if not self._check_qga_ready():
             self.console.print("[red]❌ QEMU Guest Agent not responding[/]")
             self.console.print("\n[bold]🔧 Troubleshooting QGA:[/]")
             self.console.print("  1. The VM might still be booting. Wait 30-60 seconds.")
@@ -1153,7 +1163,6 @@ class VMValidator:
             return self.results
 
         ci_status = self._exec_in_vm("cloud-init status --long 2>/dev/null || cloud-init status 2>/dev/null || true", timeout=20)
-        setup_in_progress = False
         if ci_status:
             ci_lower = ci_status.lower()
             if "running" in ci_lower:

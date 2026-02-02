@@ -537,7 +537,7 @@ class SelectiveVMCloner:
         """Generate boot diagnostic script with self-healing capabilities."""
         import base64
 
-        wants_google_chrome = any(
+        wants_chrome = any(
             p == "/home/ubuntu/.config/google-chrome"
             for p in list((config.paths or {}).values()) + list((config.copy_paths or {}).values())
         )
@@ -812,7 +812,7 @@ for pkg in "${{SNAP_PACKAGES[@]}}"; do
     [ -z "$pkg" ] && continue
     APPS_TO_TEST+=("$pkg")
 done
-if [ "{str(wants_google_chrome).lower()}" = "true" ]; then
+if [ "{str(wants_chrome).lower()}" = "true" ]; then
     APPS_TO_TEST+=("google-chrome")
 fi
 if printf '%s\n' "${{APT_PACKAGES[@]}}" | grep -qx "docker.io"; then
@@ -1419,6 +1419,13 @@ fi
         """Create cloud-init ISO with secure credential handling."""
         secrets_mgr = SecretsManager()
 
+        # Determine if Chrome is wanted early to avoid NameError in helpers
+        wants_chrome = any(
+            p == "/home/ubuntu/.config/google-chrome"
+            for p in list((config.paths or {}).values())
+            + list((config.copy_paths or {}).values())
+        )
+
         # Determine authentication method
         auth_method = getattr(config, "auth_method", "ssh_key")
 
@@ -1571,11 +1578,7 @@ fi
         # Build runcmd - services, mounts, snaps, post_commands
         runcmd_lines = []
 
-        wants_chrome = any(
-            p == "/home/ubuntu/.config/google-chrome"
-            for p in list((config.paths or {}).values())
-            + list((config.copy_paths or {}).values())
-        )
+        # wants_chrome moved to top of method to avoid NameError
 
         # Add detailed logging header
         runcmd_lines.append("  - echo '═══════════════════════════════════════════════════════════'")
@@ -1602,6 +1605,10 @@ fi
             for i, pkg in enumerate(all_packages, 1):
                 runcmd_lines.append(f"  - echo '  → [{i}/{len(all_packages)}] Installing {pkg}...'")
                 runcmd_lines.append(f"  - apt-get install -y {pkg} || echo '  → ❌ Failed to install {pkg}'")
+                if pkg == "qemu-guest-agent":
+                    runcmd_lines.append(
+                        "  - systemctl enable --now qemu-guest-agent || echo '  → ❌ Failed to enable qemu-guest-agent'"
+                    )
             runcmd_lines.append("  - apt-get clean")
             runcmd_lines.append("  - echo '  → ✓ [2/10] APT packages installed'")
             runcmd_lines.append("  - df -h / | sed 's/^/  → /'")
