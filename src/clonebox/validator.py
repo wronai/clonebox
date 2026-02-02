@@ -3,6 +3,7 @@ VM validation module - validates VM state against YAML configuration.
 """
 
 import subprocess
+import shutil
 import json
 import base64
 import time
@@ -69,6 +70,8 @@ class VMValidator:
         return 22000 + (zlib.crc32(self.vm_name.encode("utf-8")) % 1000)
 
     def _ssh_exec(self, command: str, timeout: int = 10) -> Optional[str]:
+        if shutil.which("ssh") is None:
+            return None
         key_path = self._get_ssh_key_path()
         if key_path is None:
             return None

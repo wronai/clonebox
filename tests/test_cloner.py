@@ -167,6 +167,7 @@ class TestSelectiveVMClonerMethods:
     def test_check_prerequisites_returns_dict(self, mock_libvirt):
         mock_conn = MagicMock()
         mock_conn.isAlive.return_value = True
+        mock_conn.getLibVersion.return_value = 9_000_000
         mock_conn.listNetworks.return_value = ["default"]
         mock_conn.listDefinedNetworks.return_value = []
         mock_libvirt.open.return_value = mock_conn
@@ -181,6 +182,9 @@ class TestSelectiveVMClonerMethods:
         assert "images_dir_writable" in checks
         assert "images_dir" in checks
         assert "session_type" in checks
+        assert "passt_installed" in checks
+        assert "passt_available" in checks
+        assert "default_network_required" in checks
 
     @pytest.mark.parametrize(
         "user_session,expected_type",
@@ -193,6 +197,7 @@ class TestSelectiveVMClonerMethods:
     def test_check_prerequisites_session_type(self, mock_libvirt, user_session, expected_type):
         mock_conn = MagicMock()
         mock_conn.isAlive.return_value = True
+        mock_conn.getLibVersion.return_value = 9_000_000
         mock_libvirt.open.return_value = mock_conn
         mock_libvirt.openAuth.return_value = mock_conn
 

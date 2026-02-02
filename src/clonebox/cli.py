@@ -946,10 +946,26 @@ def interactive_mode():
 
         # Check prerequisites
         checks = cloner.check_prerequisites(config)
-        bool_checks = {k: v for k, v in checks.items() if isinstance(v, bool)}
-        if bool_checks and not all(bool_checks.values()):
+        required_keys = [
+            "libvirt_connected",
+            "kvm_available",
+            "default_network",
+            "images_dir_writable",
+            "genisoimage_installed",
+            "qemu_img_installed",
+        ]
+        if getattr(config, "gui", False):
+            required_keys.append("virt_viewer_installed")
+
+        required_checks = {
+            k: checks.get(k)
+            for k in required_keys
+            if isinstance(checks.get(k), bool)
+        }
+
+        if required_checks and not all(required_checks.values()):
             console.print("[yellow]⚠️  Prerequisites check:[/]")
-            for check, passed in bool_checks.items():
+            for check, passed in required_checks.items():
                 icon = "✅" if passed else "❌"
                 console.print(f"   {icon} {check}")
 
@@ -2626,10 +2642,22 @@ def create_vm_from_config(config, start=False, user_session=False, replace=False
     
     # Check prerequisites
     checks = cloner.check_prerequisites(vm_config)
-    bool_checks = {k: v for k, v in checks.items() if isinstance(v, bool)}
-    if bool_checks and not all(bool_checks.values()):
+    required_keys = [
+        "libvirt_connected",
+        "kvm_available",
+        "default_network",
+        "images_dir_writable",
+        "genisoimage_installed",
+        "qemu_img_installed",
+    ]
+    if getattr(vm_config, "gui", False):
+        required_keys.append("virt_viewer_installed")
+
+    required_checks = {k: checks.get(k) for k in required_keys if isinstance(checks.get(k), bool)}
+
+    if required_checks and not all(required_checks.values()):
         console.print("[yellow]⚠️  Prerequisites check:[/]")
-        for check, passed in bool_checks.items():
+        for check, passed in required_checks.items():
             icon = "✅" if passed else "❌"
             console.print(f"   {icon} {check}")
     

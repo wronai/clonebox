@@ -289,6 +289,17 @@ class SelectiveVMCloner:
         """Check if libvirt default network is active."""
         return self._default_network_state() == "active"
 
+    def _passt_supported(self) -> bool:
+        try:
+            if self.conn is None:
+                return False
+            if not hasattr(self.conn, "getLibVersion"):
+                return False
+            # libvirt 9.0.0 introduced the passt backend and <portForward> support
+            return int(self.conn.getLibVersion()) >= 9_000_000
+        except Exception:
+            return False
+
     def resolve_network_mode(self, config: VMConfig) -> str:
         """Resolve network mode based on config and session type."""
         mode = (config.network_mode or "auto").lower()
@@ -323,7 +334,10 @@ class SelectiveVMCloner:
             "virt_viewer_installed": False,
             "qemu_img_installed": False,
             "passt_installed": shutil.which("passt") is not None,
+            "passt_available": False,
         }
+
+        checks["passt_available"] = checks["passt_installed"] and self._passt_supported()
 
         # Check for genisoimage
         checks["genisoimage_installed"] = shutil.which("genisoimage") is not None
@@ -542,6 +556,18 @@ class SelectiveVMCloner:
                             f"Error: {e}\n\n"
                             f"If the VM already exists, try: clonebox clone . --name {config.name} --replace\n"
                         ) from e
+
+                    try:
+                        if console and self.resolve_network_mode(config) == "user":
+                            if shutil.which("passt") and self._passt_supported():
+                                ssh_key_path = vm_dir / "ssh_key"
+                                if ssh_key_path.exists():
+                                    ssh_port = 22000 + (zlib.crc32(config.name.encode("utf-8")) % 1000)
+                                    console.print(
+                                        f"[dim]SSH access (passthrough): ssh -i {ssh_key_path} -p {ssh_port} {config.username}@127.0.0.1[/]"
+                                    )
+                    except Exception:
+                        pass
 
                     # Start if autostart requested
                     if getattr(config, "autostart", False):
@@ -1378,7 +1404,7 @@ fi
             iface = ET.SubElement(devices, "interface", type="user")
             ET.SubElement(iface, "model", type="virtio")
 
-            if shutil.which("passt"):
+            if shutil.which("passt") and self._passt_supported():
                 ET.SubElement(iface, "backend", type="passt")
 
                 ssh_port = 22000 + (zlib.crc32(config.name.encode("utf-8")) % 1000)
