@@ -37,7 +37,7 @@ from clonebox.health import HealthCheckManager, ProbeConfig, ProbeType
 from clonebox.audit import get_audit_logger, AuditQuery, AuditEventType, AuditOutcome
 from clonebox.orchestrator import Orchestrator, OrchestrationResult
 from clonebox.plugins import get_plugin_manager, PluginHook, PluginContext
-from clonebox.policies import PolicyEngine, PolicyValidationError
+from clonebox.policies import PolicyEngine, PolicyValidationError, PolicyViolationError
 from clonebox.remote import RemoteCloner, RemoteConnection
 
 # Custom questionary style
@@ -264,8 +264,6 @@ def run_vm_diagnostics(
             console.print(f"[dim]{domifaddr.stdout.strip()}[/]")
         else:
             console.print("[yellow]⚠️  No interface address detected via virsh domifaddr[/]")
-            if verbose and domifaddr.stderr.strip():
-                console.print(f"[dim]{domifaddr.stderr.strip()}[/]")
             # Fallback: try to get IP via QEMU Guest Agent (useful for slirp/user networking)
             if guest_agent_ready:
                 try:
@@ -610,7 +608,6 @@ def cmd_logs(args):
     
     name = args.name
     user_session = getattr(args, "user", False)
-    show_all = getattr(args, "all", False)
     
     try:
         vm_name, _ = _resolve_vm_name_and_config_file(name)
@@ -630,7 +627,7 @@ def cmd_logs(args):
     try:
         console.print(f"[cyan]📋 Opening logs for VM: {vm_name}[/]")
         subprocess.run(
-            [str(logs_script), vm_name, "true" if user_session else "false", "true" if show_all else "false"],
+            [str(logs_script), vm_name, "true" if user_session else "false", "true" if getattr(args, "all", False) else "false"],
             check=True
         )
     except subprocess.CalledProcessError as e:
@@ -943,7 +940,7 @@ def interactive_mode():
     )
 
     try:
-        cloner = SelectiveVMCloner(user_session=user_session)
+        cloner = SelectiveVMCloner(user_session=getattr(args, "user", False))
 
         # Check prerequisites
         checks = cloner.check_prerequisites()
@@ -1201,12 +1198,38 @@ def cmd_delete(args):
             console.print(f"[red]❌ Config not found: {config_file}[/]")
             return
 
+    policy_start = None
+    if name and (name.startswith(".") or name.startswith("/") or name.startswith("~")):
+        policy_start = Path(name).expanduser().resolve()
+
+    policy = PolicyEngine.load_effective(start=policy_start)
+    if policy is not None:
+        try:
+            policy.assert_operation_approved(
+                AuditEventType.VM_DELETE.value,
+                approved=getattr(args, "approve", False),
+            )
+        except PolicyViolationError as e:
+            console.print(f"[red]❌ {e}[/]")
+            sys.exit(1)
+
     if not args.yes:
         if not questionary.confirm(
             f"Delete VM '{name}' and its storage?", default=False, style=custom_style
         ).ask():
             console.print("[yellow]Cancelled.[/]")
             return
+
+    cloner = SelectiveVMCloner(user_session=getattr(args, "user", False))
+    delete_storage = not getattr(args, "keep_storage", False)
+    console.print(f"[cyan]🗑️ Deleting VM: {name}[/]")
+    try:
+        ok = cloner.delete_vm(name, delete_storage=delete_storage, console=console)
+        if not ok:
+            sys.exit(1)
+    except Exception as e:
+        console.print(f"[red]❌ Failed to delete VM: {e}[/]")
+        sys.exit(1)
 
 
 def cmd_list(args):
@@ -1419,7 +1442,12 @@ def cmd_export(args):
     # If name is a path, load config
     if name and (name.startswith(".") or name.startswith("/") or name.startswith("~")):
         target_path = Path(name).expanduser().resolve()
-        config_file = target_path / ".clonebox.yaml" if target_path.is_dir() else target_path
+
+        if target_path.is_dir():
+            config_file = target_path / CLONEBOX_CONFIG_FILE
+        else:
+            config_file = target_path
+
         if config_file.exists():
             config = load_clonebox_config(config_file)
             name = config["vm"]["name"]
@@ -1813,6 +1841,7 @@ def cmd_test(args):
 
     # Test 2: Check VM state
     console.print("[bold]2. VM State Check[/]")
+    cloud_init_running = False
     try:
         result = subprocess.run(
             ["virsh", "--connect", conn_uri, "domstate", vm_name],
@@ -1832,6 +1861,15 @@ def cmd_test(args):
                     qga_ready = _qga_ping(vm_name, conn_uri)
                     if qga_ready:
                         break
+            
+            # Check cloud-init status immediately if QGA is ready
+            if qga_ready:
+                status = _qga_exec(
+                    vm_name, conn_uri, "cloud-init status 2>/dev/null || true", timeout=15
+                )
+                if status and "running" in status.lower():
+                    cloud_init_running = True
+                    console.print("[yellow]⏳ Setup in progress (cloud-init is running)[/]")
 
             # Test network if running
             console.print("\n   Checking network...")
@@ -1882,14 +1920,15 @@ def cmd_test(args):
 
     # Test 3: Check cloud-init status (if running)
     cloud_init_complete: Optional[bool] = None
-    cloud_init_running: bool = False
     if not quick and state == "running":
         console.print("[bold]3. Cloud-init Status[/]")
         try:
             if not qga_ready:
                 console.print("[yellow]⚠️  Cloud-init status unknown (QEMU Guest Agent not connected)[/]")
             else:
-                status = _qga_exec(vm_name, conn_uri, "cloud-init status 2>/dev/null || true", timeout=15)
+                status = _qga_exec(
+                    vm_name, conn_uri, "cloud-init status 2>/dev/null || true", timeout=15
+                )
                 if status is None:
                     console.print("[yellow]⚠️  Could not check cloud-init (QGA command failed)[/]")
                     cloud_init_complete = None
@@ -1916,9 +1955,11 @@ def cmd_test(args):
     if not quick and state == "running":
         console.print("[bold]4. Mount Points Check[/]")
         paths = config.get("paths", {})
-        app_data_paths = config.get("app_data_paths", {})
+        copy_paths = config.get("copy_paths", None)
+        if not isinstance(copy_paths, dict) or not copy_paths:
+            copy_paths = config.get("app_data_paths", {})
 
-        if paths or app_data_paths:
+        if paths or copy_paths:
             if not _qga_ping(vm_name, conn_uri):
                 console.print("[yellow]⚠️  QEMU guest agent not connected - cannot verify mounts[/]")
             else:
@@ -1940,7 +1981,7 @@ def cmd_test(args):
                         console.print(f"[yellow]⚠️  {guest_path} (could not check)[/]")
                 
                 # Check copied paths
-                for idx, (host_path, guest_path) in enumerate(app_data_paths.items()):
+                for idx, (host_path, guest_path) in enumerate(copy_paths.items()):
                     try:
                         is_accessible = _qga_exec(
                             vm_name, conn_uri, f"test -d {guest_path} && echo yes || echo no", timeout=5
@@ -2001,9 +2042,6 @@ def cmd_test(args):
                     else:
                         console.print("[yellow]⚠️  Health check status not available yet[/]")
                         console.print("   View logs in VM: cat /var/log/clonebox-health.log")
-                else:
-                    console.print("[yellow]⚠️  Health check script not found[/]")
-                    console.print("   This is expected until cloud-init completes")
         except Exception as e:
             console.print(f"[yellow]⚠️  Could not run health check: {e}[/]")
 
@@ -2149,7 +2187,7 @@ def generate_clonebox_yaml(
     paths_by_type = {"project": [], "config": [], "data": []}
     for p in snapshot.paths:
         if p.type in paths_by_type:
-            paths_by_type[p.type].append(p.path)
+            paths_by_type[p.type].append(p)
 
     if deduplicate:
         for ptype in paths_by_type:
@@ -2431,628 +2469,98 @@ def monitor_cloud_init_status(vm_name: str, user_session: bool = False, timeout:
     last_phases = []
     seen_lines = set()
 
-    with Progress(
-        SpinnerColumn(),
-        TextColumn("[progress.description]{task.description}"),
-        console=console,
-    ) as progress:
-        task = progress.add_task("[cyan]Starting VM and initializing...", total=None)
-
-        while time.time() - start_time < timeout:
-            try:
-                elapsed = int(time.time() - start_time)
-                minutes = elapsed // 60
-                seconds = elapsed % 60
-
-                # Check VM state
-                result = subprocess.run(
-                    ["virsh", "--connect", conn_uri, "domstate", vm_name],
-                    capture_output=True,
-                    text=True,
-                    timeout=5,
-                )
-
-                vm_state = result.stdout.strip().lower()
-
-                if "shut off" in vm_state or "shutting down" in vm_state:
-                    # VM is shutting down - count consecutive detections
-                    shutdown_count += 1
-                    if shutdown_count >= 3 and not restart_detected:
-                        # Confirmed shutdown after 3 consecutive checks
-                        restart_detected = True
-                        progress.update(
-                            task,
-                            description="[yellow]⟳ VM restarting after installation...",
-                        )
-                    time.sleep(3)
-                    continue
-                else:
-                    # VM is running - reset shutdown counter
-                    if shutdown_count > 0 and shutdown_count < 3:
-                        # Was a brief glitch, not a real shutdown
-                        shutdown_count = 0
-
-                if restart_detected and "running" in vm_state and shutdown_count >= 3:
-                    # VM restarted successfully - GUI should be ready
-                    progress.update(
-                        task, description=f"[green]✓ VM ready! Total time: {minutes}m {seconds}s"
-                    )
-                    time.sleep(2)
-                    break
-
-                # Estimate remaining time (total ~15-20 minutes for full desktop install)
-                if elapsed < 60:
-                    remaining = "~15-20 minutes"
-                elif elapsed < 300:
-                    remaining = f"~{20 - minutes} minutes"
-                elif elapsed < 900:
-                    remaining = f"~{25 - minutes} minutes"
-                elif elapsed < 1500:
-                    remaining = "finishing soon..."
-                else:
-                    remaining = "almost done"
-
-                # Try to get real-time progress via QGA
-                # Get last 3 unique progress lines
-                raw_info = _exec_in_vm_qga(
-                    vm_name, 
-                    conn_uri, 
-                    "grep -E '\\[[0-9]+/10\\]|→' /var/log/cloud-init-output.log 2>/dev/null | tail -n 5"
-                )
-                
-                # Check disk space in real-time
-                disk_info = _exec_in_vm_qga(
-                    vm_name,
-                    conn_uri,
-                    "df / --output=pcent | tail -n 1 | tr -dc '0-9'"
-                )
-                disk_usage_str = ""
-                if disk_info and disk_info.isdigit():
-                    usage = int(disk_info)
-                    disk_usage_str = f" [Disk: {usage}%]"
-                    if usage > 90:
-                        console.print(f"[bold red]⚠️  WARNING: VM Disk is nearly full ({usage}%)![/]")
-                        console.print("[red]   Installation may fail. Consider increasing --disk-size-gb.[/]")
-                
-                if raw_info:
-                    lines = [l.strip() for l in raw_info.strip().split('\n') if l.strip()]
-                    for line in lines:
-                        if line not in seen_lines:
-                            # Print phase markers and sub-steps to console above the progress bar
-                            if "❌" in line:
-                                console.print(f"[bold red]    {line}[/]")
-                            elif "[" in line and "/10]" in line:
-                                console.print(f"[bold cyan]  {line}[/]")
-                            elif "→" in line:
-                                console.print(f"[dim]    {line}[/]")
-                            
-                            # Critical error detection
-                            if "No space left on device" in line or "disk space" in line.lower():
-                                if "WARNING" not in line:
-                                    console.print(f"[bold red]❌ CRITICAL ERROR: {line}[/]")
-                                    console.print("[red]   The VM has run out of disk space. Rebuild with a larger --disk-size-gb.[/]")
-
-                            seen_lines.add(line)
-                            last_phases.append(line)
-                    
-                    # Keep only last 2 for the progress bar description
-                    if len(last_phases) > 2:
-                        last_phases = last_phases[-2:]
-
-                if restart_detected:
-                    progress.update(
-                        task,
-                        description=f"[cyan]Finalizing setup... ({minutes}m {seconds}s, {remaining}){disk_usage_str}",
-                    )
-                elif last_phases:
-                    # Show the actual phase from logs
-                    current_status = last_phases[-1]
-                    progress.update(
-                        task,
-                        description=f"[cyan]{current_status} ({minutes}m {seconds}s, {remaining}){disk_usage_str}",
-                    )
-                else:
-                    progress.update(
-                        task,
-                        description=f"[cyan]Installing packages... ({minutes}m {seconds}s, {remaining}){disk_usage_str}",
-                    )
-
-            except (subprocess.TimeoutExpired, Exception) as e:
-                elapsed = int(time.time() - start_time)
-                minutes = elapsed // 60
-                seconds = elapsed % 60
-                progress.update(
-                    task, description=f"[cyan]Configuring VM... ({minutes}m {seconds}s)"
-                )
-
-            time.sleep(3)
-
-        # Final status
-        if time.time() - start_time >= timeout:
-            progress.update(
-                task, description="[yellow]⚠ Monitoring timeout - VM continues in background"
-            )
-
-
-def create_vm_from_config(
-    config: dict,
-    start: bool = False,
-    user_session: bool = False,
-    replace: bool = False,
-) -> str:
-    """Create VM from YAML config dict."""
-    paths = config.get("paths", {})
-    # Backwards compatible: v1 uses app_data_paths, newer configs may use copy_paths
-    copy_paths = config.get("copy_paths", None)
-    if not isinstance(copy_paths, dict) or not copy_paths:
-        copy_paths = config.get("app_data_paths", {})
-
-    vm_section = config.get("vm") or {}
-    
-    # Support both v1 (auth_method) and v2 (auth.method) config formats
-    auth_section = vm_section.get("auth") or {}
-    auth_method = auth_section.get("method") or vm_section.get("auth_method") or "ssh_key"
-    
-    # v2 config: secrets provider
-    secrets_section = config.get("secrets") or {}
-    secrets_provider = secrets_section.get("provider", "auto")
-    
-    # v2 config: resource limits
-    limits_section = config.get("limits") or {}
-    resources = {
-        "memory_limit": limits_section.get("memory_limit"),
-        "cpu_shares": limits_section.get("cpu_shares"),
-        "disk_limit": limits_section.get("disk_limit"),
-        "network_limit": limits_section.get("network_limit"),
-    }
-    # Remove None values
-    resources = {k: v for k, v in resources.items() if v is not None}
-
-    vm_config = VMConfig(
-        name=config["vm"]["name"],
-        ram_mb=config["vm"].get("ram_mb", 8192),
-        vcpus=config["vm"].get("vcpus", 8),
-        disk_size_gb=config["vm"].get("disk_size_gb", 10),
-        gui=config["vm"].get("gui", True),
-        base_image=config["vm"].get("base_image"),
-        paths=paths,
-        copy_paths=copy_paths,
-        packages=config.get("packages", []),
-        snap_packages=config.get("snap_packages", []),
-        services=config.get("services", []),
-        post_commands=config.get("post_commands", []),
-        user_session=user_session,
-        network_mode=config["vm"].get("network_mode", "auto"),
-        username=config["vm"].get("username", "ubuntu"),
-        password=config["vm"].get("password", "ubuntu"),
-        auth_method=auth_method,
-        ssh_public_key=vm_section.get("ssh_public_key") or auth_section.get("ssh_public_key"),
-        resources=resources if resources else config["vm"].get("resources", {}),
-    )
-
-    cloner = SelectiveVMCloner(user_session=user_session)
-
-    # Check prerequisites and show detailed info
-    checks = cloner.check_prerequisites()
-
-    if not checks["images_dir_writable"]:
-        console.print(f"[yellow]⚠️  Storage directory: {checks['images_dir']}[/]")
-        if "images_dir_error" in checks:
-            console.print(f"[red]{checks['images_dir_error']}[/]")
-            raise PermissionError(checks["images_dir_error"])
-
-    if not checks.get("genisoimage_installed"):
-        console.print("[red]❌ Error: 'genisoimage' is not installed on host.[/]")
-        console.print("[yellow]   Required to create cloud-init configuration. Install with: sudo apt install genisoimage[/]")
-        return None
-
-    if not checks.get("qemu_img_installed"):
-        console.print("[red]❌ Error: 'qemu-img' is not installed on host.[/]")
-        console.print("[yellow]   Required to create VM disks. Install with: sudo apt install qemu-utils[/]")
-        return None
-
-    if vm_config.gui and not checks.get("virt_viewer_installed"):
-        console.print("[yellow]⚠️  Warning: 'virt-viewer' is not installed on host.[/]")
-        console.print("[dim]   You won't be able to see the VM console. Install with: sudo apt install virt-viewer[/]")
-
-    console.print(f"[dim]Session: {checks['session_type']}, Storage: {checks['images_dir']}[/]")
-
-    vm_uuid = cloner.create_vm(vm_config, console=console, replace=replace)
-
-    if start:
-        cloner.start_vm(vm_config.name, open_viewer=vm_config.gui, console=console)
-
-        # Monitor cloud-init progress if GUI is enabled
-        if vm_config.gui:
-            console.print("\n[bold cyan]📊 Monitoring setup progress...[/]")
-            try:
-                monitor_cloud_init_status(vm_config.name, user_session=user_session)
-            except KeyboardInterrupt:
-                console.print("\n[yellow]Monitoring stopped. VM continues setup in background.[/]")
-            except Exception as e:
-                console.print(
-                    f"\n[dim]Note: Could not monitor status ({e}). VM continues setup in background.[/]"
-                )
-
-    return vm_uuid
-
-
-def cmd_clone(args):
-    """Generate clone config from path and optionally create VM."""
-    target_path = Path(args.path).resolve()
-    dry_run = getattr(args, "dry_run", False)
-
-    if not target_path.exists():
-        console.print(f"[red]❌ Path does not exist: {target_path}[/]")
-        return
-
-    if dry_run:
-        console.print(f"[bold cyan]🔍 DRY RUN - Analyzing: {target_path}[/]\n")
-    else:
-        console.print(f"[bold cyan]📦 Generating clone config for: {target_path}[/]")
-        # We'll show the size after detection below
-    
-    # Detect system state
-    with Progress(
-        SpinnerColumn(),
-        TextColumn("[progress.description]{task.description}"),
-        console=console,
-        transient=True,
-    ) as progress:
-        progress.add_task("Scanning system...", total=None)
-        detector = SystemDetector()
-        snapshot = detector.detect_all()
-
-    # Calculate estimated project size
-    total_project_mb = sum(p.size_mb for p in snapshot.paths if p.type == "project")
-    total_app_data_mb = sum(p.size_mb for p in snapshot.paths if p.type == "data")
-    total_mb = total_project_mb + total_app_data_mb
-    total_gb = total_mb / 1024
-
-    if not dry_run:
-        console.print(f"[dim]   Detected project data: {total_gb:.1f} GB[/]\n")
-
-    # Generate config
-    vm_name = args.name or f"clone-{target_path.name}"
-    
-    # Base OS and GUI overhead estimate (Ubuntu + GNOME + standard packages)
-    os_overhead_gb = 15 if args.profile != "minimal" else 5
-    estimated_needed_gb = total_gb + os_overhead_gb + 5 # +5GB buffer
-    
-    requested_gb = getattr(args, "disk_size_gb", None) or 30
-    if requested_gb < estimated_needed_gb:
-        console.print(f"[bold yellow]⚠️  WARNING: Project data size is {total_gb:.1f} GB.[/]")
-        console.print(f"[yellow]   Base OS + GUI needs ~{os_overhead_gb} GB. Total estimated: {estimated_needed_gb:.1f} GB.[/]")
-        console.print(f"[yellow]   Requested disk size ({requested_gb} GB) might be too small![/]")
-        console.print(f"[yellow]   Consider using --disk-size-gb {int(estimated_needed_gb + 10)} for safety.[/]\n")
-
-    yaml_content = generate_clonebox_yaml(
-        snapshot,
-        detector,
-        deduplicate=args.dedupe,
-        target_path=str(target_path),
-        vm_name=vm_name,
-        network_mode=args.network,
-        base_image=getattr(args, "base_image", None),
-        disk_size_gb=getattr(args, "disk_size_gb", None),
-    )
-
-    profile_name = getattr(args, "profile", None)
-    if profile_name:
-        merged_config = merge_with_profile(yaml.safe_load(yaml_content), profile_name)
-        if isinstance(merged_config, dict):
-            vm_section = merged_config.get("vm")
-            if isinstance(vm_section, dict):
-                vm_packages = vm_section.pop("packages", None)
-                if isinstance(vm_packages, list):
-                    packages = merged_config.get("packages")
-                    if not isinstance(packages, list):
-                        packages = []
-                    for p in vm_packages:
-                        if p not in packages:
-                            packages.append(p)
-                    merged_config["packages"] = packages
-
-            if "container" in merged_config:
-                merged_config.pop("container", None)
-
-            yaml_content = yaml.dump(
-                merged_config,
-                default_flow_style=False,
-                allow_unicode=True,
-                sort_keys=False,
-            )
-
-    # Dry run - show what would be created and exit
-    if dry_run:
-        config = yaml.safe_load(yaml_content)
-        console.print(
-            Panel(
-                f"[bold]VM Name:[/] {config['vm']['name']}\n"
-                f"[bold]RAM:[/] {config['vm'].get('ram_mb', 4096)} MB\n"
-                f"[bold]vCPUs:[/] {config['vm'].get('vcpus', 4)}\n"
-                f"[bold]Network:[/] {config['vm'].get('network_mode', 'auto')}\n"
-                f"[bold]Paths:[/] {len(config.get('paths', {}))} mounts\n"
-                f"[bold]Packages:[/] {len(config.get('packages', []))} packages\n"
-                f"[bold]Services:[/] {len(config.get('services', []))} services",
-                title="[bold cyan]Would create VM[/]",
-                border_style="cyan",
-            )
-        )
-        console.print("\n[dim]Config preview:[/]")
-        console.print(Panel(yaml_content, title="[bold].clonebox.yaml[/]", border_style="dim"))
-        console.print("\n[yellow]ℹ️  Dry run complete. No changes made.[/]")
-        return
-
-    # Save config file
-    config_file = (
-        target_path / CLONEBOX_CONFIG_FILE
-        if target_path.is_dir()
-        else target_path.parent / CLONEBOX_CONFIG_FILE
-    )
-    config_file.write_text(yaml_content)
-    console.print(f"[green]✅ Config saved: {config_file}[/]\n")
-
-    # Show config
-    console.print(Panel(yaml_content, title="[bold].clonebox.yaml[/]", border_style="cyan"))
-
-    # Open in editor if requested
-    if args.edit:
-        editor = os.environ.get("EDITOR", "nano")
-        console.print(f"[cyan]Opening {editor}...[/]")
-        os.system(f"{editor} {config_file}")
-        # Reload after edit
-        yaml_content = config_file.read_text()
-
-    # Ask to create VM
-    if args.run:
-        create_now = True
-    else:
-        create_now = questionary.confirm(
-            "Create VM with this config?", default=True, style=custom_style
-        ).ask()
-
-    if create_now:
-        # Load config with environment variable expansion
-        config = load_clonebox_config(config_file.parent)
-        user_session = getattr(args, "user", False)
-
-        console.print("\n[bold cyan]🔧 Creating VM...[/]\n")
-        if user_session:
-            console.print("[cyan]Using user session (qemu:///session) - no root required[/]")
-
-        try:
-            vm_uuid = create_vm_from_config(
-                config,
-                start=True,
-                user_session=user_session,
-                replace=getattr(args, "replace", False),
-            )
-            console.print(f"\n[bold green]🎉 VM '{config['vm']['name']}' is running![/]")
-            console.print(f"[dim]UUID: {vm_uuid}[/]")
-
-            # Show GUI startup info if GUI is enabled
-            if config.get("vm", {}).get("gui", False):
-                username = config["vm"].get("username", "ubuntu")
-                password = config["vm"].get("password", "ubuntu")
-                console.print("\n[bold yellow]⏰ GUI Setup Process:[/]")
-                console.print("  [yellow]•[/] Installing desktop environment (~5-10 minutes)")
-                console.print("  [yellow]•[/] Running health checks on all components")
-                console.print("  [yellow]•[/] Automatic restart after installation")
-                console.print("  [yellow]•[/] GUI login screen will appear")
-                console.print(
-                    f"  [yellow]•[/] Login: [cyan]{username}[/] / [cyan]{'*' * len(password)}[/] (from .env)"
-                )
-                console.print("\n[dim]💡 Progress will be monitored automatically below[/]")
-
-            # Show health check info
-            console.print("\n[bold]📊 Health Check (inside VM):[/]")
-            console.print("  [cyan]cat /var/log/clonebox-health.log[/]  # View full report")
-            console.print("  [cyan]cat /var/log/clonebox-health-status[/]  # Quick status")
-            console.print("  [cyan]clonebox-health[/]  # Re-run health check")
-
-            # Show mount instructions
-            paths = config.get("paths", {})
-            app_data_paths = config.get("app_data_paths", {})
-
-            if paths:
-                console.print("\n[bold]📁 Mounted paths (shared live):[/]")
-                for idx, (host, guest) in enumerate(list(paths.items())[:5]):
-                    console.print(f"  [dim]{host}[/] → [cyan]{guest}[/]")
-                if len(paths) > 5:
-                    console.print(f"  [dim]... and {len(paths) - 5} more paths[/]")
-
-            if app_data_paths:
-                console.print("\n[bold]📥 Copied paths (one-time import):[/]")
-                for idx, (host, guest) in enumerate(list(app_data_paths.items())[:5]):
-                    console.print(f"  [dim]{host}[/] → [cyan]{guest}[/]")
-                if len(app_data_paths) > 5:
-                    console.print(f"  [dim]... and {len(app_data_paths) - 5} more paths[/]")
-        except PermissionError as e:
-            console.print(f"[red]❌ Permission Error:[/]\n{e}")
-            console.print("\n[yellow]💡 Try running with --user flag:[/]")
-            console.print(f"  [cyan]clonebox clone {target_path} --user[/]")
-        except Exception as e:
-            console.print(f"[red]❌ Error: {e}[/]")
-    else:
-        console.print("\n[dim]To create VM later, run:[/]")
-        console.print(f"  [cyan]clonebox start {target_path}[/]")
-
-
-def cmd_detect(args):
-    """Detect and show system state."""
-    console.print("[bold cyan]🔍 Detecting system state...[/]\n")
-
-    detector = SystemDetector()
-    snapshot = detector.detect_all()
-
-    # JSON output
-    if args.json:
-        result = {
-            "services": [{"name": s.name, "status": s.status} for s in snapshot.running_services],
-            "applications": [
-                {"name": a.name, "pid": a.pid, "cwd": a.working_dir} for a in snapshot.applications
-            ],
-            "paths": [
-                {"path": p.path, "type": p.type, "size_mb": p.size_mb} for p in snapshot.paths
-            ],
-        }
-        print(json.dumps(result, indent=2))
-        return
-
-    # YAML output
-    if args.yaml:
-        result = generate_clonebox_yaml(snapshot, detector, deduplicate=args.dedupe)
-
-        if args.output:
-            output_path = Path(args.output)
-            output_path.write_text(result)
-            console.print(f"[green]✅ Config saved to: {output_path}[/]")
-        else:
-            print(result)
-        return
-
-    # Services
-    services = detector.detect_services()
-    running = [s for s in services if s.status == "running"]
-
-    if running:
-        table = Table(title="Running Services", border_style="green")
-        table.add_column("Service")
-        table.add_column("Status")
-        table.add_column("Enabled")
-
-        for svc in running:
-            table.add_row(svc.name, f"[green]{svc.status}[/]", "✓" if svc.enabled else "")
-
-        console.print(table)
-
-    # Applications
-    apps = detector.detect_applications()
-
-    if apps:
-        console.print()
-        table = Table(title="Running Applications", border_style="blue")
-        table.add_column("Name")
-        table.add_column("PID")
-        table.add_column("Memory")
-        table.add_column("Working Dir")
-
-        for app in apps[:15]:
-            table.add_row(
-                app.name,
-                str(app.pid),
-                f"{app.memory_mb:.0f} MB",
-                app.working_dir[:40] if app.working_dir else "",
-            )
-
-        console.print(table)
-
-    # Paths
-    paths = detector.detect_paths()
-
-    if paths:
-        console.print()
-        table = Table(title="Detected Paths", border_style="yellow")
-        table.add_column("Type")
-        table.add_column("Path")
-        table.add_column("Size")
-
-        for p in paths[:20]:
-            table.add_row(
-                f"[cyan]{p.type}[/]", p.path, f"{p.size_mb:.0f} MB" if p.size_mb > 0 else "-"
-            )
-
-        console.print(table)
-
-
-def cmd_monitor(args) -> None:
-    """Real-time resource monitoring for VMs and containers."""
-    conn_uri = "qemu:///session" if getattr(args, "user", False) else "qemu:///system"
-    refresh = getattr(args, "refresh", 2.0)
-    once = getattr(args, "once", False)
-
-    monitor = ResourceMonitor(conn_uri)
+    refresh = 1.0
+    once = False
+    monitor = ResourceMonitor(conn_uri=conn_uri)
 
     try:
-        while True:
-            # Clear screen for live update
-            if not once:
-                console.clear()
+        with Progress(
+            SpinnerColumn(),
+            TextColumn("[progress.description]{task.description}"),
+            console=console,
+        ) as progress:
+            task = progress.add_task("[cyan]Starting VM and initializing...", total=None)
 
-            console.print("[bold cyan]📊 CloneBox Resource Monitor[/]")
-            console.print()
+            while time.time() - start_time < timeout:
+                # Clear screen for live update
+                if not progress.finished:
+                    console.clear()
 
-            # VM Stats
-            vm_stats = monitor.get_all_vm_stats()
-            if vm_stats:
-                table = Table(title="🖥️ Virtual Machines", border_style="cyan")
-                table.add_column("Name", style="bold")
-                table.add_column("State")
-                table.add_column("CPU %")
-                table.add_column("Memory")
-                table.add_column("Disk")
-                table.add_column("Network I/O")
+                console.print("[bold cyan]📊 CloneBox Resource Monitor[/]")
+                console.print()
 
-                for vm in vm_stats:
-                    state_color = "green" if vm.state == "running" else "yellow"
-                    cpu_color = "red" if vm.cpu_percent > 80 else "green"
-                    mem_pct = (
-                        (vm.memory_used_mb / vm.memory_total_mb * 100)
-                        if vm.memory_total_mb > 0
-                        else 0
-                    )
-                    mem_color = "red" if mem_pct > 80 else "green"
+                # VM Stats
+                vm_stats = monitor.get_all_vm_stats()
+                if vm_stats:
+                    table = Table(title="🖥️ Virtual Machines", border_style="cyan")
+                    table.add_column("Name", style="bold")
+                    table.add_column("State")
+                    table.add_column("CPU %")
+                    table.add_column("Memory")
+                    table.add_column("Disk")
+                    table.add_column("Network I/O")
 
-                    table.add_row(
-                        vm.name,
-                        f"[{state_color}]{vm.state}[/]",
-                        f"[{cpu_color}]{vm.cpu_percent:.1f}%[/]",
-                        f"[{mem_color}]{vm.memory_used_mb}/{vm.memory_total_mb} MB[/]",
-                        f"{vm.disk_used_gb:.1f}/{vm.disk_total_gb:.1f} GB",
-                        f"↓{format_bytes(vm.network_rx_bytes)} ↑{format_bytes(vm.network_tx_bytes)}",
-                    )
-                console.print(table)
-            else:
-                console.print("[dim]No VMs found.[/]")
+                    for vm in vm_stats:
+                        state_color = "green" if vm.state == "running" else "yellow"
+                        cpu_color = "red" if vm.cpu_percent > 80 else "green"
+                        mem_pct = (
+                            (vm.memory_used_mb / vm.memory_total_mb * 100)
+                            if vm.memory_total_mb > 0
+                            else 0
+                        )
+                        mem_color = "red" if mem_pct > 80 else "green"
 
-            console.print()
+                        table.add_row(
+                            vm.name,
+                            f"[{state_color}]{vm.state}[/]",
+                            f"[{cpu_color}]{vm.cpu_percent:.1f}%[/]",
+                            f"[{mem_color}]{vm.memory_used_mb}/{vm.memory_total_mb} MB[/]",
+                            f"{vm.disk_used_gb:.1f}/{vm.disk_total_gb:.1f} GB",
+                            f"↓{format_bytes(vm.network_rx_bytes)} ↑{format_bytes(vm.network_tx_bytes)}",
+                        )
+                    console.print(table)
+                else:
+                    console.print("[dim]No VMs found.[/]")
 
-            # Container Stats
-            container_stats = monitor.get_container_stats()
-            if container_stats:
-                table = Table(title="🐳 Containers", border_style="blue")
-                table.add_column("Name", style="bold")
-                table.add_column("State")
-                table.add_column("CPU %")
-                table.add_column("Memory")
-                table.add_column("Network I/O")
-                table.add_column("PIDs")
+                console.print()
 
-                for c in container_stats:
-                    cpu_color = "red" if c.cpu_percent > 80 else "green"
-                    mem_pct = (
-                        (c.memory_used_mb / c.memory_limit_mb * 100) if c.memory_limit_mb > 0 else 0
-                    )
-                    mem_color = "red" if mem_pct > 80 else "green"
+                # Container Stats
+                container_stats = monitor.get_container_stats()
+                if container_stats:
+                    table = Table(title="🐳 Containers", border_style="blue")
+                    table.add_column("Name", style="bold")
+                    table.add_column("State")
+                    table.add_column("CPU %")
+                    table.add_column("Memory")
+                    table.add_column("Network I/O")
+                    table.add_column("PIDs")
 
-                    table.add_row(
-                        c.name,
-                        f"[green]{c.state}[/]",
-                        f"[{cpu_color}]{c.cpu_percent:.1f}%[/]",
-                        f"[{mem_color}]{c.memory_used_mb}/{c.memory_limit_mb} MB[/]",
-                        f"↓{format_bytes(c.network_rx_bytes)} ↑{format_bytes(c.network_tx_bytes)}",
-                        str(c.pids),
-                    )
-                console.print(table)
-            else:
-                console.print("[dim]No containers running.[/]")
+                    for c in container_stats:
+                        cpu_color = "red" if c.cpu_percent > 80 else "green"
+                        mem_pct = (
+                            (c.memory_used_mb / c.memory_limit_mb * 100)
+                            if c.memory_limit_mb > 0
+                            else 0
+                        )
+                        mem_color = "red" if mem_pct > 80 else "green"
 
-            if once:
-                break
+                        table.add_row(
+                            c.name,
+                            f"[green]{c.state}[/]",
+                            f"[{cpu_color}]{c.cpu_percent:.1f}%[/]",
+                            f"[{mem_color}]{c.memory_used_mb}/{c.memory_limit_mb} MB[/]",
+                            f"↓{format_bytes(c.network_rx_bytes)} ↑{format_bytes(c.network_tx_bytes)}",
+                            str(c.pids),
+                        )
+                    console.print(table)
+                else:
+                    console.print("[dim]No containers running.[/]")
 
-            console.print(f"\n[dim]Refreshing every {refresh}s. Press Ctrl+C to exit.[/]")
-            time.sleep(refresh)
+                if once:
+                    break
+
+                console.print(f"\n[dim]Refreshing every {refresh}s. Press Ctrl+C to exit.[/]")
+                time.sleep(refresh)
 
     except KeyboardInterrupt:
         console.print("\n[yellow]Monitoring stopped.[/]")
@@ -3209,6 +2717,17 @@ def cmd_snapshot_restore(args) -> None:
     """Restore VM to snapshot."""
     vm_name, config_file = _resolve_vm_name_and_config_file(args.vm_name)
     conn_uri = "qemu:///session" if getattr(args, "user", False) else "qemu:///system"
+
+    policy = PolicyEngine.load_effective(start=config_file)
+    if policy is not None:
+        try:
+            policy.assert_operation_approved(
+                AuditEventType.VM_SNAPSHOT_RESTORE.value,
+                approved=getattr(args, "approve", False),
+            )
+        except PolicyViolationError as e:
+            console.print(f"[red]❌ {e}[/]")
+            sys.exit(1)
 
     console.print(f"[cyan]🔄 Restoring snapshot: {args.name}[/]")
 
@@ -4021,6 +3540,17 @@ def cmd_remote_delete(args) -> None:
     user_session = getattr(args, "user", False)
     keep_storage = getattr(args, "keep_storage", False)
 
+    policy = PolicyEngine.load_effective()
+    if policy is not None:
+        try:
+            policy.assert_operation_approved(
+                AuditEventType.VM_DELETE.value,
+                approved=getattr(args, "approve", False),
+            )
+        except PolicyViolationError as e:
+            console.print(f"[red]❌ {e}[/]")
+            sys.exit(1)
+
     if not getattr(args, "yes", False):
         confirm = questionary.confirm(
             f"Delete VM '{vm_name}' on {host}?",
@@ -4195,6 +3725,11 @@ def main():
         "--user",
         action="store_true",
         help="Use user session (qemu:///session) - no root required",
+    )
+    delete_parser.add_argument(
+        "--approve",
+        action="store_true",
+        help="Approve policy-gated operation",
     )
     delete_parser.set_defaults(func=cmd_delete)
 
@@ -4504,9 +4039,7 @@ def main():
     export_parser.add_argument(
         "-u", "--user", action="store_true", help="Use user session (qemu:///session)"
     )
-    export_parser.add_argument(
-        "-o", "--output", help="Output archive filename (default: <vmname>-export.tar.gz)"
-    )
+    export_parser.add_argument("-o", "--output", help="Output archive filename (default: <vmname>-export.tar.gz)")
     export_parser.add_argument(
         "--include-data",
         "-d",
@@ -4602,6 +4135,11 @@ def main():
     snap_restore.add_argument("-u", "--user", action="store_true", help="Use user session")
     snap_restore.add_argument(
         "-f", "--force", action="store_true", help="Force restore even if running"
+    )
+    snap_restore.add_argument(
+        "--approve",
+        action="store_true",
+        help="Approve policy-gated operation",
     )
     snap_restore.set_defaults(func=cmd_snapshot_restore)
 
@@ -4848,6 +4386,11 @@ def main():
     remote_delete.add_argument("-u", "--user", action="store_true", help="Use user session on remote")
     remote_delete.add_argument("-y", "--yes", action="store_true", help="Skip confirmation")
     remote_delete.add_argument("--keep-storage", action="store_true", help="Keep disk images")
+    remote_delete.add_argument(
+        "--approve",
+        action="store_true",
+        help="Approve policy-gated operation",
+    )
     remote_delete.set_defaults(func=cmd_remote_delete)
 
     remote_exec = remote_sub.add_parser("exec", help="Execute command in VM on remote host")

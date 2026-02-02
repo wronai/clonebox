@@ -400,7 +400,7 @@ class VMValidator:
         svc_table.add_column("PID", justify="right", style="dim")
         svc_table.add_column("Note", style="dim")
 
-        # Define setup_in_progress once before the loop to fix NameError
+        # Define setup_in_progress once here to avoid NameError in branches or loops
         setup_in_progress = self._setup_in_progress() is True
 
         for service in services:
@@ -1190,7 +1190,7 @@ class VMValidator:
                 )
 
         # Calculate overall status
-        disk_failed = 1 if self.results.get("disk", {}).get("usage_pct", 0) > 95 else 0
+        disk_failed = 1 if self.results.get("disk", {}).get("usage_pct", 0) > 90 else 0
         total_checks = (
             1 # Disk space check
             + self.results["mounts"]["total"]

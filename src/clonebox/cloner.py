@@ -358,8 +358,9 @@ class SelectiveVMCloner:
                 checks["images_dir_error"] = (
                     f"Cannot write to {images_dir}\n"
                     f"  Option 1: Run with sudo\n"
-                    f"  Option 2: Use --user flag for user session (no root needed)\n"
-                    f"  Option 3: Fix permissions: sudo chown -R $USER:libvirt {images_dir}"
+                    f"  Option 2: Use --user flag for user session (recommended):\n"
+                    f"     clonebox clone . --user\n\n"
+                    f"  3. Fix permissions: sudo chown -R $USER:libvirt {images_dir}"
                 )
         else:
             # Try to create it
@@ -375,7 +376,13 @@ class SelectiveVMCloner:
 
         return checks
 
-    def create_vm(self, config: VMConfig, console=None, replace: bool = False) -> str:
+    def create_vm(
+        self,
+        config: VMConfig,
+        console=None,
+        replace: bool = False,
+        approved: bool = False,
+    ) -> str:
         """
         Create a VM with only selected applications/paths.
 
@@ -427,7 +434,19 @@ class SelectiveVMCloner:
                             )
 
                         log.info(f"VM '{config.name}' already exists - replacing...")
-                        self.delete_vm(config.name, delete_storage=True, console=console, ignore_not_found=True)
+                        policy = PolicyEngine.load_effective()
+                        if policy is not None:
+                            policy.assert_operation_approved(
+                                AuditEventType.VM_DELETE.value,
+                                approved=approved,
+                            )
+                        self.delete_vm(
+                            config.name,
+                            delete_storage=True,
+                            console=console,
+                            ignore_not_found=True,
+                            approved=approved,
+                        )
 
                     # Determine images directory
                     images_dir = self.get_images_dir()
@@ -514,202 +533,6 @@ class SelectiveVMCloner:
 
                     return vm.UUIDString()
 
-    def _generate_vm_xml(
-        self, config: VMConfig = None, root_disk: Path = None, cloudinit_iso: Optional[Path] = None
-    ) -> str:
-        """Generate libvirt XML for the VM."""
-
-        # Backward compatibility: if called without args, try to derive defaults
-        if config is None:
-            config = VMConfig()
-        if root_disk is None:
-            root_disk = Path("/var/lib/libvirt/images/default-disk.qcow2")
-
-        # Get resource limits from config or defaults
-        resource_data = getattr(config, "resources", {})
-        if not resource_data:
-            # Fallback to top-level fields
-            resource_data = {
-                "cpu": {"vcpus": config.vcpus},
-                "memory": {"limit": f"{config.ram_mb}M"},
-            }
-        
-        limits = ResourceLimits.from_dict(resource_data)
-
-        root = ET.Element("domain", type="kvm")
-
-        # Basic metadata
-        ET.SubElement(root, "name").text = config.name
-        ET.SubElement(root, "uuid").text = str(uuid.uuid4())
-        
-        # Memory configuration using limits
-        limit_kib = limits.memory.limit_bytes // 1024
-        ET.SubElement(root, "memory", unit="KiB").text = str(limit_kib)
-        ET.SubElement(root, "currentMemory", unit="KiB").text = str(limit_kib)
-        
-        # CPU configuration
-        ET.SubElement(root, "vcpu", placement="static").text = str(limits.cpu.vcpus)
-
-        # OS configuration
-        os_elem = ET.SubElement(root, "os")
-        ET.SubElement(os_elem, "type", arch="x86_64", machine="q35").text = "hvm"
-        ET.SubElement(os_elem, "boot", dev="hd")
-
-        # Features
-        features = ET.SubElement(root, "features")
-        ET.SubElement(features, "acpi")
-        ET.SubElement(features, "apic")
-
-        # Resource tuning (CPU and Memory)
-        cputune_xml = limits.cpu.to_libvirt_xml()
-        if cputune_xml:
-            # We append pre-generated XML string later or use ET to parse it
-            # For simplicity with existing ET code, we'll use SubElement for basic ones 
-            # and manual string insertion for complex tuning if needed, 
-            # but let's try to stick to ET where possible.
-            pass
-
-        # CPU tuning element
-        # Only available in system session (requires cgroups)
-        if not self.user_session and (limits.cpu.shares or limits.cpu.quota or limits.cpu.pin):
-            cputune = ET.SubElement(root, "cputune")
-            ET.SubElement(cputune, "shares").text = str(limits.cpu.shares)
-            if limits.cpu.quota:
-                ET.SubElement(cputune, "period").text = str(limits.cpu.period)
-                ET.SubElement(cputune, "quota").text = str(limits.cpu.quota)
-            if limits.cpu.pin:
-                for idx, cpu in enumerate(limits.cpu.pin):
-                    ET.SubElement(cputune, "vcpupin", vcpu=str(idx), cpuset=str(cpu))
-
-        # Memory tuning element
-        # Only available in system session (requires cgroups)
-        if not self.user_session and (limits.memory.soft_limit or limits.memory.swap):
-            memtune = ET.SubElement(root, "memtune")
-            ET.SubElement(memtune, "hard_limit", unit="KiB").text = str(limit_kib)
-            if limits.memory.soft_limit_bytes:
-                ET.SubElement(memtune, "soft_limit", unit="KiB").text = str(limits.memory.soft_limit_bytes // 1024)
-            if limits.memory.swap_bytes:
-                ET.SubElement(memtune, "swap_hard_limit", unit="KiB").text = str(limits.memory.swap_bytes // 1024)
-
-        # CPU
-        ET.SubElement(root, "cpu", mode="host-passthrough", check="none")
-
-        # Devices
-        devices = ET.SubElement(root, "devices")
-
-        # Emulator
-        ET.SubElement(devices, "emulator").text = "/usr/bin/qemu-system-x86_64"
-
-        # Root disk
-        disk = ET.SubElement(devices, "disk", type="file", device="disk")
-        ET.SubElement(disk, "driver", name="qemu", type="qcow2", cache="writeback")
-        ET.SubElement(disk, "source", file=str(root_disk))
-        ET.SubElement(disk, "target", dev="vda", bus="virtio")
-        
-        # Disk I/O tuning
-        # Only available in system session (requires cgroups)
-        if not self.user_session and (limits.disk.read_bps or limits.disk.write_bps or limits.disk.read_iops or limits.disk.write_iops):
-            iotune = ET.SubElement(disk, "iotune")
-            if limits.disk.read_bps_bytes:
-                ET.SubElement(iotune, "read_bytes_sec").text = str(limits.disk.read_bps_bytes)
-            if limits.disk.write_bps_bytes:
-                ET.SubElement(iotune, "write_bytes_sec").text = str(limits.disk.write_bps_bytes)
-            if limits.disk.read_iops:
-                ET.SubElement(iotune, "read_iops_sec").text = str(limits.disk.read_iops)
-            if limits.disk.write_iops:
-                ET.SubElement(iotune, "write_iops_sec").text = str(limits.disk.write_iops)
-
-        # Cloud-init ISO
-        if cloudinit_iso:
-            cdrom = ET.SubElement(devices, "disk", type="file", device="cdrom")
-            ET.SubElement(cdrom, "driver", name="qemu", type="raw")
-            ET.SubElement(cdrom, "source", file=str(cloudinit_iso))
-            ET.SubElement(cdrom, "target", dev="sda", bus="sata")
-            ET.SubElement(cdrom, "readonly")
-
-        # 9p filesystem mounts (bind mounts from host)
-        # Use accessmode="mapped" to allow VM user to access host files regardless of UID
-        for idx, (host_path, guest_tag) in enumerate(config.paths.items()):
-            if Path(host_path).exists():
-                fs = ET.SubElement(devices, "filesystem", type="mount", accessmode="mapped")
-                ET.SubElement(fs, "driver", type="path", wrpolicy="immediate")
-                ET.SubElement(fs, "source", dir=host_path)
-                # Use simple tag names for 9p mounts
-                tag = f"mount{idx}"
-                ET.SubElement(fs, "target", dir=tag)
-
-        # 9p filesystem mounts for COPY paths (mounted to temp location for import)
-        for idx, (host_path, guest_path) in enumerate(config.copy_paths.items()):
-            if Path(host_path).exists():
-                fs = ET.SubElement(devices, "filesystem", type="mount", accessmode="mapped")
-                ET.SubElement(fs, "driver", type="path", wrpolicy="immediate")
-                ET.SubElement(fs, "source", dir=host_path)
-                # Use import tag names for copy mounts
-                tag = f"import{idx}"
-                ET.SubElement(fs, "target", dir=tag)
-
-        # Network interface
-        network_mode = self.resolve_network_mode(config)
-        if network_mode == "user":
-            iface = ET.SubElement(devices, "interface", type="user")
-            ET.SubElement(iface, "model", type="virtio")
-        else:
-            iface = ET.SubElement(devices, "interface", type="network")
-            ET.SubElement(iface, "source", network="default")
-            ET.SubElement(iface, "model", type="virtio")
-        
-        # Network bandwidth tuning
-        if limits.network.inbound or limits.network.outbound:
-            bandwidth = ET.SubElement(iface, "bandwidth")
-            if limits.network.inbound_kbps:
-                # average in KB/s
-                ET.SubElement(bandwidth, "inbound", average=str(limits.network.inbound_kbps // 8))
-            if limits.network.outbound_kbps:
-                ET.SubElement(bandwidth, "outbound", average=str(limits.network.outbound_kbps // 8))
-
-        # Serial console
-        serial = ET.SubElement(devices, "serial", type="pty")
-        ET.SubElement(serial, "target", port="0")
-
-        console_elem = ET.SubElement(devices, "console", type="pty")
-        ET.SubElement(console_elem, "target", type="serial", port="0")
-
-        # Graphics (SPICE)
-        if config.gui:
-            graphics = ET.SubElement(
-                devices, "graphics", type="spice", autoport="yes", listen="127.0.0.1"
-            )
-            ET.SubElement(graphics, "listen", type="address", address="127.0.0.1")
-
-            # Video
-            video = ET.SubElement(devices, "video")
-            ET.SubElement(video, "model", type="virtio", heads="1", primary="yes")
-
-            # Input devices
-            ET.SubElement(devices, "input", type="tablet", bus="usb")
-            ET.SubElement(devices, "input", type="keyboard", bus="usb")
-
-        ET.SubElement(devices, "controller", type="virtio-serial", index="0")
-
-        # Channel for guest agent
-        channel = ET.SubElement(devices, "channel", type="unix")
-        ET.SubElement(channel, "source", mode="bind")
-        ET.SubElement(channel, "target", type="virtio", name="org.qemu.guest_agent.0")
-
-        # Memory balloon
-        memballoon = ET.SubElement(devices, "memballoon", model="virtio")
-        ET.SubElement(
-            memballoon,
-            "address",
-            type="pci",
-            domain="0x0000",
-            bus="0x00",
-            slot="0x08",
-            function="0x0",
-        )
-
-        return ET.tostring(root, encoding="unicode")
-
     def _generate_boot_diagnostic_script(self, config: VMConfig) -> str:
         """Generate boot diagnostic script with self-healing capabilities."""
         import base64
@@ -795,7 +618,7 @@ check_snap() {{
 }}
 
 install_snap() {{
-    timeout 60 snap wait system seed.loaded 2>/dev/null || true
+    timeout 120 snap wait system seed.loaded 2>/dev/null || true
     for i in $(seq 1 $MAX_RETRIES); do
         snap install "$1" --classic &>>"$LOG" && return 0
         snap install "$1" &>>"$LOG" && return 0
@@ -1143,8 +966,8 @@ fi
 
         mount_checks = []
         bind_paths = list(config.paths.items())
-        for i, (host_path, guest_path) in enumerate(bind_paths, 1):
-            mount_checks.append(f'check_mount "{guest_path}" "mount{i-1}" "{i}/{len(bind_paths)}"')
+        for i, (host_path, guest_tag) in enumerate(bind_paths, 1):
+            mount_checks.append(f'check_mount "{guest_tag}" "mount{i-1}" "{i}/{len(bind_paths)}"')
         
         # Add copied paths checks
         copy_paths = config.copy_paths or getattr(config, "app_data_paths", {})
@@ -1396,6 +1219,202 @@ fi
         encoded = base64.b64encode(script.encode()).decode()
         return encoded
 
+    def _generate_vm_xml(
+        self, config: VMConfig = None, root_disk: Path = None, cloudinit_iso: Optional[Path] = None
+    ) -> str:
+        """Generate libvirt XML for the VM."""
+
+        # Backward compatibility: if called without args, try to derive defaults
+        if config is None:
+            config = VMConfig()
+        if root_disk is None:
+            root_disk = Path("/var/lib/libvirt/images/default-disk.qcow2")
+
+        # Get resource limits from config or defaults
+        resource_data = getattr(config, "resources", {})
+        if not resource_data:
+            # Fallback to top-level fields
+            resource_data = {
+                "cpu": {"vcpus": config.vcpus},
+                "memory": {"limit": f"{config.ram_mb}M"},
+            }
+        
+        limits = ResourceLimits.from_dict(resource_data)
+
+        root = ET.Element("domain", type="kvm")
+
+        # Basic metadata
+        ET.SubElement(root, "name").text = config.name
+        ET.SubElement(root, "uuid").text = str(uuid.uuid4())
+        
+        # Memory configuration using limits
+        limit_kib = limits.memory.limit_bytes // 1024
+        ET.SubElement(root, "memory", unit="KiB").text = str(limit_kib)
+        ET.SubElement(root, "currentMemory", unit="KiB").text = str(limit_kib)
+        
+        # CPU configuration
+        ET.SubElement(root, "vcpu", placement="static").text = str(limits.cpu.vcpus)
+
+        # OS configuration
+        os_elem = ET.SubElement(root, "os")
+        ET.SubElement(os_elem, "type", arch="x86_64", machine="q35").text = "hvm"
+        ET.SubElement(os_elem, "boot", dev="hd")
+
+        # Features
+        features = ET.SubElement(root, "features")
+        ET.SubElement(features, "acpi")
+        ET.SubElement(features, "apic")
+
+        # Resource tuning (CPU and Memory)
+        cputune_xml = limits.cpu.to_libvirt_xml()
+        if cputune_xml:
+            # We append pre-generated XML string later or use ET to parse it
+            # For simplicity with existing ET code, we'll use SubElement for basic ones 
+            # and manual string insertion for complex tuning if needed, 
+            # but let's try to stick to ET where possible.
+            pass
+
+        # CPU tuning element
+        # Only available in system session (requires cgroups)
+        if not self.user_session and (limits.cpu.shares or limits.cpu.quota or limits.cpu.pin):
+            cputune = ET.SubElement(root, "cputune")
+            ET.SubElement(cputune, "shares").text = str(limits.cpu.shares)
+            if limits.cpu.quota:
+                ET.SubElement(cputune, "period").text = str(limits.cpu.period)
+                ET.SubElement(cputune, "quota").text = str(limits.cpu.quota)
+            if limits.cpu.pin:
+                for idx, cpu in enumerate(limits.cpu.pin):
+                    ET.SubElement(cputune, "vcpupin", vcpu=str(idx), cpuset=str(cpu))
+
+        # Memory tuning element
+        # Only available in system session (requires cgroups)
+        if not self.user_session and (limits.memory.soft_limit or limits.memory.swap):
+            memtune = ET.SubElement(root, "memtune")
+            ET.SubElement(memtune, "hard_limit", unit="KiB").text = str(limit_kib)
+            if limits.memory.soft_limit_bytes:
+                ET.SubElement(memtune, "soft_limit", unit="KiB").text = str(limits.memory.soft_limit_bytes // 1024)
+            if limits.memory.swap_bytes:
+                ET.SubElement(memtune, "swap_hard_limit", unit="KiB").text = str(limits.memory.swap_bytes // 1024)
+
+        # CPU
+        ET.SubElement(root, "cpu", mode="host-passthrough", check="none")
+
+        # Devices
+        devices = ET.SubElement(root, "devices")
+
+        # Emulator
+        ET.SubElement(devices, "emulator").text = "/usr/bin/qemu-system-x86_64"
+
+        # Root disk
+        disk = ET.SubElement(devices, "disk", type="file", device="disk")
+        ET.SubElement(disk, "driver", name="qemu", type="qcow2", cache="writeback")
+        ET.SubElement(disk, "source", file=str(root_disk))
+        ET.SubElement(disk, "target", dev="vda", bus="virtio")
+        
+        # Disk I/O tuning
+        # Only available in system session (requires cgroups)
+        if not self.user_session and (limits.disk.read_bps or limits.disk.write_bps or limits.disk.read_iops or limits.disk.write_iops):
+            iotune = ET.SubElement(disk, "iotune")
+            if limits.disk.read_bps_bytes:
+                ET.SubElement(iotune, "read_bytes_sec").text = str(limits.disk.read_bps_bytes)
+            if limits.disk.write_bps_bytes:
+                ET.SubElement(iotune, "write_bytes_sec").text = str(limits.disk.write_bps_bytes)
+            if limits.disk.read_iops:
+                ET.SubElement(iotune, "read_iops_sec").text = str(limits.disk.read_iops)
+            if limits.disk.write_iops:
+                ET.SubElement(iotune, "write_iops_sec").text = str(limits.disk.write_iops)
+
+        # Cloud-init ISO
+        if cloudinit_iso:
+            cdrom = ET.SubElement(devices, "disk", type="file", device="cdrom")
+            ET.SubElement(cdrom, "driver", name="qemu", type="raw")
+            ET.SubElement(cdrom, "source", file=str(cloudinit_iso))
+            ET.SubElement(cdrom, "target", dev="sda", bus="sata")
+            ET.SubElement(cdrom, "readonly")
+
+        # 9p filesystem mounts (bind mounts from host)
+        # Use accessmode="mapped" to allow VM user to access host files regardless of UID
+        for idx, (host_path, guest_tag) in enumerate(config.paths.items()):
+            if Path(host_path).exists():
+                fs = ET.SubElement(devices, "filesystem", type="mount", accessmode="mapped")
+                ET.SubElement(fs, "driver", type="path", wrpolicy="immediate")
+                ET.SubElement(fs, "source", dir=host_path)
+                # Use simple tag names for 9p mounts
+                tag = f"mount{idx}"
+                ET.SubElement(fs, "target", dir=tag)
+
+        # 9p filesystem mounts for COPY paths (mounted to temp location for import)
+        for idx, (host_path, guest_path) in enumerate(config.copy_paths.items()):
+            if Path(host_path).exists():
+                fs = ET.SubElement(devices, "filesystem", type="mount", accessmode="mapped")
+                ET.SubElement(fs, "driver", type="path", wrpolicy="immediate")
+                ET.SubElement(fs, "source", dir=host_path)
+                # Use import tag names for copy mounts
+                tag = f"import{idx}"
+                ET.SubElement(fs, "target", dir=tag)
+
+        # Network interface
+        network_mode = self.resolve_network_mode(config)
+        if network_mode == "user":
+            iface = ET.SubElement(devices, "interface", type="user")
+            ET.SubElement(iface, "model", type="virtio")
+        else:
+            iface = ET.SubElement(devices, "interface", type="network")
+            ET.SubElement(iface, "source", network="default")
+            ET.SubElement(iface, "model", type="virtio")
+        
+        # Network bandwidth tuning
+        if limits.network.inbound or limits.network.outbound:
+            bandwidth = ET.SubElement(iface, "bandwidth")
+            if limits.network.inbound_kbps:
+                # average in KB/s
+                ET.SubElement(bandwidth, "inbound", average=str(limits.network.inbound_kbps // 8))
+            if limits.network.outbound_kbps:
+                ET.SubElement(bandwidth, "outbound", average=str(limits.network.outbound_kbps // 8))
+
+        # Serial console
+        serial = ET.SubElement(devices, "serial", type="pty")
+        ET.SubElement(serial, "target", port="0")
+
+        console_elem = ET.SubElement(devices, "console", type="pty")
+        ET.SubElement(console_elem, "target", type="serial", port="0")
+
+        # Graphics (SPICE)
+        if config.gui:
+            graphics = ET.SubElement(
+                devices, "graphics", type="spice", autoport="yes", listen="127.0.0.1"
+            )
+            ET.SubElement(graphics, "listen", type="address", address="127.0.0.1")
+
+            # Video
+            video = ET.SubElement(devices, "video")
+            ET.SubElement(video, "model", type="virtio", heads="1", primary="yes")
+
+            # Input devices
+            ET.SubElement(devices, "input", type="tablet", bus="usb")
+            ET.SubElement(devices, "input", type="keyboard", bus="usb")
+
+        ET.SubElement(devices, "controller", type="virtio-serial", index="0")
+
+        # Channel for guest agent
+        channel = ET.SubElement(devices, "channel", type="unix")
+        ET.SubElement(channel, "source", mode="bind")
+        ET.SubElement(channel, "target", type="virtio", name="org.qemu.guest_agent.0")
+
+        # Memory balloon
+        memballoon = ET.SubElement(devices, "memballoon", model="virtio")
+        ET.SubElement(
+            memballoon,
+            "address",
+            type="pci",
+            domain="0x0000",
+            bus="0x00",
+            slot="0x08",
+            function="0x0",
+        )
+
+        return ET.tostring(root, encoding="unicode")
+
     def _create_cloudinit_iso(self, vm_dir: Path, config: VMConfig, user_session: bool = False) -> Path:
         """Create cloud-init ISO with secure credential handling."""
         secrets_mgr = SecretsManager()
@@ -1514,7 +1533,7 @@ fi
             import_mount_commands.append(f"  - mkdir -p {temp_mount_point}")
             
             # 2. Mount the 9p share
-            import_mount_commands.append(f"  - mount -t 9p -o {mount_opts} {tag} {temp_mount_point} || true")
+            import_mount_commands.append(f"  - mount -t 9p -o {mount_opts} {tag} {temp_mount_point} || echo '  → ❌ Failed to mount temporary share {tag}'")
             
             # 3. Ensure target directory exists and permissions are prepared
             if str(guest_path).startswith("/home/ubuntu/"):
@@ -1525,8 +1544,8 @@ fi
 
             # 4. Copy contents (cp -rT to copy contents of source to target)
             # We use || true to ensure boot continues even if copy fails
-            import_mount_commands.append(f"  - echo 'Importing {host_path} to {guest_path}...'")
-            import_mount_commands.append(f"  - cp -rT {temp_mount_point} {guest_path} || true")
+            import_mount_commands.append(f"  - echo '  → Importing {host_path} to {guest_path}...'")
+            import_mount_commands.append(f"  - cp -rT {temp_mount_point} {guest_path} || echo '  → ❌ Failed to copy data to {guest_path}'")
             
             # 5. Fix ownership recursively
             import_mount_commands.append(f"  - chown -R 1000:1000 {guest_path}")
@@ -1564,14 +1583,15 @@ fi
         runcmd_lines.append("  - echo '═══════════════════════════════════════════════════════════'")
         runcmd_lines.append("  - echo ''")
 
-        # Phase 0: System Optimization (Pre-install)
+        # Phase 1: System Optimization (Pre-install)
         runcmd_lines.append("  - echo '[1/10] 🛠️  Optimizing system resources...'")
         runcmd_lines.append("  - echo '  → Limiting journal size to 50M'")
         runcmd_lines.append("  - sed -i 's/^#SystemMaxUse=/SystemMaxUse=50M/' /etc/systemd/journald.conf || true")
         runcmd_lines.append("  - systemctl restart systemd-journald || true")
+        runcmd_lines.append("  - echo '  → ✓ [1/10] System resources optimized'")
         runcmd_lines.append("  - echo ''")
         
-        # Phase 1: APT Packages
+        # Phase 2: APT Packages
         if all_packages:
             runcmd_lines.append(f"  - echo '[2/10] 📦 Installing APT packages ({len(all_packages)} total)...'")
             runcmd_lines.append("  - export DEBIAN_FRONTEND=noninteractive")
@@ -1581,34 +1601,35 @@ fi
             runcmd_lines.append("  - apt-get update")
             for i, pkg in enumerate(all_packages, 1):
                 runcmd_lines.append(f"  - echo '  → [{i}/{len(all_packages)}] Installing {pkg}...'")
-                runcmd_lines.append(f"  - apt-get install -y {pkg} || echo '    ⚠️  Failed to install {pkg}'")
+                runcmd_lines.append(f"  - apt-get install -y {pkg} || echo '  → ❌ Failed to install {pkg}'")
             runcmd_lines.append("  - apt-get clean")
-            runcmd_lines.append("  - echo '  → ✓ [2/10] APT packages installed and cache cleaned'")
+            runcmd_lines.append("  - echo '  → ✓ [2/10] APT packages installed'")
+            runcmd_lines.append("  - df -h / | sed 's/^/  → /'")
             runcmd_lines.append("  - echo ''")
         else:
             runcmd_lines.append("  - echo '[2/10] 📦 No APT packages to install'")
             runcmd_lines.append("  - echo ''")
 
-        # Phase 2: Core services
+        # Phase 3: Core services
         runcmd_lines.append("  - echo '[3/10] 🔧 Enabling core services...'")
-        runcmd_lines.append("  - echo '  → qemu-guest-agent'")
-        runcmd_lines.append("  - systemctl enable --now qemu-guest-agent || true")
-        runcmd_lines.append("  - echo '  → snapd'")
-        runcmd_lines.append("  - systemctl enable --now snapd || true")
+        runcmd_lines.append("  - echo '  → [1/2] Enabling qemu-guest-agent'")
+        runcmd_lines.append("  - systemctl enable --now qemu-guest-agent || echo '  → ❌ Failed to enable qemu-guest-agent'")
+        runcmd_lines.append("  - echo '  → [2/2] Enabling snapd'")
+        runcmd_lines.append("  - systemctl enable --now snapd || echo '  → ❌ Failed to enable snapd'")
         runcmd_lines.append("  - echo '  → Waiting for snap system seed...'")
         runcmd_lines.append("  - timeout 300 snap wait system seed.loaded || true")
         runcmd_lines.append("  - echo '  → ✓ [3/10] Core services enabled'")
         runcmd_lines.append("  - echo ''")
 
-        # Phase 3: User services
+        # Phase 4: User services
         runcmd_lines.append(f"  - echo '[4/10] 🔧 Enabling user services ({len(config.services)} total)...'")
         for i, svc in enumerate(config.services, 1):
             runcmd_lines.append(f"  - echo '  → [{i}/{len(config.services)}] {svc}'")
-            runcmd_lines.append(f"  - systemctl enable --now {svc} || true")
+            runcmd_lines.append(f"  - systemctl enable --now {svc} || echo '  → ❌ Failed to enable {svc}'")
         runcmd_lines.append("  - echo '  → ✓ [4/10] User services enabled'")
         runcmd_lines.append("  - echo ''")
 
-        # Phase 4: Filesystem mounts
+        # Phase 5: Filesystem mounts
         runcmd_lines.append(f"  - echo '[5/10] 📁 Mounting shared directories ({len(existing_bind_paths)} mounts)...'")
         if bind_mount_commands:
             mount_idx = 0
@@ -1634,11 +1655,11 @@ fi
                 runcmd_lines.append(
                     f"  - grep -qF \"{entry}\" /etc/fstab || echo '{entry}' >> /etc/fstab"
                 )
-            runcmd_lines.append("  - mount -a || true")
+            runcmd_lines.append("  - mount -a || echo '  → ❌ Failed to mount shared directories'")
         runcmd_lines.append("  - echo '  → ✓ [5/10] Mounts configured'")
         runcmd_lines.append("  - echo ''")
 
-        # Phase 5: Data Import (copied paths)
+        # Phase 6: Data Import (copied paths)
         if existing_copy_paths:
             runcmd_lines.append(f"  - echo '[6/10] 📥 Importing data ({len(existing_copy_paths)} paths)...'")
             # Check space before starting large import
@@ -1648,29 +1669,33 @@ fi
             for cmd in import_mount_commands:
                 if "Importing" in cmd:
                     import_count += 1
-                    runcmd_lines.append(cmd.replace("Importing", f"  → [{import_count}/{len(existing_copy_paths)}] Importing"))
+                    # Replace the placeholder 'Importing' with numbered progress, ensuring no double prefix
+                    msg = cmd.replace("  - echo '  → Importing", f"  - echo '  → [{import_count}/{len(existing_copy_paths)}] Importing")
+                    runcmd_lines.append(msg)
                 else:
                     runcmd_lines.append(cmd)
             runcmd_lines.append("  - echo '  → ✓ [6/10] Data import completed'")
+            runcmd_lines.append("  - df -h / | sed 's/^/  → /'")
             runcmd_lines.append("  - echo ''")
         else:
             runcmd_lines.append("  - echo '[6/10] 📥 No data to import'")
             runcmd_lines.append("  - echo ''")
 
-        # Phase 6: GUI Environment Setup
+        # Phase 7: GUI Environment Setup
         if config.gui:
             runcmd_lines.append("  - echo '[7/10] 🖥️  Setting up GUI environment...'")
             runcmd_lines.append("  - echo '  → Creating user directories'")
             # Create directories that GNOME services need
-            for d in [
+            gui_dirs = [
                 f"/home/{config.username}/.config/pulse",
                 f"/home/{config.username}/.cache/ibus",
                 f"/home/{config.username}/.local/share",
                 f"/home/{config.username}/.config/dconf",
                 f"/home/{config.username}/.cache/tracker3",
                 f"/home/{config.username}/.config/autostart",
-            ]:
-                runcmd_lines.append(f"  - mkdir -p {d} && echo '  → Created {d}'")
+            ]
+            for i, d in enumerate(gui_dirs, 1):
+                runcmd_lines.append(f"  - mkdir -p {d} && echo '  → [{i}/{len(gui_dirs)}] Created {d}'")
             
             runcmd_lines.extend(
                 [
@@ -1691,7 +1716,7 @@ fi
         runcmd_lines.append(f"  - chown -R 1000:1000 /home/{config.username} || true")
         runcmd_lines.append(f"  - chown -R 1000:1000 /home/{config.username}/snap || true")
 
-        # Phase 7: Snap packages
+        # Phase 8: Snap packages
         if config.snap_packages:
             runcmd_lines.append(f"  - echo '[8/10] 📦 Installing snap packages ({len(config.snap_packages)} packages)...'")
             # Check space before starting snap installation
@@ -1701,99 +1726,16 @@ fi
                 # Try classic first, then strict, with retries
                 cmd = (
                     f"for i in 1 2 3; do "
-                    f"snap install {snap_pkg} --classic && echo '    ✓ {snap_pkg} installed (classic)' && break || "
-                    f"snap install {snap_pkg} && echo '    ✓ {snap_pkg} installed' && break || "
-                    f"echo '    ⟳ Retry $i/3...' && sleep 10; "
+                    f"snap install {snap_pkg} --classic && echo '  → ✓ {snap_pkg} installed (classic)' && break || "
+                    f"snap install {snap_pkg} && echo '  → ✓ {snap_pkg} installed' && break || "
+                    f"{{ if [ $i -eq 3 ]; then echo '  → ❌ Failed to install {snap_pkg} after 3 attempts'; else echo '  → ⟳ Retry $i/3...' && sleep 10; fi; }} "
                     f"done"
                 )
                 runcmd_lines.append(f"  - {cmd}")
             runcmd_lines.append("  - echo '  → ✓ [8/10] Snap packages installed'")
-            runcmd_lines.append("  - echo ''")
-
-            # Connect snap interfaces for GUI apps (not auto-connected via cloud-init)
-            runcmd_lines.append(f"  - echo '  → 🔌 Connecting snap interfaces...'")
-            for snap_pkg in config.snap_packages:
-                runcmd_lines.append(f"  - echo '  → Connecting interfaces for {snap_pkg}...'")
-                interfaces = SNAP_INTERFACES.get(snap_pkg, DEFAULT_SNAP_INTERFACES)
-                for iface in interfaces:
-                    runcmd_lines.append(
-                        f"  - snap connect {snap_pkg}:{iface} :{iface} 2>/dev/null || true"
-                    )
-            runcmd_lines.append("  - echo '  → ✓ Snap interfaces connected'")
-            runcmd_lines.append("  - systemctl restart snapd || true")
-            runcmd_lines.append("  - echo '  → 🧹 Optimizing snap storage...'")
-            runcmd_lines.append("  - snap set system refresh.retain=2")
-            runcmd_lines.append("  - echo ''")
-        else:
-            runcmd_lines.append("  - echo '[8/10] 📦 No snap packages to install'")
-            runcmd_lines.append("  - echo ''")
-
-        # Add remaining GUI setup if enabled
-        if config.gui:
-            runcmd_lines.append("  - echo '  → ⚙️  Creating autostart entries...'")
-            # Create autostart entries for GUI apps
-            autostart_apps = {
-                "pycharm-community": (
-                    "PyCharm Community",
-                    "/snap/bin/pycharm-community",
-                    "pycharm-community",
-                ),
-                "firefox": ("Firefox", "/snap/bin/firefox", "firefox"),
-                "chromium": ("Chromium", "/snap/bin/chromium", "chromium"),
-                "google-chrome": ("Google Chrome", "google-chrome-stable", "google-chrome"),
-            }
-
-            # Generate list of autostart apps to count them
-            target_autostart_snaps = [pkg for pkg in config.snap_packages if pkg in autostart_apps]
-            total_autostart = len(target_autostart_snaps) + (1 if wants_chrome else 0)
-
-            autostart_idx = 0
-            for snap_pkg in config.snap_packages:
-                if snap_pkg in autostart_apps:
-                    autostart_idx += 1
-                    name, exec_cmd, icon = autostart_apps[snap_pkg]
-                    runcmd_lines.append(f"  - echo '    → [{autostart_idx}/{total_autostart}] Creating autostart for {name}...'")
-                    desktop_entry = f"""[Desktop Entry]
-Type=Application
-Name={name}
-Exec={exec_cmd}
-Icon={icon}
-X-GNOME-Autostart-enabled=true
-X-GNOME-Autostart-Delay=5
-Comment=CloneBox autostart
-"""
-                    import base64
-
-                    desktop_b64 = base64.b64encode(desktop_entry.encode()).decode()
-                    runcmd_lines.append(
-                        f"  - echo '{desktop_b64}' | base64 -d > /home/ubuntu/.config/autostart/{snap_pkg}.desktop"
-                    )
-
-            # Check if google-chrome is in paths (app_data_paths)
-            if wants_chrome:
-                autostart_idx += 1
-                name, exec_cmd, icon = autostart_apps["google-chrome"]
-                runcmd_lines.append(f"  - echo '    → [{autostart_idx}/{total_autostart}] Creating autostart for {name}...'")
-                desktop_entry = f"""[Desktop Entry]
-Type=Application
-Name={name}
-Exec={exec_cmd}
-Icon={icon}
-X-GNOME-Autostart-enabled=true
-X-GNOME-Autostart-Delay=5
-Comment=CloneBox autostart
-"""
-                desktop_b64 = base64.b64encode(desktop_entry.encode()).decode()
-                runcmd_lines.append(
-                    f"  - echo '{desktop_b64}' | base64 -d > /home/ubuntu/.config/autostart/google-chrome.desktop"
-                )
-
-            # Fix ownership of autostart directory
-            runcmd_lines.append(f"  - chown -R 1000:1000 /home/{config.username}/.config/autostart")
-            runcmd_lines.append("  - echo '  → ✓ Autostart entries created'")
-            runcmd_lines.append("  - echo ''")
-
-        # Phase 8: Post commands
+            runcmd_lines.append("  - df -h / | sed 's/^/  → /'")
+        
+        # Phase 9: Post commands
         if config.post_commands:
             runcmd_lines.append(f"  - echo '[9/10] ⚙️  Running post-setup commands ({len(config.post_commands)} total)...'")
             for i, cmd in enumerate(config.post_commands, 1):
@@ -1801,7 +1743,7 @@ Comment=CloneBox autostart
                 display_cmd = cmd[:60] + '...' if len(cmd) > 60 else cmd
                 runcmd_lines.append(f"  - echo '  → [{i}/{len(config.post_commands)}] {display_cmd}'")
                 runcmd_lines.append(f"  - {cmd} || echo '  → ❌ Command {i} failed'")
-                runcmd_lines.append(f"  - echo '    ✓ Command {i} completed'")
+                runcmd_lines.append(f"  - echo '  → ✓ Command {i} completed'")
             runcmd_lines.append("  - echo '  → ✓ [9/10] Post-setup commands finished'")
             runcmd_lines.append("  - echo ''")
         else:
@@ -1815,7 +1757,7 @@ Comment=CloneBox autostart
         runcmd_lines.append("  - echo '  → Vacuuming system logs'")
         runcmd_lines.append("  - journalctl --vacuum-size=50M >/dev/null 2>&1 || true")
         runcmd_lines.append("  - echo '  → Checking final disk usage'")
-        runcmd_lines.append("  - df -h / | sed 's/^/    /' | while read line; do echo \"  → $line\"; done")
+        runcmd_lines.append("  - df -h / | sed 's/^/  → /'")
         
         runcmd_lines.append(
             f"  - echo '{health_script}' | base64 -d > /usr/local/bin/clonebox-health"
@@ -1900,7 +1842,7 @@ set -uo pipefail
 
 RED='\033[0;31m' GREEN='\033[0;32m' YELLOW='\033[1;33m' CYAN='\033[0;36m' NC='\033[0m' BOLD='\033[1m'
 
-show_help() {
+show_help() {{
     echo -e "${BOLD}${CYAN}CloneBox Repair Utility${NC}"
     echo ""
     echo "Usage: clonebox-repair [OPTION]"
@@ -1918,9 +1860,10 @@ show_help() {
     echo "  --help      Show this help message"
     echo ""
     echo "Without options, shows interactive menu."
-}
+}}
 
-show_status() {
+show_status() {{
+    echo ""
     echo -e "${BOLD}${CYAN}═══════════════════════════════════════════════════════════${NC}"
     echo -e "${BOLD}${CYAN}              CloneBox VM Status${NC}"
     echo -e "${BOLD}${CYAN}═══════════════════════════════════════════════════════════${NC}"
@@ -1939,17 +1882,17 @@ show_status() {
     echo ""
     echo -e "  Last boot diagnostic: $(stat -c %y /var/log/clonebox-boot.log 2>/dev/null || echo 'never')"
     echo -e "${BOLD}${CYAN}═══════════════════════════════════════════════════════════${NC}"
-}
+}}
 
-show_logs() {
+show_logs() {{
     echo -e "${BOLD}Recent repair logs:${NC}"
     echo ""
     tail -n 50 /var/log/clonebox-boot.log 2>/dev/null || echo "No logs found"
-}
+}}
 
-fix_permissions() {
+fix_permissions() {{
     echo -e "${CYAN}Fixing directory permissions...${NC}"
-    VM_USER="${SUDO_USER:-ubuntu}"
+    VM_USER="${{SUDO_USER:-ubuntu}}"
     VM_HOME="/home/$VM_USER"
     
     DIRS_TO_CREATE=(
@@ -1967,7 +1910,7 @@ fix_permissions() {
         "$VM_HOME/.local/share/keyrings"
     )
     
-    for dir in "${DIRS_TO_CREATE[@]}"; do
+    for dir in "${{DIRS_TO_CREATE[@]}}"; do
         if [ ! -d "$dir" ]; then
             mkdir -p "$dir" 2>/dev/null && echo "  Created $dir"
         fi
@@ -1981,11 +1924,11 @@ fix_permissions() {
     done
     
     echo -e "${GREEN}✅ Permissions fixed${NC}"
-}
+}}
 
-fix_audio() {
+fix_audio() {{
     echo -e "${CYAN}Fixing audio (PulseAudio/PipeWire)...${NC}"
-    VM_USER="${SUDO_USER:-ubuntu}"
+    VM_USER="${{SUDO_USER:-ubuntu}}"
     VM_HOME="/home/$VM_USER"
     
     # Create pulse config directory with correct permissions
@@ -2010,11 +1953,11 @@ fix_audio() {
     systemctl --user restart pipewire pipewire-pulse 2>/dev/null || true
     
     echo -e "${GREEN}✅ Audio fixed${NC}"
-}
+}}
 
-fix_keyring() {
+fix_keyring() {{
     echo -e "${CYAN}Resetting GNOME Keyring...${NC}"
-    VM_USER="${SUDO_USER:-ubuntu}"
+    VM_USER="${{SUDO_USER:-ubuntu}}"
     VM_HOME="/home/$VM_USER"
     KEYRING_DIR="$VM_HOME/.local/share/keyrings"
     
@@ -2042,11 +1985,11 @@ fix_keyring() {
     pkill -u "$VM_USER" gnome-keyring-daemon 2>/dev/null || true
     
     echo -e "${GREEN}✅ Keyring reset - log out and back in to create new keyring${NC}"
-}
+}}
 
-fix_ibus() {
+fix_ibus() {{
     echo -e "${CYAN}Fixing IBus input method...${NC}"
-    VM_USER="${SUDO_USER:-ubuntu}"
+    VM_USER="${{SUDO_USER:-ubuntu}}"
     VM_HOME="/home/$VM_USER"
     
     # Create ibus cache directory
@@ -2062,25 +2005,29 @@ fix_ibus() {
     fi
     
     echo -e "${GREEN}✅ IBus fixed${NC}"
-}
+}}
 
-fix_snaps() {
+fix_snaps() {{
     echo -e "${CYAN}Reconnecting snap interfaces...${NC}"
     IFACES="desktop desktop-legacy x11 wayland home network audio-playback audio-record camera opengl"
     
     for snap in $(snap list --color=never 2>/dev/null | tail -n +2 | awk '{print $1}'); do
-        [[ "$snap" =~ ^(core|snapd|gnome-|gtk-|mesa-) ]] && continue
-        echo -e "  ${YELLOW}$snap${NC}"
-        for iface in $IFACES; do
-            snap connect "$snap:$iface" ":$iface" 2>/dev/null && echo "    ✓ $iface" || true
-        done
+        case "$snap" in
+            pycharm-community|chromium|firefox|code|slack|spotify)
+                echo "Connecting interfaces for $snap..."
+                IFACES="desktop desktop-legacy x11 wayland home network network-bind audio-playback"
+                for iface in $IFACES; do
+                    snap connect "$snap:$iface" ":$iface" 2>/dev/null || true
+                done
+                ;;
+        esac
     done
     
     systemctl restart snapd 2>/dev/null || true
     echo -e "${GREEN}✅ Snap interfaces reconnected${NC}"
-}
+}}
 
-fix_mounts() {
+fix_mounts() {{
     echo -e "${CYAN}Remounting filesystems...${NC}"
     
     while IFS= read -r line; do
@@ -2101,9 +2048,9 @@ fix_mounts() {
     done < /etc/fstab
     
     echo -e "${GREEN}✅ Mounts checked${NC}"
-}
+}}
 
-fix_all() {
+fix_all() {{
     echo -e "${BOLD}${CYAN}Running all fixes...${NC}"
     echo ""
     fix_permissions
@@ -2117,9 +2064,9 @@ fix_all() {
     fix_mounts
     echo ""
     echo -e "${BOLD}${GREEN}All fixes completed!${NC}"
-}
+}}
 
-interactive_menu() {
+interactive_menu() {{
     while true; do
         echo ""
         echo -e "${BOLD}${CYAN}═══════════════════════════════════════════════════════════${NC}"
@@ -2153,7 +2100,7 @@ interactive_menu() {
             *) echo -e "${RED}Invalid option${NC}" ;;
         esac
     done
-}
+}}
 
 # Main
 case "${1:-}" in
@@ -2570,21 +2517,21 @@ if __name__ == "__main__":
             [
                 "  - mkdir -p /var/lib/clonebox /mnt/logs",
                 f"  - truncate -s 1G {vm_logs_img_path}",
-                f"  - mkfs.ext4 -F {vm_logs_img_path}",
+                f"  - mkfs.ext4 -F {vm_logs_img_path} >/dev/null 2>&1",
                 f"  - echo '{vm_logs_img_path} /mnt/logs ext4 loop,defaults 0 0' >> /etc/fstab",
-                "  - mount -a",
+                "  - mount /mnt/logs || echo '  → ❌ Failed to mount logs disk'",
                 "  - mkdir -p /mnt/logs/var/log",
                 "  - mkdir -p /mnt/logs/tmp",
                 "  - cp -r /var/log/clonebox*.log /mnt/logs/var/log/ 2>/dev/null || true",
                 "  - cp -r /tmp/*-error.log /mnt/logs/tmp/ 2>/dev/null || true",
-                f"  - echo 'Logs disk mounted at /mnt/logs - backing file: {vm_logs_img_path}'",
+                f"  - echo '  → ✓ Logs disk mounted at /mnt/logs'",
             ]
         )
 
         # Add reboot command at the end if GUI is enabled
         if config.gui:
-            runcmd_lines.append("  - echo '🔄 Rebooting in 10 seconds to start GUI...'")
-            runcmd_lines.append("  - echo '   (After reboot, GUI will auto-start)'")
+            runcmd_lines.append("  - echo '  → 🔄 Rebooting in 10 seconds to start GUI...'")
+            runcmd_lines.append("  - echo '  → (After reboot, GUI will auto-start)'")
             runcmd_lines.append("  - sleep 10 && reboot")
 
         runcmd_yaml = "\n".join(runcmd_lines) if runcmd_lines else ""
@@ -2712,6 +2659,8 @@ final_message: "CloneBox VM is ready after $UPTIME seconds"
         try:
             vm = self.conn.lookupByName(vm_name)
         except libvirt.libvirtError:
+            if ignore_not_found:
+                return True
             log(f"[red]❌ VM '{vm_name}' not found[/]")
             return False
 
@@ -2759,6 +2708,7 @@ final_message: "CloneBox VM is ready after $UPTIME seconds"
         delete_storage: bool = True,
         console=None,
         ignore_not_found: bool = False,
+        approved: bool = False,
     ) -> bool:
         """Delete a VM and optionally its storage."""
 
@@ -2768,9 +2718,18 @@ final_message: "CloneBox VM is ready after $UPTIME seconds"
             else:
                 print(msg)
 
+        policy = PolicyEngine.load_effective()
+        if policy is not None:
+            policy.assert_operation_approved(
+                AuditEventType.VM_DELETE.value,
+                approved=approved,
+            )
+
         try:
             vm = self.conn.lookupByName(vm_name)
         except libvirt.libvirtError:
+            if ignore_not_found:
+                return True
             log(f"[red]❌ VM '{vm_name}' not found[/]")
             return False
 

@@ -156,14 +156,18 @@ def test_cloner_additional_branches():
         # 2. Download branch (mocked)
         # PolicyEngine.load_effective() calls Path.exists() multiple times.
         # We need to handle those calls without raising StopIteration.
-        def mock_exists(path_obj):
+        def mock_exists_path(*args, **kwargs):
+            # In Python 3.13+ with mocks, we might get the instance or the path string
+            # depending on how it's called.
+            # Handle both self (instance) and potential path arguments
+            path_obj = args[0] if args else getattr(kwargs.get("self", ""), "_str", str(kwargs.get("self", "")))
             p = str(path_obj)
             if ".clonebox-policy.yml" in p:
                 return False
-            # Return True for other checks to proceed
+            # Return True for other checks to proceed (like base image cache check)
             return True
 
-        with patch("pathlib.Path.exists", side_effect=mock_exists), patch(
+        with patch("pathlib.Path.exists", side_effect=mock_exists_path), patch(
             "tempfile.NamedTemporaryFile"
         ) as mock_temp, patch("urllib.request.urlretrieve"), patch("pathlib.Path.replace"):
             mock_temp.return_value.__enter__.return_value.name = "tmpfile"
