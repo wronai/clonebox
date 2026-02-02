@@ -15,6 +15,7 @@ import tempfile
 import time
 import urllib.request
 import uuid
+import zlib
 import xml.etree.ElementTree as ET
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -299,20 +300,29 @@ class SelectiveVMCloner:
             return mode
         return "default"
 
-    def check_prerequisites(self) -> dict:
+    def check_prerequisites(self, config: Optional[VMConfig] = None) -> dict:
         """Check system prerequisites for VM creation."""
         images_dir = self.get_images_dir()
+
+        resolved_network_mode: Optional[str] = None
+        if config is not None:
+            try:
+                resolved_network_mode = self.resolve_network_mode(config)
+            except Exception:
+                resolved_network_mode = None
 
         checks = {
             "libvirt_connected": False,
             "kvm_available": False,
             "default_network": False,
+            "default_network_required": True,
             "images_dir_writable": False,
             "images_dir": str(images_dir),
             "session_type": "user" if self.user_session else "system",
             "genisoimage_installed": False,
             "virt_viewer_installed": False,
             "qemu_img_installed": False,
+            "passt_installed": shutil.which("passt") is not None,
         }
 
         # Check for genisoimage
@@ -340,8 +350,14 @@ class SelectiveVMCloner:
 
         # Check default network
         default_net_state = self._default_network_state()
-        checks["default_network"] = default_net_state == "active"
-        if default_net_state in {"inactive", "missing", "unknown"}:
+        checks["default_network_required"] = (resolved_network_mode or "default") != "user"
+        if checks["default_network_required"]:
+            checks["default_network"] = default_net_state == "active"
+        else:
+            # For user-mode networking (slirp/passt), libvirt's default network is not required.
+            checks["default_network"] = True
+
+        if checks["default_network_required"] and default_net_state in {"inactive", "missing", "unknown"}:
             checks["network_error"] = (
                 "Default network not found or inactive.\n"
                 "  For user session, CloneBox can use user-mode networking (slirp) automatically.\n"
@@ -350,6 +366,9 @@ class SelectiveVMCloner:
                 "    virsh --connect qemu:///session net-start default\n"
                 "  Or use system session: clonebox clone . (without --user)\n"
             )
+
+        if resolved_network_mode is not None:
+            checks["network_mode"] = resolved_network_mode
 
         # Check images directory
         if images_dir.exists():
@@ -1358,6 +1377,13 @@ fi
         if network_mode == "user":
             iface = ET.SubElement(devices, "interface", type="user")
             ET.SubElement(iface, "model", type="virtio")
+
+            if shutil.which("passt"):
+                ET.SubElement(iface, "backend", type="passt")
+
+                ssh_port = 22000 + (zlib.crc32(config.name.encode("utf-8")) % 1000)
+                pf = ET.SubElement(iface, "portForward", proto="tcp", address="127.0.0.1")
+                ET.SubElement(pf, "range", start=str(ssh_port), to="22")
         else:
             iface = ET.SubElement(devices, "interface", type="network")
             ET.SubElement(iface, "source", network="default")
@@ -1398,6 +1424,7 @@ fi
 
         # Channel for guest agent
         channel = ET.SubElement(devices, "channel", type="unix")
+        # For both user and system sessions, let libvirt handle the path
         ET.SubElement(channel, "source", mode="bind")
         ET.SubElement(channel, "target", type="virtio", name="org.qemu.guest_agent.0")
 
@@ -1563,7 +1590,7 @@ fi
 
         # User-data
         # Add desktop environment if GUI is enabled
-        base_packages = ["qemu-guest-agent", "cloud-guest-utils"]
+        base_packages = ["qemu-guest-agent", "cloud-guest-utils", "openssh-server"]
         if config.gui:
             base_packages.extend(
                 [
@@ -1619,9 +1646,11 @@ fi
 
         # Phase 3: Core services
         runcmd_lines.append("  - echo '[3/10] 🔧 Enabling core services...'")
-        runcmd_lines.append("  - echo '  → [1/2] Enabling qemu-guest-agent'")
+        runcmd_lines.append("  - echo '  → [1/3] Enabling qemu-guest-agent'")
         runcmd_lines.append("  - systemctl enable --now qemu-guest-agent || echo '  → ❌ Failed to enable qemu-guest-agent'")
-        runcmd_lines.append("  - echo '  → [2/2] Enabling snapd'")
+        runcmd_lines.append("  - echo '  → [2/3] Enabling SSH server'")
+        runcmd_lines.append("  - systemctl enable --now ssh || systemctl enable --now sshd || echo '  → ❌ Failed to enable ssh'")
+        runcmd_lines.append("  - echo '  → [3/3] Enabling snapd'")
         runcmd_lines.append("  - systemctl enable --now snapd || echo '  → ❌ Failed to enable snapd'")
         runcmd_lines.append("  - echo '  → Waiting for snap system seed...'")
         runcmd_lines.append("  - timeout 300 snap wait system seed.loaded || true")

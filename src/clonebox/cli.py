@@ -945,10 +945,11 @@ def interactive_mode():
         cloner = SelectiveVMCloner(user_session=getattr(args, "user", False))
 
         # Check prerequisites
-        checks = cloner.check_prerequisites()
-        if not all(checks.values()):
+        checks = cloner.check_prerequisites(config)
+        bool_checks = {k: v for k, v in checks.items() if isinstance(v, bool)}
+        if bool_checks and not all(bool_checks.values()):
             console.print("[yellow]⚠️  Prerequisites check:[/]")
-            for check, passed in checks.items():
+            for check, passed in bool_checks.items():
                 icon = "✅" if passed else "❌"
                 console.print(f"   {icon} {check}")
 
@@ -2624,10 +2625,11 @@ def create_vm_from_config(config, start=False, user_session=False, replace=False
     cloner = SelectiveVMCloner(user_session=user_session)
     
     # Check prerequisites
-    checks = cloner.check_prerequisites()
-    if not all(checks.values()):
+    checks = cloner.check_prerequisites(vm_config)
+    bool_checks = {k: v for k, v in checks.items() if isinstance(v, bool)}
+    if bool_checks and not all(bool_checks.values()):
         console.print("[yellow]⚠️  Prerequisites check:[/]")
-        for check, passed in checks.items():
+        for check, passed in bool_checks.items():
             icon = "✅" if passed else "❌"
             console.print(f"   {icon} {check}")
     

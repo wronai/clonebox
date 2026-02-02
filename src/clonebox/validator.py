@@ -6,6 +6,7 @@ import subprocess
 import json
 import base64
 import time
+import zlib
 from typing import Dict, List, Tuple, Optional
 from pathlib import Path
 from rich.console import Console
@@ -49,9 +50,66 @@ class VMValidator:
         }
 
         self._setup_in_progress_cache: Optional[bool] = None
+        self._exec_transport: str = "qga"  # qga|ssh
+
+    def _get_ssh_key_path(self) -> Optional[Path]:
+        """Return path to the SSH key generated for this VM (if present)."""
+        try:
+            if self.conn_uri.endswith("/session"):
+                images_dir = Path.home() / ".local/share/libvirt/images"
+            else:
+                images_dir = Path("/var/lib/libvirt/images")
+            key_path = images_dir / self.vm_name / "ssh_key"
+            return key_path if key_path.exists() else None
+        except Exception:
+            return None
+
+    def _get_ssh_port(self) -> int:
+        """Deterministic host-side SSH port for passt port forwarding."""
+        return 22000 + (zlib.crc32(self.vm_name.encode("utf-8")) % 1000)
+
+    def _ssh_exec(self, command: str, timeout: int = 10) -> Optional[str]:
+        key_path = self._get_ssh_key_path()
+        if key_path is None:
+            return None
+
+        ssh_port = self._get_ssh_port()
+        user = (self.config.get("vm") or {}).get("username") or "ubuntu"
+
+        try:
+            result = subprocess.run(
+                [
+                    "ssh",
+                    "-i",
+                    str(key_path),
+                    "-p",
+                    str(ssh_port),
+                    "-o",
+                    "StrictHostKeyChecking=no",
+                    "-o",
+                    "UserKnownHostsFile=/dev/null",
+                    "-o",
+                    "ConnectTimeout=5",
+                    "-o",
+                    "BatchMode=yes",
+                    f"{user}@127.0.0.1",
+                    command,
+                ],
+                capture_output=True,
+                text=True,
+                timeout=timeout,
+            )
+            if result.returncode != 0:
+                return None
+            return (result.stdout or "").strip()
+        except Exception:
+            return None
 
     def _exec_in_vm(self, command: str, timeout: int = 10) -> Optional[str]:
-        """Execute command in VM using QEMU guest agent."""
+        """Execute command in VM using QEMU guest agent, with SSH fallback."""
+        if self._exec_transport == "ssh":
+            return self._ssh_exec(command, timeout=timeout)
+
         try:
             # Execute command
             result = subprocess.run(
@@ -1170,17 +1228,24 @@ class VMValidator:
                     last_log = elapsed
 
         if not self._check_qga_ready():
-            self.console.print("[red]❌ QEMU Guest Agent not responding[/]")
-            self.console.print("\n[bold]🔧 Troubleshooting QGA:[/]")
-            self.console.print("  1. The VM might still be booting. Wait 30-60 seconds.")
-            self.console.print("  2. Ensure the agent is installed and running inside the VM:")
-            self.console.print("     [dim]virsh console " + self.vm_name + "[/]")
-            self.console.print("     [dim]sudo systemctl status qemu-guest-agent[/]")
-            self.console.print("  3. If newly created, cloud-init might still be running.")
-            self.console.print("  4. Check VM logs: [dim]clonebox logs " + self.vm_name + "[/]")
-            self.console.print(f"\n[yellow]⚠️  Skipping deep validation as it requires a working Guest Agent.[/]")
-            self.results["overall"] = "qga_not_ready"
-            return self.results
+            # SSH fallback (primarily for --user networking, where passt can forward ports)
+            self.console.print("[yellow]⚠️  QEMU Guest Agent not responding - trying SSH fallback...[/]")
+            self._exec_transport = "ssh"
+            smoke = self._ssh_exec("echo ok", timeout=10)
+            if smoke != "ok":
+                self.console.print("[red]❌ SSH fallback failed[/]")
+                self.console.print("\n[bold]🔧 Troubleshooting QGA:[/]")
+                self.console.print("  1. The VM might still be booting. Wait 30-60 seconds.")
+                self.console.print("  2. Ensure the agent is installed and running inside the VM:")
+                self.console.print("     [dim]virsh console " + self.vm_name + "[/]")
+                self.console.print("     [dim]sudo systemctl status qemu-guest-agent[/]")
+                self.console.print("  3. If newly created, cloud-init might still be running.")
+                self.console.print("  4. Check VM logs: [dim]clonebox logs " + self.vm_name + "[/]")
+                self.console.print(f"\n[yellow]⚠️  Skipping deep validation as it requires a working Guest Agent or SSH access.[/]")
+                self.results["overall"] = "qga_not_ready"
+                return self.results
+
+            self.console.print("[green]✅ SSH fallback connected (executing validations over SSH)[/]")
 
         ci_status = self._exec_in_vm("cloud-init status --long 2>/dev/null || cloud-init status 2>/dev/null || true", timeout=20)
         if ci_status:
