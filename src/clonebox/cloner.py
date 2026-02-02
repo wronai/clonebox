@@ -2625,7 +2625,12 @@ if __name__ == "__main__":
         runcmd_yaml = "\n".join(runcmd_lines) if runcmd_lines else ""
         
         # Build bootcmd combining mount commands and extra security bootcmds
-        bootcmd_lines = list(bootcmd_extra) if bootcmd_extra else []
+        bootcmd_lines = [
+            '  - sh -c "echo \"[clonebox] bootcmd: enabling serial console (ttyS0)\" > /dev/ttyS0 || true"',
+            '  - systemctl enable --now serial-getty@ttyS0.service >/dev/null 2>&1 || true',
+        ]
+        if bootcmd_extra:
+            bootcmd_lines.extend(list(bootcmd_extra))
             
         bootcmd_block = ""
         if bootcmd_lines:

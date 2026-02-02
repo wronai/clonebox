@@ -1,3 +1,24 @@
+## [1.1.23] - 2026-02-02
+
+### Summary
+
+refactor(None): deep code analysis engine with 4 supporting modules
+
+### Core
+
+- update src/clonebox/cloner.py
+- update src/clonebox/validation/__init__.py
+- update src/clonebox/validation/apps.py
+- update src/clonebox/validation/core.py
+- update src/clonebox/validation/disk.py
+- update src/clonebox/validation/mounts.py
+- update src/clonebox/validation/overall.py
+- update src/clonebox/validation/packages.py
+- update src/clonebox/validation/services.py
+- update src/clonebox/validation/smoke.py
+- ... and 3 more
+
+
 ## [1.1.22] - 2026-02-02
 
 ### Summary
