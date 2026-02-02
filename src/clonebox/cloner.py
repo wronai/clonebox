@@ -566,6 +566,18 @@ class SelectiveVMCloner:
                                     console.print(
                                         f"[dim]SSH access (passthrough): ssh -i {ssh_key_path} -p {ssh_port} {config.username}@127.0.0.1[/]"
                                     )
+                            else:
+                                console.print(
+                                    "[yellow]⚠️  passt not available - SSH port-forward will NOT be configured in --user mode[/]"
+                                )
+                                console.print(
+                                    "[dim]Install passt (and recreate VM) to enable SSH fallback, or use virsh console for live logs.[/]"
+                                )
+
+                                if self.user_session:
+                                    console.print(
+                                        f"[dim]Host serial log (when enabled): {vm_dir / 'serial.log'}[/]"
+                                    )
 
                         if console:
                             conn_uri = "qemu:///session" if self.user_session else "qemu:///system"
@@ -1434,11 +1446,12 @@ fi
         serial = ET.SubElement(devices, "serial", type="pty")
         ET.SubElement(serial, "target", port="0")
 
-        vm_dir = Path(str(root_disk)).parent
-        serial_log_path = str(vm_dir / "serial.log")
-        serial_file = ET.SubElement(devices, "serial", type="file")
-        ET.SubElement(serial_file, "source", path=serial_log_path)
-        ET.SubElement(serial_file, "target", port="1")
+        if self.user_session:
+            vm_dir = Path(str(root_disk)).parent
+            serial_log_path = str(vm_dir / "serial.log")
+            serial_file = ET.SubElement(devices, "serial", type="file")
+            ET.SubElement(serial_file, "source", path=serial_log_path)
+            ET.SubElement(serial_file, "target", port="1")
 
         console_elem = ET.SubElement(devices, "console", type="pty")
         ET.SubElement(console_elem, "target", type="serial", port="0")
@@ -2640,6 +2653,10 @@ users:
             
         user_data_header += f"ssh_pwauth: {ssh_pwauth}\n"
 
+        output_targets = "/dev/ttyS0"
+        if user_session:
+            output_targets += " /dev/ttyS1"
+
         # Assemble final user-data
         user_data = f"""{user_data_header}
 # Make sure root partition + filesystem grows to fill the qcow2 disk size
@@ -2654,7 +2671,7 @@ package_update: true
 package_upgrade: false
 
 output:
-  all: "| tee -a /var/log/cloud-init-output.log /dev/ttyS0"
+  all: "| tee -a /var/log/cloud-init-output.log {output_targets}"
 {bootcmd_block}
 
 # Install packages moved to runcmd for better logging
