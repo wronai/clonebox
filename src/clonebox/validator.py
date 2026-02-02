@@ -266,12 +266,17 @@ class VMValidator:
             self.console.print("[dim]No APT packages configured[/]")
             return self.results["packages"]
 
+        total_pkgs = len(packages)
+        self.console.print(f"[dim]Checking {total_pkgs} packages via QGA...[/]")
+
         pkg_table = Table(title="Package Validation", border_style="cyan")
         pkg_table.add_column("Package", style="bold")
         pkg_table.add_column("Status", justify="center")
         pkg_table.add_column("Version", style="dim")
 
-        for package in packages:
+        for idx, package in enumerate(packages, 1):
+            if idx == 1 or idx % 25 == 0 or idx == total_pkgs:
+                self.console.print(f"[dim]   ...packages progress: {idx}/{total_pkgs}[/]")
             self.results["packages"]["total"] += 1
 
             # Check if installed
@@ -315,12 +320,17 @@ class VMValidator:
             self.console.print("[dim]No snap packages configured[/]")
             return self.results["snap_packages"]
 
+        total_snaps = len(snap_packages)
+        self.console.print(f"[dim]Checking {total_snaps} snap packages via QGA...[/]")
+
         snap_table = Table(title="Snap Package Validation", border_style="cyan")
         snap_table.add_column("Package", style="bold")
         snap_table.add_column("Status", justify="center")
         snap_table.add_column("Version", style="dim")
 
-        for package in snap_packages:
+        for idx, package in enumerate(snap_packages, 1):
+            if idx == 1 or idx % 25 == 0 or idx == total_snaps:
+                self.console.print(f"[dim]   ...snap progress: {idx}/{total_snaps}[/]")
             self.results["snap_packages"]["total"] += 1
 
             # Check if installed
@@ -395,6 +405,9 @@ class VMValidator:
             self.console.print("[dim]No services configured[/]")
             return self.results["services"]
 
+        total_svcs = len(services)
+        self.console.print(f"[dim]Checking {total_svcs} services via QGA...[/]")
+
         if "skipped" not in self.results["services"]:
             self.results["services"]["skipped"] = 0
 
@@ -405,7 +418,9 @@ class VMValidator:
         svc_table.add_column("PID", justify="right", style="dim")
         svc_table.add_column("Note", style="dim")
 
-        for service in services:
+        for idx, service in enumerate(services, 1):
+            if idx == 1 or idx % 25 == 0 or idx == total_svcs:
+                self.console.print(f"[dim]   ...services progress: {idx}/{total_svcs}[/]")
             if service in self.VM_EXCLUDED_SERVICES:
                 svc_table.add_row(service, "[dim]—[/]", "[dim]—[/]", "[dim]—[/]", "host-only")
                 self.results["services"]["skipped"] += 1
@@ -1144,10 +1159,15 @@ class VMValidator:
         if not self._check_qga_ready():
             wait_deadline = time.time() + 180
             self.console.print("[yellow]⏳ Waiting for QEMU Guest Agent (up to 180s)...[/]")
+            last_log = 0
             while time.time() < wait_deadline:
                 time.sleep(5)
                 if self._check_qga_ready():
                     break
+                elapsed = int(180 - (wait_deadline - time.time()))
+                if elapsed - last_log >= 15:
+                    self.console.print(f"[dim]   ...still waiting for QGA ({elapsed}s elapsed)[/]")
+                    last_log = elapsed
 
         if not self._check_qga_ready():
             self.console.print("[red]❌ QEMU Guest Agent not responding[/]")

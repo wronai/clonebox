@@ -1,0 +1,53 @@
+vm:
+  name: clone-clonebox
+  ram_mb: 8192
+  vcpus: 8
+  disk_size_gb: 60
+  gui: true
+  base_image: /home/tom/ubuntu-22.04-cloud.qcow2
+  network_mode: auto
+  username: ubuntu
+  password: ubuntu
+services:
+- containerd
+- cups-browsed
+- cups
+- docker
+- systemd-resolved
+packages:
+- build-essential
+- git
+- curl
+- vim
+- docker.io
+- firefox
+- golang
+- nginx
+- python3
+- screen
+- uvicorn
+snap_packages:
+- chromium
+- pycharm-community
+post_commands:
+- command -v google-chrome >/dev/null 2>&1 || (curl -fsSL -o /tmp/google-chrome.deb
+  https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb && apt-get
+  update && DEBIAN_FRONTEND=noninteractive apt-get install -y /tmp/google-chrome.deb)
+paths:
+  /home/tom/github/wronai/clonebox: /mnt/project0
+  /home/tom/github: /mnt/project1
+  /home/tom/github/invutil: /mnt/project2
+  /home/tom/gitlab: /mnt/project3
+  /home/tom: /mnt/workdir4
+  /home/tom/Downloads: /home/ubuntu/Downloads
+  /home/tom/Documents: /home/ubuntu/Documents
+app_data_paths:
+  /home/tom/.config/google-chrome: /home/ubuntu/.config/google-chrome
+  /home/tom/.config/chromium: /home/ubuntu/.config/chromium
+  /home/tom/.docker: /home/ubuntu/.docker
+  /home/tom/snap/firefox/common/.mozilla/firefox: /home/ubuntu/snap/firefox/common/.mozilla/firefox
+  /home/tom/snap/firefox/common/.cache/mozilla/firefox: /home/ubuntu/snap/firefox/common/.cache/mozilla/firefox
+  /home/tom/.config/JetBrains: /home/ubuntu/snap/pycharm-community/common/.config/JetBrains
+  /home/tom/.local/share/JetBrains: /home/ubuntu/snap/pycharm-community/common/.local/share/JetBrains
+  /home/tom/.cache/JetBrains: /home/ubuntu/snap/pycharm-community/common/.cache/JetBrains
+  /home/tom/.pyenv: /home/ubuntu/.pyenv

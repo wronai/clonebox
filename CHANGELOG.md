@@ -1,3 +1,19 @@
+## [1.1.20] - 2026-02-02
+
+### Summary
+
+refactor(goal): CLI interface improvements
+
+### Core
+
+- update src/clonebox/cli.py
+- update src/clonebox/validator.py
+
+### Other
+
+- config: update .clonebox.clean.yaml
+
+
 ## [1.1.19] - 2026-02-02
 
 ### Summary

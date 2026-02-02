@@ -1884,14 +1884,24 @@ def cmd_test(args):
             # Give QEMU Guest Agent some time to come up (common during early boot)
             qga_ready = _qga_ping(vm_name, conn_uri)
             if not qga_ready:
-                for _ in range(12):  # ~60s
+                console.print("[yellow]⏳ Waiting for QEMU Guest Agent (up to 60s)...[/]")
+                qga_wait_start = time.time()
+                for attempt in range(12):  # ~60s
                     time.sleep(5)
                     qga_ready = _qga_ping(vm_name, conn_uri)
+                    elapsed = int(time.time() - qga_wait_start)
                     if qga_ready:
+                        console.print(f"[green]✅ QEMU Guest Agent connected after {elapsed}s[/]")
                         break
+                    if attempt % 2 == 1:
+                        console.print(f"[dim]   ...still waiting ({elapsed}s elapsed)[/]")
+
+                if not qga_ready:
+                    console.print("[yellow]⚠️  QEMU Guest Agent still not connected[/]")
             
             # Check cloud-init status immediately if QGA is ready
             if qga_ready:
+                console.print("[dim]   Checking cloud-init status via QGA...[/]")
                 status = _qga_exec(
                     vm_name, conn_uri, "cloud-init status 2>/dev/null || true", timeout=15
                 )
@@ -2068,6 +2078,8 @@ def cmd_test(args):
 
     # Run full validation if requested
     if validate_all and state == "running":
+        console.print("[bold cyan]🔎 Starting deep validation (--validate)[/]")
+        console.print("[dim]This can take a few minutes on first boot (waiting for QGA/cloud-init, checking packages/services).[/]")
         validator = VMValidator(
             config,
             vm_name,
