@@ -1237,6 +1237,17 @@ class VMValidator:
             smoke = self._ssh_exec("echo ok", timeout=10)
             if smoke != "ok":
                 self.console.print("[red]❌ SSH fallback failed[/]")
+                try:
+                    key_path = self._get_ssh_key_path()
+                    ssh_port = self._get_ssh_port()
+                    if key_path is None:
+                        self.console.print("[dim]SSH key not found for this VM (expected: <images_dir>/<vm_name>/ssh_key)[/]")
+                    else:
+                        self.console.print(f"[dim]Expected SSH key: {key_path}[/]")
+                    self.console.print(f"[dim]Expected SSH port (passt forward): 127.0.0.1:{ssh_port} -> guest:22[/]")
+                    self.console.print("[dim]SSH fallback requires libvirt user networking with passt + <portForward> in VM XML.[/]")
+                except Exception:
+                    pass
                 self.console.print("\n[bold]🔧 Troubleshooting QGA:[/]")
                 self.console.print("  1. The VM might still be booting. Wait 30-60 seconds.")
                 self.console.print("  2. Ensure the agent is installed and running inside the VM:")

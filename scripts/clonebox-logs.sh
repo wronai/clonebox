@@ -29,7 +29,7 @@ fi
 
 # For user session, use QEMU Guest Agent to fetch logs
 if [ "$USE_QGA" = "true" ]; then
-    echo "📋 Fetching logs via QEMU Guest Agent..."
+    echo "📋 Fetching logs via QEMU Guest Agent (SSH fallback if needed)..."
     echo ""
     
     # Create temp directory for logs

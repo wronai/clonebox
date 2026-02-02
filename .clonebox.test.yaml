@@ -1,0 +1,21 @@
+version: '1'
+generated: '2026-02-02T15:00:00.000000'
+vm:
+  name: clone-clonebox
+  ram_mb: 4096
+  vcpus: 4
+  disk_size_gb: 20
+  gui: true
+  base_image: /home/tom/ubuntu-22.04-cloud.qcow2
+  network_mode: auto
+  username: ubuntu
+  password: ubuntu
+packages:
+- qemu-guest-agent
+- cloud-guest-utils
+- net-tools
+paths: {}
+app_data_paths: {}
+services: []
+snap_packages: []
+post_commands: []

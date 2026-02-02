@@ -566,6 +566,12 @@ class SelectiveVMCloner:
                                     console.print(
                                         f"[dim]SSH access (passthrough): ssh -i {ssh_key_path} -p {ssh_port} {config.username}@127.0.0.1[/]"
                                     )
+
+                        if console:
+                            conn_uri = "qemu:///session" if self.user_session else "qemu:///system"
+                            console.print(
+                                f"[dim]Live install logs: virsh --connect {conn_uri} console {config.name}[/]"
+                            )
                     except Exception:
                         pass
 
@@ -1678,6 +1684,7 @@ fi
         runcmd_lines.append("  - systemctl enable --now ssh || systemctl enable --now sshd || echo '  → ❌ Failed to enable ssh'")
         runcmd_lines.append("  - echo '  → [3/3] Enabling snapd'")
         runcmd_lines.append("  - systemctl enable --now snapd || echo '  → ❌ Failed to enable snapd'")
+        runcmd_lines.append("  - systemctl enable --now serial-getty@ttyS0.service >/dev/null 2>&1 || true")
         runcmd_lines.append("  - echo '  → Waiting for snap system seed...'")
         runcmd_lines.append("  - timeout 300 snap wait system seed.loaded || true")
         runcmd_lines.append("  - echo '  → ✓ [3/10] Core services enabled'")
@@ -2639,6 +2646,9 @@ resize_rootfs: true
 # Update package cache and upgrade
 package_update: true
 package_upgrade: false
+
+output:
+  all: "| tee -a /var/log/cloud-init-output.log /dev/ttyS0"
 {bootcmd_block}
 
 # Install packages moved to runcmd for better logging

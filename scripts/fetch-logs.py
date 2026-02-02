@@ -6,6 +6,8 @@ import json
 import sys
 import base64
 import time
+import os
+import zlib
 
 def qga_exec(vm_name, conn_uri, command, timeout=10):
     """Execute command via QEMU Guest Agent"""
@@ -61,6 +63,44 @@ def qga_exec(vm_name, conn_uri, command, timeout=10):
     except Exception as e:
         return f"Error: {e}"
 
+
+def ssh_exec(vm_name, command, timeout=20):
+    """Execute command via SSH (requires passt port-forward + ssh_key)."""
+    try:
+        key_path = os.path.expanduser(f"~/.local/share/libvirt/images/{vm_name}/ssh_key")
+        if not os.path.exists(key_path):
+            return None
+
+        ssh_port = 22000 + (zlib.crc32(vm_name.encode("utf-8")) % 1000)
+        user = "ubuntu"
+        result = subprocess.run(
+            [
+                "ssh",
+                "-i",
+                key_path,
+                "-p",
+                str(ssh_port),
+                "-o",
+                "StrictHostKeyChecking=no",
+                "-o",
+                "UserKnownHostsFile=/dev/null",
+                "-o",
+                "ConnectTimeout=5",
+                "-o",
+                "BatchMode=yes",
+                f"{user}@127.0.0.1",
+                command,
+            ],
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+        )
+        if result.returncode != 0:
+            return None
+        return (result.stdout or "").strip()
+    except Exception:
+        return None
+
 def main():
     if len(sys.argv) < 4:
         print("Usage: fetch-logs.py <vm_name> <conn_uri> <output_dir>")
@@ -85,6 +125,8 @@ def main():
     for filename, command in logs.items():
         print(f"Fetching {filename}...")
         output = qga_exec(vm_name, conn_uri, command, timeout=30)
+        if output is None:
+            output = ssh_exec(vm_name, command, timeout=30)
         if output:
             # Strip ANSI escape codes for cleaner output
             import re

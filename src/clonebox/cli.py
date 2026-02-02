@@ -949,11 +949,12 @@ def interactive_mode():
         required_keys = [
             "libvirt_connected",
             "kvm_available",
-            "default_network",
             "images_dir_writable",
             "genisoimage_installed",
             "qemu_img_installed",
         ]
+        if checks.get("default_network_required", True):
+            required_keys.append("default_network")
         if getattr(config, "gui", False):
             required_keys.append("virt_viewer_installed")
 
@@ -1915,7 +1916,10 @@ def cmd_test(args):
 
                 if not qga_ready:
                     console.print("[yellow]⚠️  QEMU Guest Agent still not connected[/]")
-            
+                    console.print(
+                        f"[dim]Tip: you can watch live cloud-init output via serial console: virsh --connect {conn_uri} console {vm_name}[/]"
+                    )
+
             # Check cloud-init status immediately if QGA is ready
             if qga_ready:
                 console.print("[dim]   Checking cloud-init status via QGA...[/]")
@@ -2645,11 +2649,12 @@ def create_vm_from_config(config, start=False, user_session=False, replace=False
     required_keys = [
         "libvirt_connected",
         "kvm_available",
-        "default_network",
         "images_dir_writable",
         "genisoimage_installed",
         "qemu_img_installed",
     ]
+    if checks.get("default_network_required", True):
+        required_keys.append("default_network")
     if getattr(vm_config, "gui", False):
         required_keys.append("virt_viewer_installed")
 
