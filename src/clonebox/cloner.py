@@ -1434,6 +1434,12 @@ fi
         serial = ET.SubElement(devices, "serial", type="pty")
         ET.SubElement(serial, "target", port="0")
 
+        vm_dir = Path(str(root_disk)).parent
+        serial_log_path = str(vm_dir / "serial.log")
+        serial_file = ET.SubElement(devices, "serial", type="file")
+        ET.SubElement(serial_file, "source", path=serial_log_path)
+        ET.SubElement(serial_file, "target", port="1")
+
         console_elem = ET.SubElement(devices, "console", type="pty")
         ET.SubElement(console_elem, "target", type="serial", port="0")
 
