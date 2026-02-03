@@ -1,0 +1,3229 @@
+#!/usr/bin/env python3
+"""
+SelectiveVMCloner - Creates isolated VMs with only selected apps/paths/services.
+"""
+
+import base64
+import json
+import logging
+import os
+import secrets
+import shutil
+import socket
+import string
+import subprocess
+import tempfile
+import time
+import urllib.request
+import uuid
+import zlib
+import xml.etree.ElementTree as ET
+import signal
+from dataclasses import dataclass, field
+from datetime import datetime
+from pathlib import Path
+from typing import Any, Dict, List, Optional, Tuple
+
+try:
+    import libvirt
+except ImportError:
+    libvirt = None
+import yaml
+
+from clonebox.di import get_container
+from clonebox.interfaces.disk import DiskManager
+from clonebox.interfaces.hypervisor import HypervisorBackend
+from clonebox.interfaces.network import NetworkManager
+from clonebox.logging import get_logger, log_operation
+from clonebox.policies import PolicyEngine, PolicyViolationError
+from clonebox.resources import ResourceLimits
+from clonebox.rollback import vm_creation_transaction
+from clonebox.secrets import SecretsManager, SSHKeyPair
+from clonebox.audit import get_audit_logger, AuditEventType, AuditOutcome
+
+log = get_logger(__name__)
+
+SNAP_INTERFACES = {
+    "pycharm-community": [
+        "desktop",
+        "desktop-legacy",
+        "x11",
+        "wayland",
+        "home",
+        "network",
+        "network-bind",
+        "cups-control",
+        "removable-media",
+    ],
+    "chromium": [
+        "desktop",
+        "desktop-legacy",
+        "x11",
+        "wayland",
+        "home",
+        "network",
+        "audio-playback",
+        "camera",
+    ],
+    "firefox": [
+        "desktop",
+        "desktop-legacy",
+        "x11",
+        "wayland",
+        "home",
+        "network",
+        "audio-playback",
+        "removable-media",
+    ],
+    "code": ["desktop", "desktop-legacy", "x11", "wayland", "home", "network", "ssh-keys"],
+    "slack": ["desktop", "desktop-legacy", "x11", "wayland", "home", "network", "audio-playback"],
+    "spotify": ["desktop", "x11", "wayland", "home", "network", "audio-playback"],
+}
+DEFAULT_SNAP_INTERFACES = ["desktop", "desktop-legacy", "x11", "home", "network"]
+
+
+@dataclass
+class VMConfig:
+    """Configuration for the VM to create."""
+
+    name: str = field(default_factory=lambda: os.getenv("VM_NAME", "clonebox-vm"))
+    ram_mb: int = field(default_factory=lambda: int(os.getenv("VM_RAM_MB", "8192")))
+    vcpus: int = field(default_factory=lambda: int(os.getenv("VM_VCPUS", "4")))
+    disk_size_gb: int = field(default_factory=lambda: int(os.getenv("VM_DISK_SIZE_GB", "20")))
+    gui: bool = field(default_factory=lambda: os.getenv("VM_GUI", "true").lower() == "true")
+    base_image: Optional[str] = field(default_factory=lambda: os.getenv("VM_BASE_IMAGE") or None)
+    paths: dict = field(default_factory=dict)
+    packages: list = field(default_factory=list)
+    snap_packages: list = field(default_factory=list)  # Snap packages to install
+    services: list = field(default_factory=list)
+    post_commands: list = field(default_factory=list)  # Commands to run after setup
+    copy_paths: dict = field(default_factory=dict)  # Paths to copy (import) instead of bind-mount
+    user_session: bool = field(
+        default_factory=lambda: os.getenv("VM_USER_SESSION", "false").lower() == "true"
+    )  # Use qemu:///session instead of qemu:///system
+    network_mode: str = field(
+        default_factory=lambda: os.getenv("VM_NETWORK_MODE", "auto")
+    )  # auto|default|user
+    username: str = field(
+        default_factory=lambda: os.getenv("VM_USERNAME", "ubuntu")
+    )  # VM default username
+    password: str = field(
+        default_factory=lambda: os.getenv("VM_PASSWORD", "ubuntu")
+    )  # VM default password
+    autostart_apps: bool = field(
+        default_factory=lambda: os.getenv("VM_AUTOSTART_APPS", "true").lower() == "true"
+    )  # Auto-start GUI apps after login (desktop autostart)
+    web_services: list = field(default_factory=list)  # Web services to start (uvicorn, etc.)
+    resources: dict = field(default_factory=dict)  # Resource limits (cpu, memory, disk, network)
+    auth_method: str = "ssh_key"  # ssh_key | one_time_password | password
+    ssh_public_key: Optional[str] = None
+    shutdown_after_setup: bool = False
+
+    def to_dict(self) -> dict:
+        return {
+            "paths": self.paths,
+            "packages": self.packages,
+            "services": self.services,
+        }
+
+
+class SelectiveVMCloner:
+    """
+    Creates VMs with only selected applications, paths and services.
+    Uses bind mounts instead of full disk cloning.
+    """
+
+    def __init__(
+        self,
+        conn_uri: str = None,
+        user_session: bool = False,
+        hypervisor: HypervisorBackend = None,
+        disk_manager: DiskManager = None,
+        network_manager: NetworkManager = None,
+        secrets_manager: SecretsManager = None,
+    ):
+        self.user_session = user_session
+        container = get_container()
+
+        # Resolve dependencies
+        self.hypervisor = hypervisor or container.resolve(HypervisorBackend)
+        self.disk = disk_manager or container.resolve(DiskManager)
+        # self.network = network_manager or container.resolve(NetworkManager)
+        self.secrets = secrets_manager or container.resolve(SecretsManager)
+
+        if conn_uri:
+            self.conn_uri = conn_uri
+        else:
+            self.conn_uri = "qemu:///session" if user_session else "qemu:///system"
+
+        self.conn = None
+        self._connect()
+
+    @property
+    def SYSTEM_IMAGES_DIR(self) -> Path:
+        return Path(os.getenv("CLONEBOX_SYSTEM_IMAGES_DIR", "/var/lib/libvirt/images"))
+
+    @property
+    def USER_IMAGES_DIR(self) -> Path:
+        return Path(
+            os.getenv("CLONEBOX_USER_IMAGES_DIR", str(Path.home() / ".local/share/libvirt/images"))
+        ).expanduser()
+
+    @property
+    def DEFAULT_BASE_IMAGE_URL(self) -> str:
+        return os.getenv(
+            "CLONEBOX_BASE_IMAGE_URL",
+            "https://cloud-images.ubuntu.com/jammy/current/jammy-server-cloudimg-amd64.img",
+        )
+
+    @property
+    def DEFAULT_BASE_IMAGE_FILENAME(self) -> str:
+        return os.getenv("CLONEBOX_BASE_IMAGE_FILENAME", "clonebox-ubuntu-jammy-amd64.qcow2")
+
+    def _connect(self):
+        """Connect to libvirt."""
+        if libvirt is None:
+            raise ImportError(
+                "libvirt-python is required. Install with: pip install libvirt-python\n"
+                "Also ensure libvirt is installed: sudo apt install libvirt-daemon-system"
+            )
+
+        try:
+            # Use openAuth to avoid blocking on graphical auth dialogs (polkit)
+            # This is more robust for CLI usage
+            def auth_cb(creds, opaque):
+                return 0
+
+            auth = [[libvirt.VIR_CRED_AUTHNAME, libvirt.VIR_CRED_NOECHOPROMPT], auth_cb, None]
+            self.conn = libvirt.openAuth(self.conn_uri, auth, 0)
+        except libvirt.libvirtError as e:
+            raise ConnectionError(
+                f"Cannot connect to {self.conn_uri}\n"
+                f"Error: {e}\n\n"
+                f"Troubleshooting:\n"
+                f"  1. Check if libvirtd is running: sudo systemctl status libvirtd\n"
+                f"  2. Start libvirtd: sudo systemctl start libvirtd\n"
+                f"  3. Add user to libvirt group: sudo usermod -aG libvirt $USER\n"
+                f"  4. Re-login or run: newgrp libvirt\n"
+                f"  5. For user session (no sudo): use --user flag"
+            )
+
+        if self.conn is None:
+            raise ConnectionError(f"Cannot connect to {self.conn_uri}")
+
+    def get_images_dir(self) -> Path:
+        """Get the appropriate images directory based on session type."""
+        if self.user_session:
+            return self.USER_IMAGES_DIR
+        return self.SYSTEM_IMAGES_DIR
+
+    def _get_downloads_dir(self) -> Path:
+        return Path.home() / "Downloads"
+
+    def _ensure_default_base_image(self, console=None) -> Path:
+        """Ensure a default Ubuntu 22.04 base image is available."""
+        with log_operation(log, "vm.ensure_base_image"):
+            downloads_dir = self._get_downloads_dir()
+            downloads_dir.mkdir(parents=True, exist_ok=True)
+            cached_path = downloads_dir / self.DEFAULT_BASE_IMAGE_FILENAME
+
+            if cached_path.exists() and cached_path.stat().st_size > 0:
+                return cached_path
+
+            log.info(
+                "Downloading base image (first run only). This will be cached in ~/Downloads...",
+                url=self.DEFAULT_BASE_IMAGE_URL,
+            )
+
+            policy = PolicyEngine.load_effective()
+            if policy is not None:
+                try:
+                    policy.assert_url_allowed(self.DEFAULT_BASE_IMAGE_URL)
+                except PolicyViolationError as e:
+                    raise RuntimeError(str(e)) from e
+
+            try:
+                import urllib.request
+
+                with tempfile.NamedTemporaryFile(
+                    prefix=f"{self.DEFAULT_BASE_IMAGE_FILENAME}.",
+                    dir=str(downloads_dir),
+                    delete=False,
+                ) as tmp:
+                    tmp_path = Path(tmp.name)
+
+                try:
+                    urllib.request.urlretrieve(self.DEFAULT_BASE_IMAGE_URL, tmp_path)
+                    tmp_path.replace(cached_path)
+                finally:
+                    if tmp_path.exists() and tmp_path != cached_path:
+                        try:
+                            tmp_path.unlink()
+                        except Exception:
+                            pass
+            except Exception as e:
+                log.error(f"Failed to download base image: {e}")
+                raise RuntimeError(
+                    "Failed to download a default base image.\n\n"
+                    "🔧 Solutions:\n"
+                    "  1. Provide a base image explicitly:\n"
+                    "     clonebox clone . --base-image /path/to/image.qcow2\n"
+                    "  2. Download it manually and reuse it:\n"
+                    f"     wget -O {cached_path} {self.DEFAULT_BASE_IMAGE_URL}\n\n"
+                    f"Original error: {e}"
+                ) from e
+
+            return cached_path
+
+    def _default_network_state(self) -> str:
+        try:
+            active = self.conn.listNetworks() or []
+            if "default" in active:
+                return "active"
+            defined = self.conn.listDefinedNetworks() or []
+            if "default" in defined:
+                return "inactive"
+            return "missing"
+        except Exception:
+            return "unknown"
+
+    def _default_network_active(self) -> bool:
+        """Check if libvirt default network is active."""
+        return self._default_network_state() == "active"
+
+    def _passt_supported(self) -> bool:
+        try:
+            if self.conn is None:
+                return False
+            if not hasattr(self.conn, "getLibVersion"):
+                return False
+            # libvirt 9.0.0 introduced the passt backend and <portForward> support
+            return int(self.conn.getLibVersion()) >= 9_000_000
+        except Exception:
+            return False
+
+    def _read_passt_ssh_port(self, vm_name: str, vm_dir: Path) -> int:
+        port_file = vm_dir / "ssh_port"
+        if port_file.exists():
+            try:
+                port = int(port_file.read_text().strip())
+                if 1 <= port <= 65535:
+                    return port
+            except Exception:
+                pass
+        return 22000 + (zlib.crc32(vm_name.encode("utf-8")) % 1000)
+
+    def _allocate_passt_ssh_port(self, vm_name: str, vm_dir: Path, host: str = "127.0.0.1") -> int:
+        def _is_free(port: int) -> bool:
+            try:
+                with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+                    s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+                    s.bind((host, port))
+                return True
+            except OSError:
+                return False
+
+        port_file = vm_dir / "ssh_port"
+
+        if port_file.exists():
+            try:
+                stored = int(port_file.read_text().strip())
+                if 1 <= stored <= 65535 and _is_free(stored):
+                    return stored
+            except Exception:
+                pass
+
+        base = 22000 + (zlib.crc32(vm_name.encode("utf-8")) % 1000)
+        base_offset = base - 22000
+        for i in range(1000):
+            candidate = 22000 + ((base_offset + i) % 1000)
+            if _is_free(candidate):
+                try:
+                    port_file.write_text(str(candidate))
+                except Exception:
+                    pass
+                return candidate
+
+        try:
+            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+                s.bind((host, 0))
+                candidate = int(s.getsockname()[1])
+            try:
+                port_file.write_text(str(candidate))
+            except Exception:
+                pass
+            return candidate
+        except Exception:
+            return base
+
+    def resolve_network_mode(self, config: VMConfig) -> str:
+        """Resolve network mode based on config and session type."""
+        mode = (config.network_mode or "auto").lower()
+        if mode == "auto":
+            if self.user_session and not self._default_network_active():
+                return "user"
+            return "default"
+        if mode in {"default", "user"}:
+            return mode
+        return "default"
+
+    def check_prerequisites(self, config: Optional[VMConfig] = None) -> dict:
+        """Check system prerequisites for VM creation."""
+        images_dir = self.get_images_dir()
+
+        resolved_network_mode: Optional[str] = None
+        if config is not None:
+            try:
+                resolved_network_mode = self.resolve_network_mode(config)
+            except Exception:
+                resolved_network_mode = None
+
+        checks = {
+            "libvirt_connected": False,
+            "kvm_available": False,
+            "default_network": False,
+            "default_network_required": True,
+            "images_dir_writable": False,
+            "images_dir": str(images_dir),
+            "session_type": "user" if self.user_session else "system",
+            "genisoimage_installed": False,
+            "virt_viewer_installed": False,
+            "qemu_img_installed": False,
+            "passt_installed": shutil.which("passt") is not None,
+            "passt_available": False,
+        }
+
+        checks["passt_available"] = checks["passt_installed"] and self._passt_supported()
+
+        # Check for genisoimage
+        checks["genisoimage_installed"] = shutil.which("genisoimage") is not None
+        
+        # Check for virt-viewer
+        checks["virt_viewer_installed"] = shutil.which("virt-viewer") is not None
+
+        # Check for qemu-img
+        checks["qemu_img_installed"] = shutil.which("qemu-img") is not None
+
+        # Check libvirt connection
+        if self.conn and self.conn.isAlive():
+            checks["libvirt_connected"] = True
+
+        # Check KVM
+        kvm_path = Path("/dev/kvm")
+        checks["kvm_available"] = kvm_path.exists()
+        if not checks["kvm_available"]:
+            checks["kvm_error"] = "KVM not available. Enable virtualization in BIOS."
+        elif not os.access(kvm_path, os.R_OK | os.W_OK):
+            checks["kvm_error"] = (
+                "No access to /dev/kvm. Add user to kvm group: sudo usermod -aG kvm $USER"
+            )
+
+        # Check default network
+        default_net_state = self._default_network_state()
+        checks["default_network_required"] = (resolved_network_mode or "default") != "user"
+        if checks["default_network_required"]:
+            checks["default_network"] = default_net_state == "active"
+        else:
+            # For user-mode networking (slirp/passt), libvirt's default network is not required.
+            checks["default_network"] = True
+
+        if checks["default_network_required"] and default_net_state in {"inactive", "missing", "unknown"}:
+            checks["network_error"] = (
+                "Default network not found or inactive.\n"
+                "  For user session, CloneBox can use user-mode networking (slirp) automatically.\n"
+                "  Or create a user network:\n"
+                "    virsh --connect qemu:///session net-define /tmp/default-network.xml\n"
+                "    virsh --connect qemu:///session net-start default\n"
+                "  Or use system session: clonebox clone . (without --user)\n"
+            )
+
+        if resolved_network_mode is not None:
+            checks["network_mode"] = resolved_network_mode
+
+        # Check images directory
+        if images_dir.exists():
+            checks["images_dir_writable"] = os.access(images_dir, os.W_OK)
+            if not checks["images_dir_writable"]:
+                checks["images_dir_error"] = (
+                    f"Cannot write to {images_dir}\n"
+                    f"  Option 1: Run with sudo\n"
+                    f"  Option 2: Use --user flag for user session (recommended):\n"
+                    f"     clonebox clone . --user\n\n"
+                    f"  3. Fix permissions: sudo chown -R $USER:libvirt {images_dir}"
+                )
+        else:
+            # Try to create it
+            try:
+                images_dir.mkdir(parents=True, exist_ok=True)
+                checks["images_dir_writable"] = True
+            except PermissionError:
+                checks["images_dir_writable"] = False
+                checks["images_dir_error"] = (
+                    f"Cannot create {images_dir}\n"
+                    f"  Use --user flag for user session (stores in ~/.local/share/libvirt/images/)"
+                )
+
+        return checks
+
+    def create_vm(
+        self,
+        config: VMConfig,
+        console=None,
+        replace: bool = False,
+        approved: bool = False,
+    ) -> str:
+        """
+        Create a VM with only selected applications/paths.
+
+        Args:
+            config: VMConfig with paths, packages, services
+            console: Rich console for output (optional)
+
+        Returns:
+            UUID of created VM
+        """
+        audit = get_audit_logger()
+        with audit.operation(
+            AuditEventType.VM_CREATE,
+            target_type="vm",
+            target_name=config.name,
+        ) as audit_ctx:
+            audit_ctx.add_detail("ram_mb", config.ram_mb)
+            audit_ctx.add_detail("vcpus", config.vcpus)
+            audit_ctx.add_detail("disk_size_gb", config.disk_size_gb)
+
+            with log_operation(
+                log, "vm.create", vm_name=config.name, ram_mb=config.ram_mb
+            ):
+                with vm_creation_transaction(self, config, console) as ctx:
+                    # If VM already exists, optionally replace it
+                    existing_vm = None
+                    try:
+                        candidate_vm = self.conn.lookupByName(config.name)
+                        if candidate_vm is not None:
+                            try:
+                                if hasattr(candidate_vm, "name") and callable(candidate_vm.name):
+                                    if candidate_vm.name() == config.name:
+                                        existing_vm = candidate_vm
+                                else:
+                                    existing_vm = candidate_vm
+                            except Exception:
+                                existing_vm = candidate_vm
+                    except Exception:
+                        existing_vm = None
+
+                    if existing_vm is not None:
+                        if not replace:
+                            raise RuntimeError(
+                                f"VM '{config.name}' already exists.\n\n"
+                                f"🔧 Solutions:\n"
+                                f"  1. Reuse existing VM: clonebox start {config.name}\n"
+                                f"  2. Replace it: clonebox clone . --name {config.name} --replace\n"
+                                f"  3. Delete it: clonebox delete {config.name}\n"
+                            )
+
+                        log.info(f"VM '{config.name}' already exists - replacing...")
+                        policy = PolicyEngine.load_effective()
+                        if policy is not None:
+                            policy.assert_operation_approved(
+                                AuditEventType.VM_DELETE.value,
+                                approved=approved,
+                            )
+                        self.delete_vm(
+                            config.name,
+                            delete_storage=True,
+                            console=console,
+                            ignore_not_found=True,
+                            approved=approved,
+                        )
+
+                    # Determine images directory
+                    images_dir = self.get_images_dir()
+                    try:
+                        vm_dir = ctx.add_directory(images_dir / config.name)
+                        vm_dir.mkdir(parents=True, exist_ok=True)
+                    except PermissionError as e:
+                        raise PermissionError(
+                            f"Cannot create VM directory: {images_dir / config.name}\n\n"
+                            f"🔧 Solutions:\n"
+                            f"  1. Use --user flag to run in user session (recommended):\n"
+                            f"     clonebox clone . --user\n\n"
+                            f"  2. Run with sudo (not recommended):\n"
+                            f"     sudo clonebox clone .\n\n"
+                            f"  3. Fix directory permissions:\n"
+                            f"     sudo mkdir -p {images_dir}\n"
+                            f"     sudo chown -R $USER:libvirt {images_dir}\n\n"
+                            f"Original error: {e}"
+                        ) from e
+
+                    # Create root disk
+                    root_disk = ctx.add_file(vm_dir / "root.qcow2")
+
+                    if not config.base_image:
+                        config.base_image = str(self._ensure_default_base_image(console=console))
+
+                    if config.base_image and Path(config.base_image).exists():
+                        # Use backing file for faster creation
+                        log.info(f"Creating root disk ({config.disk_size_gb}GB) using backing file: {config.base_image}")
+                        cmd = [
+                            "qemu-img",
+                            "create",
+                            "-f",
+                            "qcow2",
+                            "-b",
+                            config.base_image,
+                            "-F",
+                            "qcow2",
+                            str(root_disk),
+                            f"{config.disk_size_gb}G",
+                        ]
+                    else:
+                        # Create empty disk
+                        log.info(f"Creating empty {config.disk_size_gb}GB root disk...")
+                        cmd = ["qemu-img", "create", "-f", "qcow2", str(root_disk), f"{config.disk_size_gb}G"]
+
+                    subprocess.run(cmd, check=True, capture_output=True)
+
+                    # Create cloud-init ISO if packages/services/paths specified
+                    cloudinit_iso = None
+                    if (
+                        config.packages
+                        or config.services
+                        or config.snap_packages
+                        or config.post_commands
+                        or config.gui
+                        or config.paths
+                        or config.copy_paths
+                    ):
+                        cloudinit_iso = ctx.add_file(self._create_cloudinit_iso(vm_dir, config, self.user_session))
+                        log.info(f"Created cloud-init ISO for VM setup")
+
+                    # Generate VM XML
+                    vm_xml = self._generate_vm_xml(config, root_disk, cloudinit_iso)
+                    ctx.add_libvirt_domain(self.conn, config.name)
+
+                    # Define VM
+                    log.info(f"Defining VM '{config.name}'...")
+                    try:
+                        vm = self.conn.defineXML(vm_xml)
+                    except Exception as e:
+                        raise RuntimeError(
+                            f"Failed to define VM '{config.name}'.\n"
+                            f"Error: {e}\n\n"
+                            f"If the VM already exists, try: clonebox clone . --name {config.name} --replace\n"
+                        ) from e
+
+                    try:
+                        if console and self.resolve_network_mode(config) == "user":
+                            if shutil.which("passt") and self._passt_supported():
+                                ssh_key_path = vm_dir / "ssh_key"
+                                if ssh_key_path.exists():
+                                    ssh_port = self._read_passt_ssh_port(config.name, vm_dir)
+                                    console.print(
+                                        f"[dim]SSH access (passthrough): ssh -i {ssh_key_path} -p {ssh_port} {config.username}@127.0.0.1[/]"
+                                    )
+                            else:
+                                console.print(
+                                    "[yellow]⚠️  passt not available - SSH port-forward will NOT be configured in --user mode[/]"
+                                )
+                                console.print(
+                                    "[dim]Install passt (and recreate VM) to enable SSH fallback, or use virsh console for live logs.[/]"
+                                )
+
+                                if self.user_session:
+                                    console.print(
+                                        f"[dim]Host serial log (when enabled): {vm_dir / 'serial.log'}[/]"
+                                    )
+
+                        if console:
+                            conn_uri = "qemu:///session" if self.user_session else "qemu:///system"
+                            console.print(
+                                f"[dim]Live install logs: virsh --connect {conn_uri} console {config.name}[/]"
+                            )
+                    except Exception:
+                        pass
+
+                    # Start if autostart requested
+                    if getattr(config, "autostart", False):
+                        self.start_vm(config.name, open_viewer=True)
+
+                    # All good - commit transaction
+                    ctx.commit()
+
+                    return vm.UUIDString()
+
+    def _generate_boot_diagnostic_script(self, config: VMConfig) -> str:
+        """Generate boot diagnostic script with self-healing capabilities."""
+        import base64
+
+        wants_chrome = any(
+            p == "/home/ubuntu/.config/google-chrome"
+            for p in list((config.paths or {}).values()) + list((config.copy_paths or {}).values())
+        )
+
+        apt_pkg_list = list(config.packages or [])
+        for base_pkg in ["qemu-guest-agent", "cloud-guest-utils"]:
+            if base_pkg not in apt_pkg_list:
+                apt_pkg_list.insert(0, base_pkg)
+        if config.gui:
+            for gui_pkg in ["ubuntu-desktop-minimal", "firefox"]:
+                if gui_pkg not in apt_pkg_list:
+                    apt_pkg_list.append(gui_pkg)
+
+        apt_packages = " ".join(f'"{p}"' for p in apt_pkg_list) if apt_pkg_list else ""
+        snap_packages = (
+            " ".join(f'"{p}"' for p in config.snap_packages) if config.snap_packages else ""
+        )
+        services = " ".join(f'"{s}"' for s in config.services) if config.services else ""
+
+        snap_ifaces_bash = "\n".join(
+            f'SNAP_INTERFACES["{snap}"]="{" ".join(ifaces)}"'
+            for snap, ifaces in SNAP_INTERFACES.items()
+        )
+
+        mount_points_bash = "\n".join(str(p) for p in (config.paths or {}).values())
+        copy_paths_bash = "\n".join(str(p) for p in (config.copy_paths or {}).values())
+
+        script = f"""#!/bin/bash
+set -uo pipefail
+LOG="/var/log/clonebox-boot.log"
+STATUS_KV="/var/run/clonebox-status"
+STATUS_JSON="/var/run/clonebox-status.json"
+MAX_RETRIES=3
+PASSED=0 FAILED=0 REPAIRED=0 TOTAL=0
+
+RED='\\033[0;31m' GREEN='\\033[0;32m' YELLOW='\\033[1;33m' CYAN='\\033[0;36m' NC='\\033[0m' BOLD='\\033[1m'
+
+log() {{ echo -e "[$(date +%H:%M:%S)] $1" | tee -a "$LOG"; }}
+ok() {{ log "${{GREEN}}✅ $1${{NC}}"; ((PASSED++)); ((TOTAL++)); }}
+fail() {{ log "${{RED}}❌ $1${{NC}}"; ((FAILED++)); ((TOTAL++)); }}
+repair() {{ log "${{YELLOW}}🔧 $1${{NC}}"; }}
+section() {{ log ""; log "${{BOLD}}[$1] $2${{NC}}"; }}
+
+write_status() {{
+    local phase="$1"
+    local current_task="${{2:-}}"
+    printf 'passed=%s failed=%s repaired=%s\n' "$PASSED" "$FAILED" "$REPAIRED" > "$STATUS_KV" 2>/dev/null || true
+    cat > "$STATUS_JSON" <<EOF
+{{"phase":"$phase","current_task":"$current_task","total":$TOTAL,"passed":$PASSED,"failed":$FAILED,"repaired":$REPAIRED,"timestamp":"$(date -Iseconds)"}}
+EOF
+}}
+
+header() {{
+    log ""
+    log "${{BOLD}}${{CYAN}}═══════════════════════════════════════════════════════════${{NC}}"
+    log "${{BOLD}}${{CYAN}}  $1${{NC}}"
+    log "${{BOLD}}${{CYAN}}═══════════════════════════════════════════════════════════${{NC}}"
+}}
+
+declare -A SNAP_INTERFACES
+{snap_ifaces_bash}
+DEFAULT_IFACES="desktop desktop-legacy x11 home network"
+
+check_apt() {{
+    dpkg -l "$1" 2>/dev/null | grep -q "^ii"
+}}
+
+install_apt() {{
+    for i in $(seq 1 $MAX_RETRIES); do
+        DEBIAN_FRONTEND=noninteractive apt-get install -y "$1" &>>"$LOG" && return 0
+        sleep 3
+    done
+    return 1
+}}
+
+check_snap() {{
+    snap list "$1" &>/dev/null
+}}
+
+install_snap() {{
+    timeout 120 snap wait system seed.loaded 2>/dev/null || true
+    for i in $(seq 1 $MAX_RETRIES); do
+        snap install "$1" --classic &>>"$LOG" && return 0
+        snap install "$1" &>>"$LOG" && return 0
+        sleep 5
+    done
+    return 1
+}}
+
+connect_interfaces() {{
+    local snap="$1"
+    local ifaces="${{SNAP_INTERFACES[$snap]:-$DEFAULT_IFACES}}"
+    for iface in $ifaces; do
+        snap connect "$snap:$iface" ":$iface" 2>/dev/null && log "    ${{GREEN}}✓${{NC}} $snap:$iface" || true
+    done
+}}
+
+test_launch() {{
+    local app="$1"
+    local temp_output="/tmp/$app-test.log"
+    local error_detail="/tmp/$app-error.log"
+    
+    case "$app" in
+        pycharm-community) 
+            if timeout 10 /snap/pycharm-community/current/jbr/bin/java -version &>"$temp_output"; then
+                return 0
+            else
+                echo "PyCharm Java test failed:" >> "$error_detail"
+                cat "$temp_output" >> "$error_detail" 2>&1 || true
+                return 1
+            fi
+            ;;
+        chromium) 
+            # First check if chromium can run at all
+            if ! command -v chromium >/dev/null 2>&1; then
+                echo "ERROR: chromium not found in PATH" >> "$error_detail"
+                echo "PATH=$PATH" >> "$error_detail"
+                return 1
+            fi
+            
+            # Try with different approaches
+            if timeout 10 chromium --headless=new --dump-dom about:blank &>"$temp_output" 2>&1; then
+                return 0
+            else
+                echo "Chromium headless test failed:" >> "$error_detail"
+                cat "$temp_output" >> "$error_detail"
+                
+                # Try basic version check
+                echo "Trying chromium --version:" >> "$error_detail"
+                timeout 5 chromium --version >> "$error_detail" 2>&1 || true
+                
+                # Check display
+                echo "Display check:" >> "$error_detail"
+                echo "DISPLAY=${{DISPLAY:-unset}}" >> "$error_detail"
+                echo "XDG_RUNTIME_DIR=${{XDG_RUNTIME_DIR:-unset}}" >> "$error_detail"
+                ls -la /tmp/.X11-unix/ >> "$error_detail" 2>&1 || true
+                
+                return 1
+            fi
+            ;;
+        firefox) 
+            if timeout 15 firefox --headless --version &>/dev/null; then
+                return 0
+            else
+                echo "Firefox test failed" >> "$error_detail"
+                return 1
+            fi
+            ;;
+        google-chrome|google-chrome-stable)
+            if timeout 15 google-chrome-stable --headless --version &>/dev/null; then
+                return 0
+            else
+                echo "Chrome test failed" >> "$error_detail"
+                return 1
+            fi
+            ;;
+        docker) 
+            if docker info &>/dev/null; then
+                return 0
+            else
+                echo "Docker info failed:" >> "$error_detail"
+                docker info >> "$error_detail" 2>&1 || true
+                return 1
+            fi
+            ;;
+        *) 
+            if command -v "$1" &>/dev/null; then
+                return 0
+            else
+                echo "Command not found: $1" >> "$error_detail"
+                echo "PATH=$PATH" >> "$error_detail"
+                return 1
+            fi
+            ;;
+    esac
+}}
+
+header "CloneBox VM Boot Diagnostic"
+write_status "starting" "boot diagnostic starting"
+
+APT_PACKAGES=({apt_packages})
+SNAP_PACKAGES=({snap_packages})
+SERVICES=({services})
+VM_USER="${{SUDO_USER:-ubuntu}}"
+VM_HOME="/home/$VM_USER"
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Section 0: Fix permissions for GNOME directories (runs first!)
+# ═══════════════════════════════════════════════════════════════════════════════
+section "0/7" "Fixing directory permissions..."
+write_status "fixing_permissions" "fixing directory permissions"
+
+GNOME_DIRS=(
+    "$VM_HOME/.config"
+    "$VM_HOME/.config/pulse"
+    "$VM_HOME/.config/dconf"
+    "$VM_HOME/.config/ibus"
+    "$VM_HOME/.cache"
+    "$VM_HOME/.cache/ibus"
+    "$VM_HOME/.cache/tracker3"
+    "$VM_HOME/.cache/mesa_shader_cache"
+    "$VM_HOME/.local"
+    "$VM_HOME/.local/share"
+    "$VM_HOME/.local/share/applications"
+    "$VM_HOME/.local/share/keyrings"
+)
+
+for dir in "${{GNOME_DIRS[@]}}"; do
+    if [ ! -d "$dir" ]; then
+        mkdir -p "$dir" 2>/dev/null && log "    Created $dir" || true
+    fi
+done
+
+# Fix ownership for all critical directories
+chown -R 1000:1000 "$VM_HOME/.config" "$VM_HOME/.cache" "$VM_HOME/.local" 2>/dev/null || true
+chmod 700 "$VM_HOME/.config" "$VM_HOME/.cache" 2>/dev/null || true
+
+# Fix snap directories ownership
+for snap_dir in "$VM_HOME/snap"/*; do
+    [ -d "$snap_dir" ] && chown -R 1000:1000 "$snap_dir" 2>/dev/null || true
+done
+
+ok "Directory permissions fixed"
+
+section "1/7" "Checking APT packages..."
+write_status "checking_apt" "checking APT packages"
+for pkg in "${{APT_PACKAGES[@]}}"; do
+    [ -z "$pkg" ] && continue
+    if check_apt "$pkg"; then
+        ok "$pkg"
+    else
+        repair "Installing $pkg..."
+        if install_apt "$pkg"; then
+            ok "$pkg installed"
+            ((REPAIRED++))
+        else
+            fail "$pkg FAILED"
+        fi
+    fi
+done
+
+section "2/7" "Checking Snap packages..."
+write_status "checking_snaps" "checking snap packages"
+timeout 120 snap wait system seed.loaded 2>/dev/null || true
+for pkg in "${{SNAP_PACKAGES[@]}}"; do
+    [ -z "$pkg" ] && continue
+    if check_snap "$pkg"; then
+        ok "$pkg (snap)"
+    else
+        repair "Installing $pkg..."
+        if install_snap "$pkg"; then
+            ok "$pkg installed"
+            ((REPAIRED++))
+        else
+            fail "$pkg FAILED"
+        fi
+    fi
+done
+
+section "3/7" "Connecting Snap interfaces..."
+write_status "connecting_interfaces" "connecting snap interfaces"
+for pkg in "${{SNAP_PACKAGES[@]}}"; do
+    [ -z "$pkg" ] && continue
+    check_snap "$pkg" && connect_interfaces "$pkg"
+done
+systemctl restart snapd 2>/dev/null || true
+
+section "4/7" "Testing application launch..."
+write_status "testing_launch" "testing application launch"
+APPS_TO_TEST=()
+for pkg in "${{SNAP_PACKAGES[@]}}"; do
+    [ -z "$pkg" ] && continue
+    APPS_TO_TEST+=("$pkg")
+done
+if [ "{str(wants_chrome).lower()}" = "true" ]; then
+    APPS_TO_TEST+=("google-chrome")
+fi
+if printf '%s\n' "${{APT_PACKAGES[@]}}" | grep -qx "docker.io"; then
+    APPS_TO_TEST+=("docker")
+fi
+
+for app in "${{APPS_TO_TEST[@]}}"; do
+    [ -z "$app" ] && continue
+    case "$app" in
+        google-chrome)
+            if ! command -v google-chrome >/dev/null 2>&1 && ! command -v google-chrome-stable >/dev/null 2>&1; then
+                repair "Installing google-chrome..."
+                tmp_deb="/tmp/google-chrome-stable_current_amd64.deb"
+                if curl -fsSL -o "$tmp_deb" "https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb" \
+                    && DEBIAN_FRONTEND=noninteractive apt-get install -y "$tmp_deb" &>>"$LOG"; then
+                    rm -f "$tmp_deb"
+                    ((REPAIRED++))
+                else
+                    rm -f "$tmp_deb" 2>/dev/null || true
+                fi
+            fi
+            ;;
+        docker)
+            check_apt "docker.io" || continue
+            ;;
+        *)
+            if check_snap "$app"; then
+                :
+            else
+                continue
+            fi
+            ;;
+    esac
+
+    if test_launch "$app"; then
+        ok "$app launches OK"
+    else
+        fail "$app launch test FAILED"
+        # Show error details in main log
+        if [ -f "/tmp/$app-error.log" ]; then
+            echo "  Error details:" | tee -a "$LOG"
+            head -10 "/tmp/$app-error.log" | sed 's/^/    /' | tee -a "$LOG" || true
+        fi
+    fi
+done
+
+section "5/7" "Checking mounts & imported paths..."
+write_status "checking_mounts" "checking mounts & imported paths"
+
+MOUNT_POINTS=$(cat <<'EOF'
+{mount_points_bash}
+EOF
+)
+
+COPIED_PATHS=$(cat <<'EOF'
+{copy_paths_bash}
+EOF
+)
+
+# Bind mounts (shared live)
+if [ -n "$(echo "$MOUNT_POINTS" | tr -d '[:space:]')" ]; then
+    while IFS= read -r mp; do
+        [ -z "$mp" ] && continue
+        if mountpoint -q "$mp" 2>/dev/null; then
+            ok "$mp mounted"
+        else
+            repair "Mounting $mp..."
+            mkdir -p "$mp" 2>/dev/null || true
+            if mount "$mp" &>>"$LOG"; then
+                ok "$mp mounted"
+                ((REPAIRED++))
+            else
+                fail "$mp mount FAILED"
+            fi
+        fi
+    done <<< "$MOUNT_POINTS"
+else
+    log "    (no bind mounts configured)"
+fi
+
+# Imported/copied paths (one-time import)
+if [ -n "$(echo "$COPIED_PATHS" | tr -d '[:space:]')" ]; then
+    while IFS= read -r p; do
+        [ -z "$p" ] && continue
+        if [ -d "$p" ]; then
+            if [ "$(ls -A "$p" 2>/dev/null | wc -l)" -gt 0 ]; then
+                ok "$p copied"
+            else
+                ok "$p copied (empty)"
+            fi
+        else
+            fail "$p missing (copy)"
+        fi
+    done <<< "$COPIED_PATHS"
+else
+    log "    (no copied paths configured)"
+fi
+
+section "6/7" "Checking services..."
+write_status "checking_services" "checking services"
+for svc in "${{SERVICES[@]}}"; do
+    [ -z "$svc" ] && continue
+    if systemctl is-active "$svc" &>/dev/null; then
+        ok "$svc running"
+    else
+        repair "Starting $svc..."
+        systemctl enable --now "$svc" &>/dev/null && ok "$svc started" && ((REPAIRED++)) || fail "$svc FAILED"
+    fi
+done
+
+header "Diagnostic Summary"
+log ""
+log "  Total:    $TOTAL"
+log "  ${{GREEN}}Passed:${{NC}}   $PASSED"
+log "  ${{YELLOW}}Repaired:${{NC}} $REPAIRED"
+log "  ${{RED}}Failed:${{NC}}   $FAILED"
+log ""
+
+write_status "complete" "complete"
+
+if [ $FAILED -eq 0 ]; then
+    log "${{GREEN}}${{BOLD}}═══════════════════════════════════════════════════════════${{NC}}"
+    log "${{GREEN}}${{BOLD}}  ✅ All checks passed! CloneBox VM is ready.${{NC}}"
+    log "${{GREEN}}${{BOLD}}═══════════════════════════════════════════════════════════${{NC}}"
+    exit 0
+else
+    log "${{RED}}${{BOLD}}═══════════════════════════════════════════════════════════${{NC}}"
+    log "${{RED}}${{BOLD}}  ⚠️  $FAILED checks failed. See /var/log/clonebox-boot.log${{NC}}"
+    log "${{RED}}${{BOLD}}═══════════════════════════════════════════════════════════${{NC}}"
+    exit 1
+fi
+"""
+        return base64.b64encode(script.encode()).decode()
+
+    def _generate_health_check_script(self, config: VMConfig) -> str:
+        """Generate a health check script that validates all installed components."""
+        import base64
+
+        # Build package check commands
+        apt_checks = []
+        for i, pkg in enumerate(config.packages, 1):
+            apt_checks.append(f'check_apt_package "{pkg}" "{i}/{len(config.packages)}"')
+
+        snap_checks = []
+        for i, pkg in enumerate(config.snap_packages, 1):
+            snap_checks.append(f'check_snap_package "{pkg}" "{i}/{len(config.snap_packages)}"')
+
+        service_checks = []
+        for i, svc in enumerate(config.services, 1):
+            service_checks.append(f'check_service "{svc}" "{i}/{len(config.services)}"')
+
+        mount_checks = []
+        bind_paths = list(config.paths.items())
+        for i, (host_path, guest_tag) in enumerate(bind_paths, 1):
+            mount_checks.append(f'check_mount "{guest_tag}" "mount{i-1}" "{i}/{len(bind_paths)}"')
+        
+        # Add copied paths checks
+        copy_paths = config.copy_paths or getattr(config, "app_data_paths", {})
+        if copy_paths:
+            copy_list = list(copy_paths.items())
+            for i, (host_path, guest_path) in enumerate(copy_list, 1):
+                mount_checks.append(f'check_copy_path "{guest_path}" "{i}/{len(copy_list)}"')
+
+        apt_checks_str = "\n".join(apt_checks) if apt_checks else "echo 'No apt packages to check'"
+        snap_checks_str = (
+            "\n".join(snap_checks) if snap_checks else "echo 'No snap packages to check'"
+        )
+        service_checks_str = (
+            "\n".join(service_checks) if service_checks else "echo 'No services to check'"
+        )
+        mount_checks_str = "\n".join(mount_checks) if mount_checks else "echo 'No mounts to check'"
+
+        script = fr"""#!/bin/bash
+# CloneBox Health Check Script
+# Generated automatically - validates all installed components
+
+REPORT_FILE="/var/log/clonebox-health.log"
+PASSED=0
+FAILED=0
+WARNINGS=0
+SETUP_IN_PROGRESS=0
+if [ ! -f /var/lib/cloud/instance/boot-finished ]; then
+    SETUP_IN_PROGRESS=1
+fi
+
+# Colors for output
+RED='\\033[0;31m'
+GREEN='\\033[0;32m'
+YELLOW='\\033[1;33m'
+NC='\\033[0m'
+
+log() {{
+    echo "[$(date '+%Y-%m-%d %H:%M:%S')] $1" | tee -a "$REPORT_FILE"
+    # If it's a PASS/FAIL/INFO/WARN line, also echo with prefix for the monitor
+    if [[ "$1" =~ ^\[(PASS|FAIL|WARN|INFO)\] ]]; then
+        echo "  → $1"
+    fi
+}}
+
+check_disk_space() {{
+    local usage
+    usage=$(df / --output=pcent | tail -n 1 | tr -dc '0-9')
+    local avail
+    avail=$(df -h / --output=avail | tail -n 1 | tr -d ' ')
+    
+    if [ "$usage" -gt 95 ]; then
+        log "[FAIL] Disk space nearly full: ${{usage}}% used ($avail available)"
+        ((FAILED++))
+        return 1
+    elif [ "$usage" -gt 85 ]; then
+        log "[WARN] Disk usage high: ${{usage}}% used ($avail available)"
+        ((WARNINGS++))
+        return 0
+    else
+        log "[PASS] Disk space OK: ${{usage}}% used ($avail available)"
+        ((PASSED++))
+        return 0
+    fi
+}}
+
+check_apt_package() {{
+    local pkg="$1"
+    local progress="$2"
+    if dpkg -l "$pkg" 2>/dev/null | grep -q "^ii"; then
+        log "[PASS] [$progress] APT package '$pkg' is installed"
+        ((PASSED++))
+        return 0
+    else
+        if [ $SETUP_IN_PROGRESS -eq 1 ]; then
+            log "[WARN] [$progress] APT package '$pkg' is not installed yet"
+            ((WARNINGS++))
+            return 1
+        else
+            log "[FAIL] [$progress] APT package '$pkg' is NOT installed"
+            ((FAILED++))
+            return 1
+        fi
+    fi
+}}
+
+check_snap_package() {{
+    local pkg="$1"
+    local progress="$2"
+    local out
+    out=$(snap list "$pkg" 2>&1)
+    if [ $? -eq 0 ]; then
+        log "[PASS] [$progress] Snap package '$pkg' is installed"
+        ((PASSED++))
+        return 0
+    else
+        if [ $SETUP_IN_PROGRESS -eq 1 ]; then
+            log "[WARN] [$progress] Snap package '$pkg' is not installed yet"
+            ((WARNINGS++))
+            return 1
+        else
+            log "[FAIL] [$progress] Snap package '$pkg' is NOT installed"
+            ((FAILED++))
+            return 1
+        fi
+    fi
+}}
+
+check_service() {{
+    local svc="$1"
+    local progress="$2"
+    if systemctl is-enabled "$svc" &>/dev/null; then
+        if systemctl is-active "$svc" &>/dev/null; then
+            log "[PASS] [$progress] Service '$svc' is enabled and running"
+            ((PASSED++))
+            return 0
+        else
+            log "[WARN] [$progress] Service '$svc' is enabled but not running"
+            ((WARNINGS++))
+            return 1
+        fi
+    else
+        log "[INFO] [$progress] Service '$svc' is not enabled (may be optional)"
+        return 0
+    fi
+}}
+
+check_mount() {{
+    local path="$1"
+    local tag="$2"
+    local progress="$3"
+    if mountpoint -q "$path" 2>/dev/null; then
+        log "[PASS] [$progress] Mount '$path' ($tag) is active"
+        ((PASSED++))
+        return 0
+    elif [ -d "$path" ]; then
+        log "[WARN] [$progress] Directory '$path' exists but not mounted"
+        ((WARNINGS++))
+        return 1
+    else
+        log "[INFO] [$progress] Mount point '$path' does not exist yet"
+        return 0
+    fi
+}}
+
+check_copy_path() {{
+    local path="$1"
+    local progress="$2"
+    if [ -d "$path" ]; then
+        if [ "$(ls -A "$path" 2>/dev/null | wc -l)" -gt 0 ]; then
+            log "[PASS] [$progress] Path '$path' exists and contains data"
+            ((PASSED++))
+            return 0
+        else
+            log "[WARN] [$progress] Path '$path' exists but is EMPTY"
+            ((WARNINGS++))
+            return 1
+        fi
+    else
+        if [ $SETUP_IN_PROGRESS -eq 1 ]; then
+            log "[INFO] [$progress] Path '$path' not imported yet"
+            return 0
+        else
+            log "[FAIL] [$progress] Path '$path' MISSING"
+            ((FAILED++))
+            return 1
+        fi
+    fi
+}}
+
+check_gui() {{
+    if systemctl get-default | grep -q graphical; then
+        log "[PASS] System configured for graphical target"
+        ((PASSED++))
+        if systemctl is-active gdm3 &>/dev/null || systemctl is-active gdm &>/dev/null; then
+            log "[PASS] Display manager (GDM) is running"
+            ((PASSED++))
+        else
+            log "[WARN] Display manager not yet running (may start after reboot)"
+            ((WARNINGS++))
+        fi
+    else
+        log "[INFO] System not configured for GUI"
+    fi
+}}
+
+# Start health check
+log "=========================================="
+log "CloneBox Health Check Report"
+log "VM Name: {config.name}"
+log "Date: $(date)"
+log "=========================================="
+
+log ""
+log "--- System Health ---"
+check_disk_space
+check_gui
+
+log ""
+log "--- APT Packages ---"
+{apt_checks_str}
+
+log ""
+log "--- Snap Packages ---"
+{snap_checks_str}
+
+log ""
+log "--- Services ---"
+{service_checks_str}
+
+log ""
+log "--- Mounts ---"
+{mount_checks_str}
+
+log ""
+log "--- GUI Status ---"
+check_gui
+
+log ""
+log "=========================================="
+log "Health Check Summary"
+log "=========================================="
+log "Passed:   $PASSED"
+log "Failed:   $FAILED"
+log "Warnings: $WARNINGS"
+
+if [ $FAILED -eq 0 ]; then
+    log ""
+    log "[SUCCESS] All critical checks passed!"
+    if [ $SETUP_IN_PROGRESS -eq 1 ]; then
+        echo "HEALTH_STATUS=PENDING" > /var/log/clonebox-health-status
+        exit 0
+    else
+        echo "HEALTH_STATUS=OK" > /var/log/clonebox-health-status
+        exit 0
+    fi
+else
+    log ""
+    log "[ERROR] Some checks failed. Review log for details."
+    if [ $SETUP_IN_PROGRESS -eq 1 ]; then
+        echo "HEALTH_STATUS=PENDING" > /var/log/clonebox-health-status
+        exit 0
+    else
+        echo "HEALTH_STATUS=FAILED" > /var/log/clonebox-health-status
+        exit 1
+    fi
+fi
+"""
+        # Encode script to base64 for safe embedding in cloud-init
+        encoded = base64.b64encode(script.encode()).decode()
+        return encoded
+
+    def _generate_vm_xml(
+        self, config: VMConfig = None, root_disk: Path = None, cloudinit_iso: Optional[Path] = None
+    ) -> str:
+        """Generate libvirt XML for the VM."""
+
+        # Backward compatibility: if called without args, try to derive defaults
+        if config is None:
+            config = VMConfig()
+        if root_disk is None:
+            root_disk = Path("/var/lib/libvirt/images/default-disk.qcow2")
+
+        # Get resource limits from config or defaults
+        resource_data = getattr(config, "resources", {})
+        if not resource_data:
+            # Fallback to top-level fields
+            resource_data = {
+                "cpu": {"vcpus": config.vcpus},
+                "memory": {"limit": f"{config.ram_mb}M"},
+            }
+        
+        limits = ResourceLimits.from_dict(resource_data)
+
+        root = ET.Element("domain", type="kvm")
+
+        # Basic metadata
+        ET.SubElement(root, "name").text = config.name
+        ET.SubElement(root, "uuid").text = str(uuid.uuid4())
+        
+        # Memory configuration using limits
+        limit_kib = limits.memory.limit_bytes // 1024
+        ET.SubElement(root, "memory", unit="KiB").text = str(limit_kib)
+        ET.SubElement(root, "currentMemory", unit="KiB").text = str(limit_kib)
+        
+        # CPU configuration
+        ET.SubElement(root, "vcpu", placement="static").text = str(limits.cpu.vcpus)
+
+        # OS configuration
+        os_elem = ET.SubElement(root, "os")
+        ET.SubElement(os_elem, "type", arch="x86_64", machine="q35").text = "hvm"
+        ET.SubElement(os_elem, "boot", dev="hd")
+
+        # Features
+        features = ET.SubElement(root, "features")
+        ET.SubElement(features, "acpi")
+        ET.SubElement(features, "apic")
+
+        # Resource tuning (CPU and Memory)
+        cputune_xml = limits.cpu.to_libvirt_xml()
+        if cputune_xml:
+            # We append pre-generated XML string later or use ET to parse it
+            # For simplicity with existing ET code, we'll use SubElement for basic ones 
+            # and manual string insertion for complex tuning if needed, 
+            # but let's try to stick to ET where possible.
+            pass
+
+        # CPU tuning element
+        # Only available in system session (requires cgroups)
+        if not self.user_session and (limits.cpu.shares or limits.cpu.quota or limits.cpu.pin):
+            cputune = ET.SubElement(root, "cputune")
+            ET.SubElement(cputune, "shares").text = str(limits.cpu.shares)
+            if limits.cpu.quota:
+                ET.SubElement(cputune, "period").text = str(limits.cpu.period)
+                ET.SubElement(cputune, "quota").text = str(limits.cpu.quota)
+            if limits.cpu.pin:
+                for idx, cpu in enumerate(limits.cpu.pin):
+                    ET.SubElement(cputune, "vcpupin", vcpu=str(idx), cpuset=str(cpu))
+
+        # Memory tuning element
+        # Only available in system session (requires cgroups)
+        if not self.user_session and (limits.memory.soft_limit or limits.memory.swap):
+            memtune = ET.SubElement(root, "memtune")
+            ET.SubElement(memtune, "hard_limit", unit="KiB").text = str(limit_kib)
+            if limits.memory.soft_limit_bytes:
+                ET.SubElement(memtune, "soft_limit", unit="KiB").text = str(limits.memory.soft_limit_bytes // 1024)
+            if limits.memory.swap_bytes:
+                ET.SubElement(memtune, "swap_hard_limit", unit="KiB").text = str(limits.memory.swap_bytes // 1024)
+
+        # CPU
+        ET.SubElement(root, "cpu", mode="host-passthrough", check="none")
+
+        # Devices
+        devices = ET.SubElement(root, "devices")
+
+        # Emulator
+        ET.SubElement(devices, "emulator").text = "/usr/bin/qemu-system-x86_64"
+
+        # Root disk
+        disk = ET.SubElement(devices, "disk", type="file", device="disk")
+        ET.SubElement(disk, "driver", name="qemu", type="qcow2", cache="writeback")
+        ET.SubElement(disk, "source", file=str(root_disk))
+        ET.SubElement(disk, "target", dev="vda", bus="virtio")
+        
+        # Disk I/O tuning
+        # Only available in system session (requires cgroups)
+        if not self.user_session and (limits.disk.read_bps or limits.disk.write_bps or limits.disk.read_iops or limits.disk.write_iops):
+            iotune = ET.SubElement(disk, "iotune")
+            if limits.disk.read_bps_bytes:
+                ET.SubElement(iotune, "read_bytes_sec").text = str(limits.disk.read_bps_bytes)
+            if limits.disk.write_bps_bytes:
+                ET.SubElement(iotune, "write_bytes_sec").text = str(limits.disk.write_bps_bytes)
+            if limits.disk.read_iops:
+                ET.SubElement(iotune, "read_iops_sec").text = str(limits.disk.read_iops)
+            if limits.disk.write_iops:
+                ET.SubElement(iotune, "write_iops_sec").text = str(limits.disk.write_iops)
+
+        # Cloud-init ISO
+        if cloudinit_iso:
+            cdrom = ET.SubElement(devices, "disk", type="file", device="cdrom")
+            ET.SubElement(cdrom, "driver", name="qemu", type="raw")
+            ET.SubElement(cdrom, "source", file=str(cloudinit_iso))
+            ET.SubElement(cdrom, "target", dev="sda", bus="sata")
+            ET.SubElement(cdrom, "readonly")
+
+        # 9p filesystem mounts (bind mounts from host)
+        # Use accessmode="mapped" to allow VM user to access host files regardless of UID
+        for idx, (host_path, guest_tag) in enumerate(config.paths.items()):
+            if Path(host_path).exists():
+                fs = ET.SubElement(devices, "filesystem", type="mount", accessmode="mapped")
+                ET.SubElement(fs, "driver", type="path", wrpolicy="immediate")
+                ET.SubElement(fs, "source", dir=host_path)
+                # Use simple tag names for 9p mounts
+                tag = f"mount{idx}"
+                ET.SubElement(fs, "target", dir=tag)
+
+        # 9p filesystem mounts for COPY paths (mounted to temp location for import)
+        for idx, (host_path, guest_path) in enumerate(config.copy_paths.items()):
+            if Path(host_path).exists():
+                fs = ET.SubElement(devices, "filesystem", type="mount", accessmode="mapped")
+                ET.SubElement(fs, "driver", type="path", wrpolicy="immediate")
+                ET.SubElement(fs, "source", dir=host_path)
+                # Use import tag names for copy mounts
+                tag = f"import{idx}"
+                ET.SubElement(fs, "target", dir=tag)
+
+        # Network interface
+        network_mode = self.resolve_network_mode(config)
+        if network_mode == "user":
+            iface = ET.SubElement(devices, "interface", type="user")
+            ET.SubElement(iface, "model", type="virtio")
+
+            if shutil.which("passt") and self._passt_supported():
+                ET.SubElement(iface, "backend", type="passt")
+
+                vm_dir = Path(str(root_disk)).parent
+                ssh_port = self._allocate_passt_ssh_port(config.name, vm_dir)
+                pf = ET.SubElement(iface, "portForward", proto="tcp", address="127.0.0.1")
+                ET.SubElement(pf, "range", start=str(ssh_port), to="22")
+        else:
+            iface = ET.SubElement(devices, "interface", type="network")
+            ET.SubElement(iface, "source", network="default")
+            ET.SubElement(iface, "model", type="virtio")
+        
+        # Network bandwidth tuning
+        if limits.network.inbound or limits.network.outbound:
+            bandwidth = ET.SubElement(iface, "bandwidth")
+            if limits.network.inbound_kbps:
+                # average in KB/s
+                ET.SubElement(bandwidth, "inbound", average=str(limits.network.inbound_kbps // 8))
+            if limits.network.outbound_kbps:
+                ET.SubElement(bandwidth, "outbound", average=str(limits.network.outbound_kbps // 8))
+
+        # Serial console with logging
+        serial = ET.SubElement(devices, "serial", type="pty")
+        ET.SubElement(serial, "target", type="isa-serial", port="0")
+        
+        if self.user_session:
+            vm_dir = Path(str(root_disk)).parent
+            serial_log_path = str(vm_dir / "serial.log")
+            # Use libvirt's built-in logging for the serial console
+            log_elem = ET.SubElement(serial, "log", file=serial_log_path, append="on")
+
+        console_elem = ET.SubElement(devices, "console", type="pty")
+        ET.SubElement(console_elem, "target", type="serial", port="0")
+
+        # Graphics (SPICE)
+        if config.gui:
+            graphics = ET.SubElement(
+                devices, "graphics", type="spice", autoport="yes", listen="127.0.0.1"
+            )
+            ET.SubElement(graphics, "listen", type="address", address="127.0.0.1")
+
+            # Video
+            video = ET.SubElement(devices, "video")
+            ET.SubElement(video, "model", type="virtio", heads="1", primary="yes")
+
+            # Input devices
+            ET.SubElement(devices, "input", type="tablet", bus="usb")
+            ET.SubElement(devices, "input", type="keyboard", bus="usb")
+
+        ET.SubElement(devices, "controller", type="virtio-serial", index="0")
+
+        # Channel for guest agent
+        channel = ET.SubElement(devices, "channel", type="unix")
+        # For both user and system sessions, let libvirt handle the path
+        ET.SubElement(channel, "source", mode="bind")
+        ET.SubElement(channel, "target", type="virtio", name="org.qemu.guest_agent.0")
+
+        # Memory balloon
+        memballoon = ET.SubElement(devices, "memballoon", model="virtio")
+        ET.SubElement(
+            memballoon,
+            "address",
+            type="pci",
+            domain="0x0000",
+            bus="0x00",
+            slot="0x08",
+            function="0x0",
+        )
+
+        return ET.tostring(root, encoding="unicode")
+
+    def _yaml_single_quote(self, s: str) -> str:
+        """Escape a string for single-quoted YAML value."""
+        return "'" + s.replace("'", "''") + "'"
+
+    def _create_cloudinit_iso(self, vm_dir: Path, config: VMConfig, user_session: bool = False) -> Path:
+        """Create cloud-init ISO with secure credential handling."""
+        secrets_mgr = SecretsManager()
+
+        # Determine if Chrome is wanted early to avoid NameError in helpers
+        wants_chrome = any(
+            p == "/home/ubuntu/.config/google-chrome"
+            for p in list((config.paths or {}).values())
+            + list((config.copy_paths or {}).values())
+        )
+
+        # Determine authentication method
+        auth_method = getattr(config, "auth_method", "ssh_key")
+
+        ssh_authorized_keys = []
+        user_password = None
+        lock_passwd = True
+        ssh_pwauth = False
+        bootcmd_extra = []
+        chpasswd_config_dict = {}
+
+        if auth_method == "ssh_key":
+            ssh_key_path = vm_dir / "ssh_key"
+            provided_key = getattr(config, "ssh_public_key", None)
+
+            if provided_key:
+                ssh_authorized_keys = [provided_key]
+            else:
+                key_pair = SSHKeyPair.generate()
+                key_pair.save(ssh_key_path)
+                ssh_authorized_keys = [key_pair.public_key]
+                log.info(f"SSH key generated and saved to: {ssh_key_path}")
+
+            local_password = getattr(config, "password", None)
+            if getattr(config, "gui", False) and local_password:
+                user_password = local_password
+                chpasswd_config_dict = {
+                    "list": f"{config.username}:{local_password}\n",
+                    "expire": False
+                }
+                lock_passwd = False
+                ssh_pwauth = True
+
+        elif auth_method == "one_time_password":
+            otp, _ = SecretsManager.generate_one_time_password()
+            user_password = otp
+            chpasswd_config_dict = {
+                "list": f"{config.username}:{otp}\n",
+                "expire": False
+            }
+            bootcmd_extra = [
+                ["echo", "===================="],
+                ["echo", f"ONE-TIME PASSWORD = {otp}"],
+                ["echo", "You MUST change this on first login!"],
+                ["echo", "===================="],
+            ]
+            lock_passwd = False
+            ssh_pwauth = True
+            log.warning("One-time password generated. It will be shown on VM console.")
+
+        else:
+            # Fallback to legacy password from environment/secrets
+            password = secrets_mgr.get("VM_PASSWORD") or getattr(config, "password", "ubuntu")
+            user_password = password
+            chpasswd_config_dict = {
+                "list": f"{config.username}:{password}\n",
+                "expire": False
+            }
+            lock_passwd = False
+            ssh_pwauth = True
+            log.warning("DEPRECATED: Using password authentication. Switch to 'ssh_key' for better security.")
+
+        cloudinit_dir = vm_dir / "cloud-init"
+        cloudinit_dir.mkdir(exist_ok=True)
+
+        # Meta-data - include network config disabled to let Ubuntu's default handle DHCP
+        instance_id = f"{config.name}-{uuid.uuid4().hex}"
+        meta_data = f"instance-id: {instance_id}\nlocal-hostname: {config.name}\n"
+        (cloudinit_dir / "meta-data").write_text(meta_data)
+
+        # Don't create network-config file - let Ubuntu cloud image's default netplan handle DHCP
+        # The default /etc/netplan/50-cloud-init.yaml should configure DHCP on all interfaces
+
+        # Generate mount commands and fstab entries for 9p filesystems
+        bind_mount_commands = []
+        fstab_entries = []
+        all_paths = dict(config.paths) if config.paths else {}
+        existing_bind_paths = {h: g for h, g in all_paths.items() if Path(h).exists()}
+        pre_chown_dirs: set[str] = set()
+        for idx, (host_path, guest_path) in enumerate(existing_bind_paths.items()):
+            # Ensure all parent directories in /home/ubuntu are owned by user
+                # This prevents "Permission denied" when creating config dirs (e.g. .config) as root
+                if str(guest_path).startswith("/home/ubuntu/"):
+                    try:
+                        rel_path = Path(guest_path).relative_to("/home/ubuntu")
+                        current = Path("/home/ubuntu")
+                        # Create and chown each component in the path
+                        for part in rel_path.parts:
+                            current = current / part
+                            d_str = str(current)
+                            if d_str not in pre_chown_dirs:
+                                pre_chown_dirs.add(d_str)
+                                bind_mount_commands.append(f"  - mkdir -p {d_str}")
+                                bind_mount_commands.append(f"  - chown 1000:1000 {d_str}")
+                    except ValueError:
+                        pass
+
+                tag = f"mount{idx}"
+                # Use uid=1000,gid=1000 to give ubuntu user access to mounts
+                # mmap allows proper file mapping
+                mount_opts = "trans=virtio,version=9p2000.L,mmap,uid=1000,gid=1000,users"
+                
+                # Ensure target exists and is owned by user (if not already handled)
+                if str(guest_path) not in pre_chown_dirs:
+                    bind_mount_commands.append(f"  - mkdir -p {guest_path}")
+                    bind_mount_commands.append(f"  - chown 1000:1000 {guest_path}")
+
+                bind_mount_commands.append(f"  - mount -t 9p -o {mount_opts} {tag} {guest_path} || true")
+                # Add fstab entry for persistence after reboot
+                fstab_entries.append(f"{tag} {guest_path} 9p {mount_opts},nofail 0 0")
+
+        # Handle copy_paths (import then copy)
+        import_mount_commands = []
+        all_copy_paths = dict(config.copy_paths) if config.copy_paths else {}
+        existing_copy_paths = {h: g for h, g in all_copy_paths.items() if Path(h).exists()}
+        
+        for idx, (host_path, guest_path) in enumerate(existing_copy_paths.items()):
+            tag = f"import{idx}"
+            temp_mount_point = f"/mnt/import{idx}"
+            # Use regular mount options
+            mount_opts = "trans=virtio,version=9p2000.L,mmap,uid=1000,gid=1000"
+
+            # 1. Create temp mount point
+            import_mount_commands.append(f"  - mkdir -p {temp_mount_point}")
+            
+            # 2. Mount the 9p share
+            import_mount_commands.append(f"  - mount -t 9p -o {mount_opts} {tag} {temp_mount_point} || echo '  → ❌ Failed to mount temporary share {tag}'")
+            
+            # 3. Ensure target directory exists and permissions are prepared
+            if str(guest_path).startswith("/home/ubuntu/"):
+                import_mount_commands.append(f"  - mkdir -p {guest_path}")
+                import_mount_commands.append(f"  - chown 1000:1000 {guest_path}")
+            else:
+                import_mount_commands.append(f"  - mkdir -p {guest_path}")
+
+            # 4. Copy contents (cp -rT to copy contents of source to target)
+            # We use || true to ensure boot continues even if copy fails
+            import_mount_commands.append(f"  - echo '  → Importing {host_path} to {guest_path}...'")
+            import_mount_commands.append(f"  - cp -rT {temp_mount_point} {guest_path} || echo '  → ❌ Failed to copy data to {guest_path}'")
+            
+            # 5. Fix ownership recursively
+            import_mount_commands.append(f"  - chown -R 1000:1000 {guest_path}")
+
+            # 6. Unmount and cleanup
+            import_mount_commands.append(f"  - umount {temp_mount_point} || true")
+            import_mount_commands.append(f"  - rmdir {temp_mount_point} || true")
+
+        # User-data
+        # Add desktop environment if GUI is enabled
+        base_packages = ["qemu-guest-agent", "cloud-guest-utils", "openssh-server"]
+        if config.gui:
+            base_packages.extend(
+                [
+                    "ubuntu-desktop-minimal",
+                    "firefox",
+                ]
+            )
+
+        all_packages = base_packages + list(config.packages)
+        packages_yaml = "\n".join(f"  - {pkg}" for pkg in all_packages) if all_packages else ""
+
+        # Build runcmd - services, mounts, snaps, post_commands
+        runcmd_lines = []
+
+        # wants_chrome moved to top of method to avoid NameError
+
+        # Network setup for passt/user-mode networking (must be first!)
+        # This ensures network is configured before any package installs
+        if user_session:
+            runcmd_lines.append("echo '[0/10] 🌐 Configuring network for user-mode (passt)...'")
+            runcmd_lines.append("|")
+            runcmd_lines.append("    NIC=$(ip -o link show | grep -E 'enp|eth' | grep -v 'lo:' | head -1 | awk -F': ' '{print $2}' | tr -d ' ') ")
+            runcmd_lines.append("    if [ -n \"$NIC\" ]; then")
+            runcmd_lines.append("      echo \"  → Found interface: $NIC\"")
+            runcmd_lines.append("      # Check if already has IPv4")
+            runcmd_lines.append("      if ! ip addr show $NIC | grep -q 'inet '; then")
+            runcmd_lines.append("        echo \"  → No IPv4 address, configuring manually for passt...\"")
+            runcmd_lines.append("        ip addr add 10.0.2.15/24 dev $NIC 2>/dev/null || true")
+            runcmd_lines.append("        ip link set $NIC up")
+            runcmd_lines.append("        ip route add default via 10.0.2.2 2>/dev/null || true")
+            runcmd_lines.append("        echo 'nameserver 10.0.2.3' > /etc/resolv.conf")
+            runcmd_lines.append("        echo \"  → ✓ Network configured: 10.0.2.15/24\"")
+            runcmd_lines.append("      else")
+            runcmd_lines.append("        echo \"  → ✓ Network already configured\"")
+            runcmd_lines.append("      fi")
+            runcmd_lines.append("    else")
+            runcmd_lines.append("      echo \"  → ⚠️ No network interface found\"")
+            runcmd_lines.append("    fi")
+            runcmd_lines.append("echo ''")
+
+        # Add detailed logging header
+        runcmd_lines.append("echo '═══════════════════════════════════════════════════════════'")
+        runcmd_lines.append("echo '           CloneBox VM Installation Progress'")
+        runcmd_lines.append("echo '═══════════════════════════════════════════════════════════'")
+        runcmd_lines.append("echo ''")
+
+        # Phase 1: System Optimization (Pre-install)
+        runcmd_lines.append("echo '[1/10] 🛠️  Optimizing system resources...'")
+        runcmd_lines.append("echo '  → Limiting journal size to 50M'")
+        runcmd_lines.append("sed -i 's/^#SystemMaxUse=/SystemMaxUse=50M/' /etc/systemd/journald.conf || true")
+        runcmd_lines.append("systemctl restart systemd-journald || true")
+        runcmd_lines.append("echo '  → ✓ [1/10] System resources optimized'")
+        runcmd_lines.append("echo ''")
+        
+        # Phase 2: APT Packages
+        if all_packages:
+            runcmd_lines.append(f"echo '[2/10] 📦 Installing APT packages ({len(all_packages)} total)...'")
+            runcmd_lines.append("export DEBIAN_FRONTEND=noninteractive")
+            # Check space before starting
+            runcmd_lines.append("if [ $(df / --output=avail | tail -n 1) -lt 524288 ]; then echo '  → ⚠️  WARNING: Low disk space (<512MB) before APT install'; fi")
+            runcmd_lines.append("echo '  → Updating package repositories...'")
+            if user_session:
+                runcmd_lines.append("echo '  → Ensuring DNS resolver is configured (user-mode networking)...'")
+                runcmd_lines.append("mkdir -p /etc/systemd/resolved.conf.d || true")
+                runcmd_lines.append("printf '[Resolve]\\nDNS=1.1.1.1 8.8.8.8\\nFallbackDNS=1.0.0.1 8.8.4.4\\n' > /etc/systemd/resolved.conf.d/clonebox.conf || true")
+                runcmd_lines.append("systemctl restart systemd-resolved || true")
+                runcmd_lines.append("if [ -L /etc/resolv.conf ]; then rm -f /etc/resolv.conf; fi")
+                runcmd_lines.append("if ! grep -q '^nameserver' /etc/resolv.conf 2>/dev/null; then printf 'nameserver 1.1.1.1\\nnameserver 8.8.8.8\\noptions timeout:1 attempts:5\\n' > /etc/resolv.conf; fi")
+                runcmd_lines.append("timeout 60 sh -c 'until getent hosts archive.ubuntu.com >/dev/null 2>&1; do sleep 2; done' || true")
+            runcmd_lines.append("apt-get update")
+            for i, pkg in enumerate(all_packages, 1):
+                runcmd_lines.append(f"echo '  → [{i}/{len(all_packages)}] Installing {pkg}...'")
+                runcmd_lines.append(f"apt-get install -y {pkg} || echo '  → ❌ Failed to install {pkg}'")
+                if pkg == "qemu-guest-agent":
+                    runcmd_lines.append("systemctl enable --now qemu-guest-agent || echo '  → ❌ Failed to enable qemu-guest-agent'")
+            runcmd_lines.append("apt-get clean")
+            runcmd_lines.append("echo '  → ✓ [2/10] APT packages installed'")
+            runcmd_lines.append("df -h / | sed 's/^/  → /'")
+            runcmd_lines.append("echo ''")
+        else:
+            runcmd_lines.append("echo '[2/10] 📦 No APT packages to install'")
+            runcmd_lines.append("echo ''")
+
+        # Phase 3: Core services
+        runcmd_lines.append("echo '[3/10] 🔧 Enabling core services...'")
+        runcmd_lines.append("echo '  → [1/3] Enabling qemu-guest-agent'")
+        runcmd_lines.append("systemctl enable --now qemu-guest-agent || echo '  → ❌ Failed to enable qemu-guest-agent'")
+        runcmd_lines.append("echo '  → [2/3] Enabling SSH server'")
+        runcmd_lines.append("systemctl enable --now ssh || systemctl enable --now sshd || echo '  → ❌ Failed to enable ssh'")
+        runcmd_lines.append("echo '  → [3/3] Enabling snapd'")
+        runcmd_lines.append("systemctl enable --now snapd || echo '  → ❌ Failed to enable snapd'")
+        runcmd_lines.append("systemctl enable --now serial-getty@ttyS0.service >/dev/null 2>&1 || true")
+        runcmd_lines.append("echo '  → Waiting for snap system seed...'")
+        runcmd_lines.append("timeout 300 snap wait system seed.loaded || true")
+        runcmd_lines.append("echo '  → ✓ [3/10] Core services enabled'")
+        runcmd_lines.append("echo ''")
+
+        # Phase 4: User services
+        runcmd_lines.append(f"echo '[4/10] 🔧 Enabling user services ({len(config.services)} total)...'")
+        for i, svc in enumerate(config.services, 1):
+            runcmd_lines.append(f"echo '  → [{i}/{len(config.services)}] {svc}'")
+            runcmd_lines.append(f"systemctl enable --now {svc} || echo '  → ❌ Failed to enable {svc}'")
+        runcmd_lines.append("echo '  → ✓ [4/10] User services enabled'")
+        runcmd_lines.append("echo ''")
+
+        # Phase 5: Filesystem mounts
+        runcmd_lines.append(f"echo '[5/10] 📁 Mounting shared directories ({len(existing_bind_paths)} mounts)...'")
+        if bind_mount_commands:
+            mount_idx = 0
+            for cmd in bind_mount_commands:
+                if "mount -t 9p" in cmd:
+                    mount_idx += 1
+                    # Extract mount point for logging
+                    parts = cmd.strip().split()
+                    # Look for the path before '||'
+                    try:
+                        sep_idx = parts.index("||")
+                        mp = parts[sep_idx - 1]
+                    except ValueError:
+                        mp = parts[-1]
+                    runcmd_lines.append(f"echo '  → [{mount_idx}/{len(existing_bind_paths)}] Mounting {mp}...'")
+                
+                # Strip prefix if present in the command string itself
+                clean_cmd = cmd.strip()
+                if clean_cmd.startswith("- "):
+                    clean_cmd = clean_cmd[2:]
+                runcmd_lines.append(clean_cmd)
+        
+        if fstab_entries:
+            runcmd_lines.append(
+                "grep -q '^# CloneBox 9p mounts' /etc/fstab || echo '# CloneBox 9p mounts' >> /etc/fstab"
+            )
+            for entry in fstab_entries:
+                runcmd_lines.append(
+                    f"grep -qF \"{entry}\" /etc/fstab || echo '{entry}' >> /etc/fstab"
+                )
+            runcmd_lines.append("mount -a || echo '  → ❌ Failed to mount shared directories'")
+        runcmd_lines.append("echo '  → ✓ [5/10] Mounts configured'")
+        runcmd_lines.append("echo ''")
+
+        # Phase 6: Data Import (copied paths)
+        if existing_copy_paths:
+            runcmd_lines.append(f"echo '[6/10] 📥 Importing data ({len(existing_copy_paths)} paths)...'")
+            # Check space before starting large import
+            runcmd_lines.append("if [ $(df / --output=avail | tail -n 1) -lt 1048576 ]; then echo '  → ⚠️  WARNING: Low disk space (<1GB) before data import'; fi")
+            # Add import commands with progress
+            import_count = 0
+            for cmd in import_mount_commands:
+                if "Importing" in cmd:
+                    import_count += 1
+                    # Replace the placeholder 'Importing' with numbered progress, ensuring no double prefix
+                    msg = cmd.replace("echo '  → Importing", f"echo '  → [{import_count}/{len(existing_copy_paths)}] Importing")
+                    runcmd_lines.append(msg)
+                else:
+                    runcmd_lines.append(cmd)
+            runcmd_lines.append("echo '  → ✓ [6/10] Data import completed'")
+            runcmd_lines.append("df -h / | sed 's/^/  → /'")
+            runcmd_lines.append("echo ''")
+        else:
+            runcmd_lines.append("echo '[6/10] 📥 No data to import'")
+            runcmd_lines.append("echo ''")
+
+        # Phase 7: GUI Environment Setup
+        if config.gui:
+            runcmd_lines.append("echo '[7/10] 🖥️  Setting up GUI environment...'")
+            runcmd_lines.append("echo '  → Creating user directories'")
+            # Create directories that GNOME services need
+            gui_dirs = [
+                f"/home/{config.username}/.config/pulse",
+                f"/home/{config.username}/.cache/ibus",
+                f"/home/{config.username}/.local/share",
+                f"/home/{config.username}/.config/dconf",
+                f"/home/{config.username}/.cache/tracker3",
+                f"/home/{config.username}/.config/autostart",
+            ]
+            for i, d in enumerate(gui_dirs, 1):
+                runcmd_lines.append(f"mkdir -p {d} && echo '  → [{i}/{len(gui_dirs)}] Created {d}'")
+            
+            runcmd_lines.extend(
+                [
+                    f"chown -R 1000:1000 /home/{config.username}/.config /home/{config.username}/.cache /home/{config.username}/.local",
+                    f"chmod 700 /home/{config.username}/.config /home/{config.username}/.cache",
+                    "systemctl set-default graphical.target",
+                    "echo '  → Starting display manager'",
+                ]
+            )
+            runcmd_lines.append("systemctl enable --now gdm3 || systemctl enable --now gdm || true")
+            runcmd_lines.append("systemctl start display-manager || true")
+            runcmd_lines.append("echo '  → ✓ [7/10] GUI environment ready'")
+            runcmd_lines.append("echo ''")
+        else:
+            runcmd_lines.append("echo '[7/10] 🖥️  No GUI requested'")
+            runcmd_lines.append("echo ''")
+
+        runcmd_lines.append(f"chown -R 1000:1000 /home/{config.username} || true")
+        runcmd_lines.append(f"chown -R 1000:1000 /home/{config.username}/snap || true")
+
+        # Phase 8: Snap packages
+        if config.snap_packages:
+            runcmd_lines.append(f"echo '[8/10] 📦 Installing snap packages ({len(config.snap_packages)} packages)...'")
+            # Check space before starting snap installation
+            runcmd_lines.append("if [ $(df / --output=avail | tail -n 1) -lt 2097152 ]; then echo '  → ⚠️  WARNING: Low disk space (<2GB) before Snap install'; fi")
+            for i, snap_pkg in enumerate(config.snap_packages, 1):
+                runcmd_lines.append(f"echo '  → [{i}/{len(config.snap_packages)}] {snap_pkg}'")
+                # Try classic first, then strict, with retries
+                cmd = (
+                    f"for i in 1 2 3; do "
+                    f"snap install {snap_pkg} --classic && echo '  → ✓ {snap_pkg} installed (classic)' && break || "
+                    f"snap install {snap_pkg} && echo '  → ✓ {snap_pkg} installed' && break || "
+                    f"{{ if [ $i -eq 3 ]; then echo '  → ❌ Failed to install {snap_pkg} after 3 attempts'; else echo '  → ⟳ Retry $i/3...' && sleep 10; fi; }} "
+                    f"done"
+                )
+                runcmd_lines.append(cmd)
+            runcmd_lines.append("echo '  → ✓ [8/10] Snap packages installed'")
+            runcmd_lines.append("df -h / | sed 's/^/  → /'")
+        
+        # Phase 9: Post commands
+        if config.post_commands:
+            runcmd_lines.append(f"echo '[9/10] ⚙️  Running post-setup commands ({len(config.post_commands)} total)...'")
+            for i, cmd in enumerate(config.post_commands, 1):
+                # Truncate long commands for display
+                display_cmd = cmd[:60] + '...' if len(cmd) > 60 else cmd
+                runcmd_lines.append(f"echo '  → [{i}/{len(config.post_commands)}] {display_cmd}'")
+                runcmd_lines.append(f"{cmd} || echo '  → ❌ Command {i} failed'")
+                runcmd_lines.append(f"echo '  → ✓ Command {i} completed'")
+            runcmd_lines.append("echo '  → ✓ [9/10] Post-setup commands finished'")
+            runcmd_lines.append("echo ''")
+        else:
+            runcmd_lines.append("echo '[9/10] ⚙️  No post-setup commands'")
+            runcmd_lines.append("echo ''")
+
+        # Generate health check script
+        health_script = self._generate_health_check_script(config)
+        # Phase 10: Health checks and finalization
+        runcmd_lines.append("echo '[10/10] 🏥 Running health checks and final cleanup...'")
+        runcmd_lines.append("echo '  → Vacuuming system logs'")
+        runcmd_lines.append("journalctl --vacuum-size=50M >/dev/null 2>&1 || true")
+        runcmd_lines.append("echo '  → Checking final disk usage'")
+        runcmd_lines.append("df -h / | sed 's/^/  → /'")
+        
+        runcmd_lines.append(
+            f"echo '{health_script}' | base64 -d > /usr/local/bin/clonebox-health"
+        )
+        runcmd_lines.append("chmod +x /usr/local/bin/clonebox-health")
+        runcmd_lines.append(
+            "/usr/local/bin/clonebox-health >> /var/log/clonebox-health.log 2>&1 || true"
+        )
+        runcmd_lines.append("echo '  → ✓ [10/10] Health checks completed'")
+        runcmd_lines.append("echo 'CloneBox VM ready!' > /var/log/clonebox-ready")
+        
+        # Final status
+        runcmd_lines.append("  - echo ''")
+        runcmd_lines.append("  - echo '═══════════════════════════════════════════════════════════'")
+        runcmd_lines.append("  - echo '           ✅ CloneBox VM Installation Complete!'")
+        runcmd_lines.append("  - echo '═══════════════════════════════════════════════════════════'")
+        runcmd_lines.append("  - echo ''")
+        # Generate boot diagnostic script (self-healing)
+        boot_diag_script = self._generate_boot_diagnostic_script(config)
+        runcmd_lines.append(
+            f"  - echo '{boot_diag_script}' | base64 -d > /usr/local/bin/clonebox-boot-diagnostic"
+        )
+        runcmd_lines.append("  - chmod +x /usr/local/bin/clonebox-boot-diagnostic")
+
+        # Create systemd service for boot diagnostic (runs before GDM on subsequent boots)
+        systemd_service = """[Unit]
+Description=CloneBox Boot Diagnostic
+After=network-online.target snapd.service
+Before=gdm.service display-manager.service
+Wants=network-online.target
+DefaultDependencies=no
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/clonebox-boot-diagnostic
+StandardOutput=journal+console
+StandardError=journal+console
+TimeoutStartSec=300
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target"""
+        import base64
+
+        systemd_b64 = base64.b64encode(systemd_service.encode()).decode()
+        runcmd_lines.append(
+            f"  - echo '{systemd_b64}' | base64 -d > /etc/systemd/system/clonebox-diagnostic.service"
+        )
+        runcmd_lines.append("  - systemctl daemon-reload")
+        runcmd_lines.append("  - systemctl enable clonebox-diagnostic.service")
+        runcmd_lines.append("  - systemctl start clonebox-diagnostic.service || true")
+
+        # Create MOTD banner
+        motd_banner = '''#!/bin/bash
+S="/var/run/clonebox-status"
+echo ""
+echo -e "\\033[1;34m═══════════════════════════════════════════════════════════\\033[0m"
+echo -e "\\033[1;34m                  CloneBox VM Status\\033[0m"
+echo -e "\\033[1;34m═══════════════════════════════════════════════════════════\\033[0m"
+if [ -f "$S" ]; then
+    source "$S"
+    if [ "${failed:-0}" -eq 0 ]; then
+        echo -e "  \\033[0;32m✅ All systems operational\\033[0m"
+    else
+        echo -e "  \\033[0;31m⚠️  $failed checks failed\\033[0m"
+    fi
+    echo -e "  Passed: ${passed:-0} | Repaired: ${repaired:-0} | Failed: ${failed:-0}"
+fi
+echo -e "  Log: /var/log/clonebox-boot.log"
+echo -e "\\033[1;34m═══════════════════════════════════════════════════════════\\033[0m"
+echo ""'''
+        motd_b64 = base64.b64encode(motd_banner.encode()).decode()
+        runcmd_lines.append(f"  - echo '{motd_b64}' | base64 -d > /etc/update-motd.d/99-clonebox")
+        runcmd_lines.append("  - chmod +x /etc/update-motd.d/99-clonebox")
+
+        # Create user-friendly clonebox-repair script
+        repair_script = r"""#!/bin/bash
+# CloneBox Repair - User-friendly repair utility for CloneBox VMs
+# Usage: clonebox-repair [--auto|--status|--logs|--help]
+
+set -uo pipefail
+
+RED='\033[0;31m' GREEN='\033[0;32m' YELLOW='\033[1;33m' CYAN='\033[0;36m' NC='\033[0m' BOLD='\033[1m'
+
+show_help() {{
+    echo -e "${BOLD}${CYAN}CloneBox Repair Utility${NC}"
+    echo ""
+    echo "Usage: clonebox-repair [OPTION]"
+    echo ""
+    echo "Options:"
+    echo "  --auto      Run full automatic repair (same as boot diagnostic)"
+    echo "  --status    Show current CloneBox status"
+    echo "  --logs      Show recent repair logs"
+    echo "  --perms     Fix directory permissions only"
+    echo "  --audio     Fix audio (PulseAudio) and restart"
+    echo "  --keyring   Reset GNOME Keyring (fixes password mismatch)"
+    echo "  --snaps     Reconnect all snap interfaces only"
+    echo "  --mounts    Remount all 9p filesystems only"
+    echo "  --all       Run all fixes (perms + audio + snaps + mounts)"
+    echo "  --help      Show this help message"
+    echo ""
+    echo "Without options, shows interactive menu."
+}}
+
+show_status() {{
+    echo ""
+    echo -e "${BOLD}${CYAN}═══════════════════════════════════════════════════════════${NC}"
+    echo -e "${BOLD}${CYAN}              CloneBox VM Status${NC}"
+    echo -e "${BOLD}${CYAN}═══════════════════════════════════════════════════════════${NC}"
+    
+    if [ -f /var/run/clonebox-status ]; then
+        source /var/run/clonebox-status
+        if [ "${failed:-0}" -eq 0 ]; then
+            echo -e "  ${GREEN}✅ All systems operational${NC}"
+        else
+            echo -e "  ${RED}⚠️  $failed checks failed${NC}"
+        fi
+        echo -e "  Passed: ${passed:-0} | Repaired: ${repaired:-0} | Failed: ${failed:-0}"
+    else
+        echo -e "  ${YELLOW}No status information available${NC}"
+    fi
+    echo ""
+    echo -e "  Last boot diagnostic: $(stat -c %y /var/log/clonebox-boot.log 2>/dev/null || echo 'never')"
+    echo -e "${BOLD}${CYAN}═══════════════════════════════════════════════════════════${NC}"
+}}
+
+show_logs() {{
+    echo -e "${BOLD}Recent repair logs:${NC}"
+    echo ""
+    tail -n 50 /var/log/clonebox-boot.log 2>/dev/null || echo "No logs found"
+}}
+
+fix_permissions() {{
+    echo -e "${CYAN}Fixing directory permissions...${NC}"
+    VM_USER="${{SUDO_USER:-ubuntu}}"
+    VM_HOME="/home/$VM_USER"
+    
+    DIRS_TO_CREATE=(
+        "$VM_HOME/.config"
+        "$VM_HOME/.config/pulse"
+        "$VM_HOME/.config/dconf"
+        "$VM_HOME/.config/ibus"
+        "$VM_HOME/.cache"
+        "$VM_HOME/.cache/ibus"
+        "$VM_HOME/.cache/tracker3"
+        "$VM_HOME/.cache/mesa_shader_cache"
+        "$VM_HOME/.local"
+        "$VM_HOME/.local/share"
+        "$VM_HOME/.local/share/applications"
+        "$VM_HOME/.local/share/keyrings"
+    )
+    
+    for dir in "${{DIRS_TO_CREATE[@]}}"; do
+        if [ ! -d "$dir" ]; then
+            mkdir -p "$dir" 2>/dev/null && echo "  Created $dir"
+        fi
+    done
+    
+    chown -R 1000:1000 "$VM_HOME/.config" "$VM_HOME/.cache" "$VM_HOME/.local" 2>/dev/null
+    chmod 700 "$VM_HOME/.config" "$VM_HOME/.cache" 2>/dev/null
+    
+    for snap_dir in "$VM_HOME/snap"/*; do
+        [ -d "$snap_dir" ] && chown -R 1000:1000 "$snap_dir" 2>/dev/null
+    done
+    
+    echo -e "${GREEN}✅ Permissions fixed${NC}"
+}}
+
+fix_audio() {{
+    echo -e "${CYAN}Fixing audio (PulseAudio/PipeWire)...${NC}"
+    VM_USER="${{SUDO_USER:-ubuntu}}"
+    VM_HOME="/home/$VM_USER"
+    
+    # Create pulse config directory with correct permissions
+    mkdir -p "$VM_HOME/.config/pulse" 2>/dev/null
+    chown -R 1000:1000 "$VM_HOME/.config/pulse" 2>/dev/null
+    chmod 700 "$VM_HOME/.config/pulse" 2>/dev/null
+    
+    # Kill and restart audio services as user
+    if [ -n "$SUDO_USER" ]; then
+        sudo -u "$SUDO_USER" pulseaudio --kill 2>/dev/null || true
+        sleep 1
+        sudo -u "$SUDO_USER" pulseaudio --start 2>/dev/null || true
+        echo "  Restarted PulseAudio for $SUDO_USER"
+    else
+        pulseaudio --kill 2>/dev/null || true
+        sleep 1
+        pulseaudio --start 2>/dev/null || true
+        echo "  Restarted PulseAudio"
+    fi
+    
+    # Restart pipewire if available
+    systemctl --user restart pipewire pipewire-pulse 2>/dev/null || true
+    
+    echo -e "${GREEN}✅ Audio fixed${NC}"
+}}
+
+fix_keyring() {{
+    echo -e "${CYAN}Resetting GNOME Keyring...${NC}"
+    VM_USER="${{SUDO_USER:-ubuntu}}"
+    VM_HOME="/home/$VM_USER"
+    KEYRING_DIR="$VM_HOME/.local/share/keyrings"
+    
+    echo -e "${YELLOW}⚠️  This will delete existing keyrings and create a new one on next login${NC}"
+    echo -e "${YELLOW}   Stored passwords (WiFi, Chrome, etc.) will be lost!${NC}"
+    
+    if [ -t 0 ]; then
+        read -rp "Continue? [y/N] " confirm
+        [[ "$confirm" != [yY]* ]] && { echo "Cancelled"; return; }
+    fi
+    
+    # Backup old keyrings
+    if [ -d "$KEYRING_DIR" ] && [ "$(ls -A "$KEYRING_DIR" 2>/dev/null)" ]; then
+        backup_dir="$VM_HOME/.local/share/keyrings.backup.$(date +%Y%m%d%H%M%S)"
+        mv "$KEYRING_DIR" "$backup_dir" 2>/dev/null
+        echo "  Backed up to $backup_dir"
+    fi
+    
+    # Create fresh keyring directory
+    mkdir -p "$KEYRING_DIR" 2>/dev/null
+    chown -R 1000:1000 "$KEYRING_DIR" 2>/dev/null
+    chmod 700 "$KEYRING_DIR" 2>/dev/null
+    
+    # Kill gnome-keyring-daemon to force restart on next login
+    pkill -u "$VM_USER" gnome-keyring-daemon 2>/dev/null || true
+    
+    echo -e "${GREEN}✅ Keyring reset - log out and back in to create new keyring${NC}"
+}}
+
+fix_ibus() {{
+    echo -e "${CYAN}Fixing IBus input method...${NC}"
+    VM_USER="${{SUDO_USER:-ubuntu}}"
+    VM_HOME="/home/$VM_USER"
+    
+    # Create ibus cache directory
+    mkdir -p "$VM_HOME/.cache/ibus" 2>/dev/null
+    chown -R 1000:1000 "$VM_HOME/.cache/ibus" 2>/dev/null
+    chmod 700 "$VM_HOME/.cache/ibus" 2>/dev/null
+    
+    # Restart ibus
+    if [ -n "$SUDO_USER" ]; then
+        sudo -u "$SUDO_USER" ibus restart 2>/dev/null || true
+    else
+        ibus restart 2>/dev/null || true
+    fi
+    
+    echo -e "${GREEN}✅ IBus fixed${NC}"
+}}
+
+fix_snaps() {{
+    echo -e "${CYAN}Reconnecting snap interfaces...${NC}"
+    IFACES="desktop desktop-legacy x11 wayland home network audio-playback audio-record camera opengl"
+    
+    for snap in $(snap list --color=never 2>/dev/null | tail -n +2 | awk '{print $1}'); do
+        case "$snap" in
+            pycharm-community|chromium|firefox|code|slack|spotify)
+                echo "Connecting interfaces for $snap..."
+                IFACES="desktop desktop-legacy x11 wayland home network network-bind audio-playback"
+                for iface in $IFACES; do
+                    snap connect "$snap:$iface" ":$iface" 2>/dev/null || true
+                done
+                ;;
+        esac
+    done
+    
+    systemctl restart snapd 2>/dev/null || true
+    echo -e "${GREEN}✅ Snap interfaces reconnected${NC}"
+}}
+
+fix_mounts() {{
+    echo -e "${CYAN}Remounting filesystems...${NC}"
+    
+    while IFS= read -r line; do
+        tag=$(echo "$line" | awk '{print $1}')
+        mp=$(echo "$line" | awk '{print $2}')
+        if [[ "$tag" =~ ^mount[0-9]+$ ]] && [[ "$mp" == /* ]]; then
+            if ! mountpoint -q "$mp" 2>/dev/null; then
+                mkdir -p "$mp" 2>/dev/null
+                if mount "$mp" 2>/dev/null; then
+                    echo -e "  ${GREEN}✓${NC} $mp"
+                else
+                    echo -e "  ${RED}✗${NC} $mp (failed)"
+                fi
+            else
+                echo -e "  ${GREEN}✓${NC} $mp (already mounted)"
+            fi
+        fi
+    done < /etc/fstab
+    
+    echo -e "${GREEN}✅ Mounts checked${NC}"
+}}
+
+fix_all() {{
+    echo -e "${BOLD}${CYAN}Running all fixes...${NC}"
+    echo ""
+    fix_permissions
+    echo ""
+    fix_audio
+    echo ""
+    fix_ibus
+    echo ""
+    fix_snaps
+    echo ""
+    fix_mounts
+    echo ""
+    echo -e "${BOLD}${GREEN}All fixes completed!${NC}"
+}}
+
+interactive_menu() {{
+    while true; do
+        echo ""
+        echo -e "${BOLD}${CYAN}═══════════════════════════════════════════════════════════${NC}"
+        echo -e "${BOLD}${CYAN}              CloneBox Repair Menu${NC}"
+        echo -e "${BOLD}${CYAN}═══════════════════════════════════════════════════════════${NC}"
+        echo ""
+        echo "  1) Run full automatic repair (boot diagnostic)"
+        echo "  2) Run all quick fixes (perms + audio + snaps + mounts)"
+        echo "  3) Fix permissions only"
+        echo "  4) Fix audio (PulseAudio) only"
+        echo "  5) Reset GNOME Keyring (⚠️  deletes saved passwords)"
+        echo "  6) Reconnect snap interfaces only"
+        echo "  7) Remount filesystems only"
+        echo "  8) Show status"
+        echo "  9) Show logs"
+        echo "  q) Quit"
+        echo ""
+        read -rp "Select option: " choice
+        
+        case "$choice" in
+            1) sudo /usr/local/bin/clonebox-boot-diagnostic ;;
+            2) fix_all ;;
+            3) fix_permissions ;;
+            4) fix_audio ;;
+            5) fix_keyring ;;
+            6) fix_snaps ;;
+            7) fix_mounts ;;
+            8) show_status ;;
+            9) show_logs ;;
+            q|Q) exit 0 ;;
+            *) echo -e "${RED}Invalid option${NC}" ;;
+        esac
+    done
+}}
+
+# Main
+case "${1:-}" in
+    --auto)    exec sudo /usr/local/bin/clonebox-boot-diagnostic ;;
+    --all)     fix_all ;;
+    --status)  show_status ;;
+    --logs)    show_logs ;;
+    --perms)   fix_permissions ;;
+    --audio)   fix_audio ;;
+    --keyring) fix_keyring ;;
+    --snaps)   fix_snaps ;;
+    --mounts)  fix_mounts ;;
+    --help|-h) show_help ;;
+    "") interactive_menu ;;
+    *) show_help; exit 1 ;;
+esac
+"""
+        repair_b64 = base64.b64encode(repair_script.encode()).decode()
+        runcmd_lines.append(f"  - echo '{repair_b64}' | base64 -d > /usr/local/bin/clonebox-repair")
+        runcmd_lines.append("  - chmod +x /usr/local/bin/clonebox-repair")
+        runcmd_lines.append("  - ln -sf /usr/local/bin/clonebox-repair /usr/local/bin/cb-repair")
+
+        # === AUTOSTART: Systemd user services + Desktop autostart files ===
+        # Create directories for user systemd services and autostart
+        runcmd_lines.append(f"  - mkdir -p /home/{config.username}/.config/systemd/user")
+        runcmd_lines.append(f"  - mkdir -p /home/{config.username}/.config/autostart")
+
+        # Enable lingering for the user (allows user services to run without login)
+        runcmd_lines.append(f"  - loginctl enable-linger {config.username}")
+
+        # Add environment variables for monitoring
+        runcmd_lines.extend(
+            [
+                "  - echo 'CLONEBOX_ENABLE_MONITORING=true' >> /etc/environment",
+                "  - echo 'CLONEBOX_MONITOR_INTERVAL=30' >> /etc/environment",
+                "  - echo 'CLONEBOX_AUTO_REPAIR=true' >> /etc/environment",
+                "  - echo 'CLONEBOX_WATCH_APPS=true' >> /etc/environment",
+                "  - echo 'CLONEBOX_WATCH_SERVICES=true' >> /etc/environment",
+            ]
+        )
+
+        # Generate autostart configurations based on installed apps (if enabled)
+        autostart_apps = []
+
+        if getattr(config, "autostart_apps", True):
+            # Detect apps from snap_packages
+            for snap_pkg in config.snap_packages or []:
+                if snap_pkg == "pycharm-community":
+                    autostart_apps.append(
+                        {
+                            "name": "pycharm-community",
+                            "display_name": "PyCharm Community",
+                            "exec": "/snap/bin/pycharm-community %U",
+                            "type": "snap",
+                            "after": "graphical-session.target",
+                        }
+                    )
+                elif snap_pkg == "chromium":
+                    autostart_apps.append(
+                        {
+                            "name": "chromium",
+                            "display_name": "Chromium Browser",
+                            "exec": "/snap/bin/chromium %U",
+                            "type": "snap",
+                            "after": "graphical-session.target",
+                        }
+                    )
+                elif snap_pkg == "firefox":
+                    autostart_apps.append(
+                        {
+                            "name": "firefox",
+                            "display_name": "Firefox",
+                            "exec": "/snap/bin/firefox %U",
+                            "type": "snap",
+                            "after": "graphical-session.target",
+                        }
+                    )
+                elif snap_pkg == "code":
+                    autostart_apps.append(
+                        {
+                            "name": "code",
+                            "display_name": "Visual Studio Code",
+                            "exec": "/snap/bin/code --new-window",
+                            "type": "snap",
+                            "after": "graphical-session.target",
+                        }
+                    )
+
+            # Detect apps from packages (APT)
+            for apt_pkg in config.packages or []:
+                if apt_pkg == "firefox":
+                    # Only add if not already added from snap
+                    if not any(a["name"] == "firefox" for a in autostart_apps):
+                        autostart_apps.append(
+                            {
+                                "name": "firefox",
+                                "display_name": "Firefox",
+                                "exec": "/usr/bin/firefox %U",
+                                "type": "apt",
+                                "after": "graphical-session.target",
+                            }
+                        )
+
+            # Check for google-chrome from app_data_paths (now in copy_paths or paths)
+            all_paths_to_check = {}
+            if config.paths:
+                all_paths_to_check.update(config.paths)
+            if config.copy_paths:
+                all_paths_to_check.update(config.copy_paths)
+
+            for host_path, guest_path in all_paths_to_check.items():
+                if guest_path == "/home/ubuntu/.config/google-chrome":
+                    autostart_apps.append(
+                        {
+                            "name": "google-chrome",
+                            "display_name": "Google Chrome",
+                            "exec": "/usr/bin/google-chrome-stable %U",
+                            "type": "deb",
+                            "after": "graphical-session.target",
+                        }
+                    )
+                    break
+
+        # Generate systemd user services for each app
+        for app in autostart_apps:
+            service_content = f"""[Unit]
+Description={app["display_name"]} Autostart
+After={app["after"]}
+PartOf=graphical-session.target
+
+[Service]
+Type=simple
+Environment=DISPLAY=:0
+Environment=XDG_RUNTIME_DIR=/run/user/1000
+Environment=XDG_SESSION_TYPE=x11
+ExecStart={app["exec"]}
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=default.target
+"""
+            service_b64 = base64.b64encode(service_content.encode()).decode()
+            service_path = f"/home/{config.username}/.config/systemd/user/{app['name']}.service"
+            runcmd_lines.append(f"  - echo '{service_b64}' | base64 -d > {service_path}")
+
+        # Fix snap interfaces reconnection script to be more robust
+        snap_fix_script = r"""#!/bin/bash
+# Fix snap interfaces for GUI apps
+set -euo pipefail
+SNAP_LIST=$(snap list | awk 'NR>1 {print $1}')
+for snap in $SNAP_LIST; do
+    case "$snap" in
+        pycharm-community|chromium|firefox|code|slack|spotify)
+            echo "Connecting interfaces for $snap..."
+            IFACES="desktop desktop-legacy x11 wayland home network network-bind audio-playback"
+            for iface in $IFACES; do
+                snap connect "$snap:$iface" ":$iface" 2>/dev/null || true
+            done
+            ;;
+    esac
+done
+systemctl restart snapd 2>/dev/null || true
+"""
+        snap_fix_b64 = base64.b64encode(snap_fix_script.encode()).decode()
+        runcmd_lines.append(
+            f"  - echo '{snap_fix_b64}' | base64 -d > /usr/local/bin/clonebox-fix-snaps"
+        )
+        runcmd_lines.append("  - chmod +x /usr/local/bin/clonebox-fix-snaps")
+        runcmd_lines.append("  - /usr/local/bin/clonebox-fix-snaps || true")
+
+        # Generate desktop autostart files for GUI apps (alternative to systemd user services)
+        for app in autostart_apps:
+            desktop_content = f"""[Desktop Entry]
+Type=Application
+Name={app["display_name"]}
+Exec={app["exec"]}
+Hidden=false
+NoDisplay=false
+X-GNOME-Autostart-enabled=true
+X-GNOME-Autostart-Delay=5
+"""
+            desktop_b64 = base64.b64encode(desktop_content.encode()).decode()
+            desktop_path = f"/home/{config.username}/.config/autostart/{app['name']}.desktop"
+            runcmd_lines.append(f"  - echo '{desktop_b64}' | base64 -d > {desktop_path}")
+
+        # Fix ownership of all autostart files
+        runcmd_lines.append(f"  - chown -R 1000:1000 /home/{config.username}/.config/systemd")
+        runcmd_lines.append(f"  - chown -R 1000:1000 /home/{config.username}/.config/autostart")
+
+        # Enable systemd user services (must run as user)
+        if autostart_apps:
+            services_to_enable = " ".join(f"{app['name']}.service" for app in autostart_apps)
+            runcmd_lines.append(
+                f"  - sudo -u {config.username} XDG_RUNTIME_DIR=/run/user/1000 systemctl --user daemon-reload || true"
+            )
+            # Note: We don't enable services by default as desktop autostart is more reliable for GUI apps
+            # User can enable them manually with: systemctl --user enable <service>
+
+        # === WEB SERVICES: System-wide services for uvicorn, nginx, etc. ===
+        web_services = getattr(config, "web_services", []) or []
+        for svc in web_services:
+            svc_name = svc.get("name", "clonebox-web")
+            svc_desc = svc.get("description", f"CloneBox {svc_name}")
+            svc_workdir = svc.get("workdir", "/mnt/project0")
+            svc_exec = svc.get("exec", "uvicorn app:app --host 0.0.0.0 --port 8000")
+            svc_user = svc.get("user", config.username)
+            svc_after = svc.get("after", "network.target")
+            svc_env = svc.get("environment", [])
+
+            env_lines = "\n".join(f"Environment={e}" for e in svc_env) if svc_env else ""
+
+            web_service_content = f"""[Unit]
+Description={svc_desc}
+After={svc_after}
+
+[Service]
+Type=simple
+User={svc_user}
+WorkingDirectory={svc_workdir}
+{env_lines}
+ExecStart={svc_exec}
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target
+"""
+            web_svc_b64 = base64.b64encode(web_service_content.encode()).decode()
+            runcmd_lines.append(
+                f"  - echo '{web_svc_b64}' | base64 -d > /etc/systemd/system/{svc_name}.service"
+            )
+            runcmd_lines.append("  - systemctl daemon-reload")
+            runcmd_lines.append(f"  - systemctl enable {svc_name}.service")
+            runcmd_lines.append(f"  - systemctl start {svc_name}.service || true")
+
+        # Install CloneBox Monitor for continuous monitoring and self-healing
+        scripts_dir = Path(__file__).resolve().parent.parent.parent / "scripts"
+        try:
+            with open(scripts_dir / "clonebox-monitor.sh") as f:
+                monitor_script = f.read()
+            with open(scripts_dir / "clonebox-monitor.service") as f:
+                monitor_service = f.read()
+            with open(scripts_dir / "clonebox-monitor.default") as f:
+                monitor_config = f.read()
+        except (FileNotFoundError, OSError):
+            # Fallback to embedded scripts if files not found
+            monitor_script = """#!/bin/bash
+# CloneBox Monitor - Fallback embedded version
+set -euo pipefail
+LOG_FILE="/var/log/clonebox-monitor.log"
+log() { echo "[$(date '+%Y-%m-%d %H:%M:%S')] $1" | tee -a "$LOG_FILE"; }
+log_info() { log "[INFO] $1"; }
+log_warn() { log "[WARN] $1"; }
+log_error() { log "[ERROR] $1"; }
+log_success() { log "[SUCCESS] $1"; }
+while true; do
+    log_info "CloneBox Monitor running..."
+    sleep 60
+done
+"""
+            monitor_service = """[Unit]
+Description=CloneBox Monitor
+After=graphical-session.target
+[Service]
+Type=simple
+User=ubuntu
+ExecStart=/usr/local/bin/clonebox-monitor
+Restart=always
+[Install]
+WantedBy=default.target
+"""
+            monitor_config = """# CloneBox Monitor Configuration
+CLONEBOX_MONITOR_INTERVAL=30
+CLONEBOX_AUTO_REPAIR=true
+"""
+
+        # Install monitor script
+        monitor_b64 = base64.b64encode(monitor_script.encode()).decode()
+        runcmd_lines.append(
+            f"  - echo '{monitor_b64}' | base64 -d > /usr/local/bin/clonebox-monitor"
+        )
+        runcmd_lines.append("  - chmod +x /usr/local/bin/clonebox-monitor")
+
+        # Install monitor configuration
+        config_b64 = base64.b64encode(monitor_config.encode()).decode()
+        runcmd_lines.append(f"  - echo '{config_b64}' | base64 -d > /etc/default/clonebox-monitor")
+
+        # Install systemd user service
+        service_b64 = base64.b64encode(monitor_service.encode()).decode()
+        runcmd_lines.append(
+            f"  - echo '{service_b64}' | base64 -d > /etc/systemd/user/clonebox-monitor.service"
+        )
+
+        # Enable lingering and start monitor
+        runcmd_lines.extend(
+            [
+                "  - loginctl enable-linger ubuntu",
+                "  - sudo -u ubuntu systemctl --user daemon-reload",
+                "  - sudo -u ubuntu systemctl --user enable clonebox-monitor.service",
+                "  - sudo -u ubuntu systemctl --user start clonebox-monitor.service || true",
+            ]
+        )
+
+        # Create Python monitor service for continuous diagnostics (legacy)
+        monitor_script = f'''#!/usr/bin/env python3
+"""CloneBox Monitor - Continuous diagnostics and app restart service."""
+import subprocess
+import time
+import os
+import sys
+import json
+from pathlib import Path
+
+REQUIRED_APPS = {json.dumps([app["name"] for app in autostart_apps])}
+CHECK_INTERVAL = 60  # seconds
+LOG_FILE = "/var/log/clonebox-monitor.log"
+STATUS_FILE = "/var/run/clonebox-monitor-status.json"
+
+def log(msg):
+    timestamp = time.strftime("%Y-%m-%d %H:%M:%S")
+    line = f"[{{timestamp}}] {{msg}}"
+    print(line)
+    try:
+        with open(LOG_FILE, "a") as f:
+            f.write(line + "\\n")
+    except:
+        pass
+
+def get_running_processes():
+    try:
+        result = subprocess.run(["ps", "aux"], capture_output=True, text=True, timeout=10)
+        return result.stdout
+    except:
+        return ""
+
+def is_app_running(app_name, ps_output):
+    patterns = {{
+        "pycharm-community": ["pycharm", "idea"],
+        "chromium": ["chromium"],
+        "firefox": ["firefox", "firefox-esr"],
+        "google-chrome": ["chrome", "google-chrome"],
+        "code": ["code", "vscode"],
+    }}
+    for pattern in patterns.get(app_name, [app_name]):
+        if pattern.lower() in ps_output.lower():
+            return True
+    return False
+
+def restart_app(app_name):
+    log(f"Restarting {{app_name}}...")
+    try:
+        subprocess.run(
+            ["sudo", "-u", "{config.username}", "systemctl", "--user", "restart", f"{{app_name}}.service"],
+            timeout=30, capture_output=True
+        )
+        return True
+    except Exception as e:
+        log(f"Failed to restart {{app_name}}: {{e}}")
+        return False
+
+def check_mounts():
+    try:
+        with open("/etc/fstab", "r") as f:
+            fstab = f.read()
+        for line in fstab.split("\\n"):
+            parts = line.split()
+            if len(parts) >= 2 and parts[0].startswith("mount"):
+                mp = parts[1]
+                result = subprocess.run(["mountpoint", "-q", mp], capture_output=True)
+                if result.returncode != 0:
+                    log(f"Mount {{mp}} not active, attempting remount...")
+                    subprocess.run(["mount", mp], capture_output=True)
+    except Exception as e:
+        log(f"Mount check failed: {{e}}")
+
+def write_status(status):
+    try:
+        with open(STATUS_FILE, "w") as f:
+            json.dump(status, f)
+    except:
+        pass
+
+def main():
+    log("CloneBox Monitor started")
+    
+    while True:
+        status = {{"timestamp": time.strftime("%Y-%m-%dT%H:%M:%S"), "apps": {{}}, "mounts_ok": True}}
+        
+        # Check mounts
+        check_mounts()
+        
+        # Check apps (only if GUI session is active)
+        if os.path.exists("/run/user/1000"):
+            ps_output = get_running_processes()
+            for app in REQUIRED_APPS:
+                running = is_app_running(app, ps_output)
+                status["apps"][app] = "running" if running else "stopped"
+                # Don't auto-restart apps - user may have closed them intentionally
+        
+        write_status(status)
+        time.sleep(CHECK_INTERVAL)
+
+if __name__ == "__main__":
+    main()
+'''
+        # Note: The bash monitor is already installed above, no need to install Python monitor
+
+        # Create logs disk for host access
+        # Inside the VM, we use a fixed path for the image file
+        vm_logs_img_path = "/var/lib/clonebox/logs.img"
+        
+        runcmd_lines.extend(
+            [
+                "  - mkdir -p /var/lib/clonebox /mnt/logs",
+                f"  - truncate -s 1G {vm_logs_img_path}",
+                f"  - mkfs.ext4 -F {vm_logs_img_path} >/dev/null 2>&1",
+                f"  - echo '{vm_logs_img_path} /mnt/logs ext4 loop,defaults 0 0' >> /etc/fstab",
+                "  - mount /mnt/logs || echo '  → ❌ Failed to mount logs disk'",
+                "  - mkdir -p /mnt/logs/var/log",
+                "  - mkdir -p /mnt/logs/tmp",
+                "  - cp -r /var/log/clonebox*.log /mnt/logs/var/log/ 2>/dev/null || true",
+                "  - cp -r /tmp/*-error.log /mnt/logs/tmp/ 2>/dev/null || true",
+                f"  - echo '  → ✓ Logs disk mounted at /mnt/logs'",
+            ]
+        )
+
+        # Add reboot command at the end if GUI is enabled
+        if config.gui:
+            runcmd_lines.append("  - echo '  → 🔄 Rebooting in 10 seconds to start GUI...'")
+            runcmd_lines.append("  - echo '  → (After reboot, GUI will auto-start)'")
+            runcmd_lines.append("  - sleep 10 && reboot")
+
+        runcmd_yaml = "\n".join(runcmd_lines) if runcmd_lines else ""
+        
+        # Helper to log to console
+        log_cmd = "echo '[clonebox] $1' > /dev/ttyS0 || true"
+
+        # bootcmd standardization
+        bootcmd_list = [
+            ["sh", "-c", log_cmd.replace("$1", "bootcmd - starting configuration")],
+            ["systemctl", "enable", "--now", "serial-getty@ttyS0.service"],
+        ]
+        
+        if user_session:
+            # Enhanced network fallback for user-mode (passt)
+            # We do this in bootcmd to have network as early as possible for packages
+            net_setup_cmd = (
+                "NIC=$(ip -o link show | grep -E 'enp|eth' | grep -v 'lo' | head -1 | awk -F': ' '{print $2}' | tr -d ' '); "
+                "if [ -n \"$NIC\" ]; then "
+                f"  {log_cmd.replace('$1', 'Found NIC: $NIC')}; "
+                "  ip addr show $NIC | grep -q 'inet ' || ( "
+                f"    {log_cmd.replace('$1', 'Manual network config for $NIC')}; "
+                "    ip addr add 10.0.2.15/24 dev $NIC 2>/dev/null; "
+                "    ip link set $NIC up; "
+                "    ip route add default via 10.0.2.2 2>/dev/null; "
+                "    echo nameserver 10.0.2.3 > /etc/resolv.conf "
+                "  ); "
+                "else "
+                f"  {log_cmd.replace('$1', 'No NIC found for network setup')}; "
+                "fi"
+            )
+            bootcmd_list.extend([
+                ["sh", "-c", log_cmd.replace("$1", "Running network fallback...")],
+                ["sh", "-c", net_setup_cmd],
+            ])
+        
+        if bootcmd_extra:
+            for extra in bootcmd_extra:
+                if isinstance(extra, list):
+                    bootcmd_list.append(extra)
+                elif isinstance(extra, str):
+                    if extra.strip().startswith("["):
+                        try:
+                            # Use top-level json import
+                            bootcmd_list.append(json.loads(extra))
+                        except:
+                            bootcmd_list.append(["sh", "-c", extra.strip("- ")])
+                    else:
+                        bootcmd_list.append(["sh", "-c", extra.strip("- ")])
+            
+        bootcmd_block = ""
+        if bootcmd_list:
+            import yaml
+            # Use yaml.dump for the whole block to ensure perfect formatting
+            # cloud-init is very picky about indentation and types
+            bootcmd_yaml = yaml.dump({"bootcmd": bootcmd_list}, default_flow_style=False)
+            bootcmd_block = "\n" + bootcmd_yaml + "\n"
+
+        # User-data components
+        # No write_files needed - we'll use bootcmd to configure network directly
+
+        output_targets = "/dev/ttyS0"
+
+        # Build the cloud-config dictionary
+        cloud_config = {
+            "hostname": config.name,
+            "manage_etc_hosts": True,
+            "users": [
+                {
+                    "name": config.username,
+                    "sudo": "ALL=(ALL) NOPASSWD:ALL",
+                    "shell": "/bin/bash",
+                    "groups": "sudo,adm,dialout,cdrom,floppy,audio,dip,video,plugdev,netdev,docker",
+                    "lock_passwd": lock_passwd == "true",
+                }
+            ],
+            "ssh_pwauth": ssh_pwauth == "true",
+            "growpart": {
+                "mode": "auto",
+                "devices": ["/"],
+                "ignore_growroot_disabled": False,
+            },
+            "resize_rootfs": True,
+            "package_update": True,
+            "package_upgrade": False,
+            "output": {
+                "all": f'| tee -a /var/log/cloud-init-output.log {output_targets}'
+            },
+            "final_message": "CloneBox VM is ready after $UPTIME seconds",
+        }
+
+        if ssh_authorized_keys:
+            cloud_config["users"][0]["ssh_authorized_keys"] = ssh_authorized_keys
+
+        if chpasswd_config_dict:
+            # Modern way is to put it in the user object or use the chpasswd module correctly
+            # cloud-init schema prefers it in the user object or as a top-level module
+            cloud_config["chpasswd"] = chpasswd_config_dict
+
+        if bootcmd_list:
+            cloud_config["bootcmd"] = bootcmd_list
+
+        if all_packages:
+            # We install packages via runcmd for better progress logging.
+            # Do not emit the 'packages' key at all (an empty list triggers schema warnings).
+            pass
+        else:
+            pass
+
+        # Assemble final user-data using yaml.dump for safety
+        import yaml
+        
+        # Merge extra blocks into cloud_config
+        if bootcmd_list:
+            cloud_config["bootcmd"] = bootcmd_list
+            
+        # Add runcmd
+        # runcmd_lines currently mixes plain shell lines and YAML-ish list items ("- cmd", "  - cmd", and "|").
+        # Running them as individual runcmd entries breaks multi-line shell constructs (if/then/fi).
+        # Normalize to a single bash script executed once.
+        script_lines: list[str] = []
+        for raw in runcmd_lines:
+            s = (raw or "").rstrip("\n")
+            t = s.strip()
+            if not t:
+                continue
+            if t == "|":
+                continue
+            if t.startswith("- "):
+                t = t[2:]
+            script_lines.append(t)
+
+        if script_lines:
+            cloud_config["runcmd"] = [["bash", "-lc", "\n".join(script_lines)]]
+
+        # Prevent PyYAML from inserting hard newlines into long shell commands.
+        user_data = "#cloud-config\n" + yaml.dump(
+            cloud_config,
+            sort_keys=False,
+            default_flow_style=False,
+            allow_unicode=True,
+            width=10000,
+        )
+        (cloudinit_dir / "user-data").write_text(user_data)
+
+        # Create ISO
+        iso_path = vm_dir / "cloud-init.iso"
+
+        network_config = """version: 2
+ethernets:
+  id0:
+    match:
+      driver: "virtio_net"
+    dhcp4: true
+    dhcp6: false
+    optional: true
+"""
+        (cloudinit_dir / "network-config").write_text(network_config)
+
+        iso_files = [
+            str(cloudinit_dir / "user-data"),
+            str(cloudinit_dir / "meta-data"),
+            str(cloudinit_dir / "network-config"),
+        ]
+
+        subprocess.run(
+            [
+                "genisoimage",
+                "-output",
+                str(iso_path),
+                "-volid",
+                "cidata",
+                "-joliet",
+                "-rock",
+            ] + iso_files,
+            check=True,
+            capture_output=True,
+        )
+
+        return iso_path
+
+    def start_vm(self, vm_name: str, open_viewer: bool = True, console=None) -> bool:
+        """Start a VM and optionally open virt-viewer."""
+
+        def log(msg):
+            if console:
+                console.print(msg)
+            else:
+                print(msg)
+
+        try:
+            vm = self.conn.lookupByName(vm_name)
+        except libvirt.libvirtError:
+            log(f"[red]❌ VM '{vm_name}' not found[/]")
+            return False
+
+        if vm.isActive():
+            log(f"[yellow]⚠️  VM '{vm_name}' is already running[/]")
+        else:
+            log(f"[cyan]🚀 Starting VM '{vm_name}'...[/]")
+            vm.create()
+            log("[green]✅ VM started![/]")
+
+        if self.user_session:
+            try:
+                vm_dir = self.get_images_dir() / vm_name
+                serial_log_path = vm_dir / "serial.log"
+                qemu_log_path = Path.home() / ".cache/libvirt/qemu/log" / f"{vm_name}.log"
+
+                log(f"[dim]Host serial log: {serial_log_path}[/]")
+                log(f"[dim]Follow: tail -f {serial_log_path}[/]")
+                if serial_log_path.exists():
+                    try:
+                        tail = subprocess.run(
+                            ["tail", "-n", "60", str(serial_log_path)],
+                            capture_output=True,
+                            text=True,
+                            timeout=2,
+                        )
+                        if (tail.stdout or "").strip():
+                            log("[dim]--- serial.log (last 60 lines) ---[/]")
+                            if console:
+                                console.print(tail.stdout.rstrip())
+                            else:
+                                print(tail.stdout.rstrip())
+                    except Exception:
+                        pass
+
+                log(f"[dim]Host QEMU log: {qemu_log_path}[/]")
+            except Exception:
+                pass
+
+        if open_viewer:
+            import shutil
+            if shutil.which("virt-viewer"):
+                log("[cyan]🖥️  Opening virt-viewer...[/]")
+                subprocess.Popen(
+                    ["virt-viewer", "-c", self.conn_uri, vm_name],
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                )
+            else:
+                log("[yellow]⚠️  Warning: 'virt-viewer' not found. Cannot open console automatically.[/]")
+                log("[dim]   Install it with: sudo apt install virt-viewer[/]")
+
+        return True
+
+    def wait_for_setup(self, vm_name: str, timeout_mins: int = 15, console=None) -> bool:
+        """Wait for the VM to complete setup by monitoring serial.log."""
+        import time
+        from rich.live import Live
+        from rich.panel import Panel
+        from rich.text import Text
+
+        def log(msg):
+            if console:
+                console.print(msg)
+            else:
+                print(msg)
+
+        vm_dir = self.get_images_dir() / vm_name
+        serial_log_path = vm_dir / "serial.log"
+        
+        # Ensure log file exists or wait for it
+        start_wait = time.time()
+        while not serial_log_path.exists() and time.time() - start_wait < 30:
+            time.sleep(1)
+        
+        if not serial_log_path.exists():
+            log(f"[yellow]⚠️  Serial log not found at {serial_log_path}. Cannot monitor progress.[/]")
+            return False
+
+        log(f"[cyan]⏳ Monitoring VM setup progress (timeout: {timeout_mins}m)...[/]")
+        
+        last_pos = 0
+        setup_complete = False
+        start_time = time.time()
+        timeout_secs = timeout_mins * 60
+
+        with open(serial_log_path, "r") as f:
+            while time.time() - start_time < timeout_secs:
+                f.seek(last_pos)
+                new_data = f.read()
+                if new_data:
+                    last_pos = f.tell()
+                    # Print new lines to console
+                    if console:
+                        # Clean up escape sequences if any, but keep it simple for now
+                        console.print(new_data, end="")
+                    else:
+                        print(new_data, end="")
+
+                    if "CloneBox VM is ready" in new_data or "HEALTH_STATUS=OK" in new_data:
+                        setup_complete = True
+                        break
+                    
+                    if "HEALTH_STATUS=FAILED" in new_data:
+                        log("[red]❌ VM setup failed (detected in logs)[/]")
+                        return False
+
+                time.sleep(1)
+        
+        if setup_complete:
+            log(f"\n[green]✅ VM setup completed successfully![/]")
+            return True
+        else:
+            log(f"\n[yellow]⚠️  Timeout waiting for VM setup to complete.[/]")
+            return False
+
+    def stop_vm(self, vm_name: str, force: bool = False, console=None) -> bool:
+        """Stop a VM."""
+
+        def log(msg):
+            if console:
+                console.print(msg)
+            else:
+                print(msg)
+
+        try:
+            vm = self.conn.lookupByName(vm_name)
+        except libvirt.libvirtError:
+            if ignore_not_found:
+                return True
+            log(f"[red]❌ VM '{vm_name}' not found[/]")
+            return False
+
+        if not vm.isActive():
+            log(f"[yellow]⚠️  VM '{vm_name}' is not running[/]")
+            return True
+
+        if force:
+            log(f"[yellow]⚡ Force stopping VM '{vm_name}'...[/]")
+            vm.destroy()
+        else:
+            log(f"[cyan]🛑 Shutting down VM '{vm_name}'...[/]")
+            try:
+                vm.shutdown()
+            except libvirt.libvirtError as e:
+                log(f"[red]❌ Failed to request shutdown: {e}[/]")
+                return False
+
+            # Wait for shutdown
+            import time
+            waiting = True
+            for i in range(30):
+                try:
+                    if not vm.isActive():
+                        waiting = False
+                        break
+                except libvirt.libvirtError:
+                    # Domain might be gone
+                    waiting = False
+                    break
+                time.sleep(1)
+            
+            if waiting:
+                log(f"[red]❌ Shutdown timed out. VM is still running.[/]")
+                log(f"[dim]The guest OS is not responding to ACPI shutdown signal.[/]")
+                log(f"[dim]Try using: clonebox stop {vm_name} --force[/]")
+                return False
+
+        log("[green]✅ VM stopped![/]")
+        return True
+
+    def delete_vm(
+        self,
+        vm_name: str,
+        delete_storage: bool = True,
+        console=None,
+        ignore_not_found: bool = False,
+        approved: bool = False,
+    ) -> bool:
+        """Delete a VM and optionally its storage."""
+
+        def log(msg):
+            if console:
+                console.print(msg)
+            else:
+                print(msg)
+
+        policy = PolicyEngine.load_effective()
+        if policy is not None:
+            policy.assert_operation_approved(
+                AuditEventType.VM_DELETE.value,
+                approved=approved,
+            )
+
+        # Best-effort cleanup for orphaned passt helpers.
+        # When passt processes linger, they keep SSH forward ports busy and cause port drift.
+        def _cleanup_passt() -> None:
+            try:
+                procs = subprocess.run(
+                    ["pgrep", "-af", "passt"],
+                    capture_output=True,
+                    text=True,
+                    check=False,
+                )
+                lines = (procs.stdout or "").splitlines()
+                pids: list[int] = []
+                for line in lines:
+                    if vm_name not in line:
+                        continue
+                    try:
+                        pid = int(line.strip().split()[0])
+                    except Exception:
+                        continue
+                    pids.append(pid)
+
+                for pid in pids:
+                    try:
+                        os.kill(pid, signal.SIGTERM)
+                    except Exception:
+                        pass
+                if pids:
+                    time.sleep(0.5)
+                for pid in pids:
+                    try:
+                        os.kill(pid, signal.SIGKILL)
+                    except Exception:
+                        pass
+            except Exception:
+                pass
+
+        try:
+            vm = self.conn.lookupByName(vm_name)
+        except libvirt.libvirtError:
+            _cleanup_passt()
+            if delete_storage:
+                vm_dir = self.get_images_dir() / vm_name
+                if vm_dir.exists():
+                    import shutil
+
+                    shutil.rmtree(vm_dir)
+                    log(f"[green]🗑️  Storage deleted: {vm_dir}[/]")
+
+            if ignore_not_found:
+                return True
+            log(f"[red]❌ VM '{vm_name}' not found[/]")
+            return False
+
+        # Stop if running
+        if vm.isActive():
+            vm.destroy()
+
+        _cleanup_passt()
+
+        # Undefine
+        vm.undefine()
+        log(f"[green]✅ VM '{vm_name}' undefined[/]")
+
+        # Delete storage
+        if delete_storage:
+            vm_dir = self.get_images_dir() / vm_name
+            if vm_dir.exists():
+                import shutil
+
+                shutil.rmtree(vm_dir)
+                log(f"[green]🗑️  Storage deleted: {vm_dir}[/]")
+
+        return True
+
+    def list_vms(self) -> list:
+        """List all VMs."""
+        vms = []
+        for vm_id in self.conn.listDomainsID():
+            vm = self.conn.lookupByID(vm_id)
+            vms.append({"name": vm.name(), "state": "running", "uuid": vm.UUIDString()})
+
+        for name in self.conn.listDefinedDomains():
+            vm = self.conn.lookupByName(name)
+            vms.append({"name": name, "state": "stopped", "uuid": vm.UUIDString()})
+
+        return vms
+
+    def close(self):
+        """Close libvirt connection."""
+        if self.conn:
+            self.conn.close()
+
+    # Backward compatibility methods for tests
+    def _get_base_image_info(self, image_path: str) -> dict:
+        """Get base image information - backward compatibility shim."""
+        if hasattr(self, "get_base_image_info"):
+            return self.get_base_image_info(image_path)
+        # Return empty dict if method doesn't exist
+        return {}
+
+    def get_vm_info(self, vm_name: str) -> dict:
+        """Get VM information - backward compatibility shim."""
+        if hasattr(self, "_get_vm_info"):
+            return self._get_vm_info(vm_name)
+        # Try to get basic info from libvirt
+        try:
+            vm = self.conn.lookupByName(vm_name)
+            return {
+                "name": vm.name(),
+                "state": "running" if vm.isActive() else "stopped",
+                "uuid": vm.UUIDString(),
+            }
+        except Exception:
+            return {}

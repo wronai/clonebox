@@ -3,11 +3,59 @@
 Pydantic models for CloneBox configuration validation.
 """
 
+import os
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, List, Literal, Optional
 from uuid import uuid4
 
 from pydantic import BaseModel, Field, field_validator, model_validator
+
+
+@dataclass
+class VMConfig:
+    """Configuration for the VM to create."""
+
+    name: str = field(default_factory=lambda: os.getenv("VM_NAME", "clonebox-vm"))
+    ram_mb: int = field(default_factory=lambda: int(os.getenv("VM_RAM_MB", "8192")))
+    vcpus: int = field(default_factory=lambda: int(os.getenv("VM_VCPUS", "4")))
+    disk_size_gb: int = field(default_factory=lambda: int(os.getenv("VM_DISK_SIZE_GB", "20")))
+    gui: bool = field(default_factory=lambda: os.getenv("VM_GUI", "true").lower() == "true")
+    base_image: Optional[str] = field(default_factory=lambda: os.getenv("VM_BASE_IMAGE") or None)
+    paths: dict = field(default_factory=dict)
+    packages: list = field(default_factory=list)
+    snap_packages: list = field(default_factory=list)  # Snap packages to install
+    services: list = field(default_factory=list)
+    post_commands: list = field(default_factory=list)  # Commands to run after setup
+    copy_paths: dict = field(default_factory=dict)  # Paths to copy (import) instead of bind-mount
+    user_session: bool = field(
+        default_factory=lambda: os.getenv("VM_USER_SESSION", "false").lower() == "true"
+    )  # Use qemu:///session instead of qemu:///system
+    network_mode: str = field(
+        default_factory=lambda: os.getenv("VM_NETWORK_MODE", "auto")
+    )  # auto|default|user
+    username: str = field(
+        default_factory=lambda: os.getenv("VM_USERNAME", "ubuntu")
+    )  # VM default username
+    password: str = field(
+        default_factory=lambda: os.getenv("VM_PASSWORD", "ubuntu")
+    )  # VM default password
+    autostart_apps: bool = field(
+        default_factory=lambda: os.getenv("VM_AUTOSTART_APPS", "true").lower() == "true"
+    )  # Auto-start GUI apps after login (desktop autostart)
+    web_services: list = field(default_factory=list)  # Web services to start (uvicorn, etc.)
+    resources: dict = field(default_factory=dict)  # Resource limits (cpu, memory, disk, network)
+    auth_method: str = "ssh_key"  # ssh_key | one_time_password | password
+    ssh_public_key: Optional[str] = None
+    shutdown_after_setup: bool = False
+
+    def to_dict(self) -> dict:
+        """Convert to dictionary representation."""
+        return {
+            "paths": self.paths,
+            "packages": self.packages,
+            "services": self.services,
+        }
 
 
 class VMSettings(BaseModel):
