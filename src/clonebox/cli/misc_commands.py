@@ -19,91 +19,79 @@ from clonebox.cli.utils import console, custom_style, load_clonebox_config, CLON
 def cmd_clone(args):
     """Clone current environment to VM."""
     from clonebox.cloner import SelectiveVMCloner
+    import os
+    from rich.progress import Progress, SpinnerColumn, TextColumn
     
     path = Path(args.path).expanduser().resolve()
     user_session = getattr(args, "user", False)
     
-    # Detect system configuration
-    console.print("[bold cyan]🔍 Detecting system configuration...[/]")
+    if not path.exists():
+        console.print(f"[red]❌ Path does not exist: {path}[/]")
+        return
+    
+    console.print(f"[cyan]🔍 Analyzing system for cloning...[/]")
+    
+    # Detect system state
     detector = SystemDetector()
-    sys_info = detector.detect_all()
     
-    # Show detected configuration
-    format_detection_output(sys_info, console)
+    with Progress(
+        SpinnerColumn(),
+        TextColumn("[progress.description]{task.description}"),
+        console=console,
+    ) as progress:
+        task = progress.add_task("Scanning system...", total=None)
+        
+        # Take snapshot
+        snapshot = detector.detect_all()
+        
+        # Detect Docker containers
+        containers = detector.detect_docker_containers()
+        
+        progress.update(task, description="Finalizing...")
     
-    # Ask what to include
-    if args.interactive:
-        choices = questionary.checkbox(
-            "Select what to include in the VM:",
-            choices=[
-                questionary.Choice("Installed packages", value="packages", checked=True),
-                questionary.Choice("Snap packages", value="snaps", checked=True),
-                questionary.Choice("Running services", value="services", checked=True),
-                questionary.Choice("User home directory", value="home", checked=True),
-                questionary.Choice("Configuration files", value="config", checked=True),
-                questionary.Choice("Development tools", value="devtools", checked=True),
-            ],
-            style=custom_style,
-        ).ask()
-        
-        if not choices:
-            console.print("[yellow]No selections made[/]")
-            return
-        
-        # Build configuration from choices
-        config = build_config_from_detection(sys_info, choices, path)
-    else:
-        # Use all detected
-        config = build_config_from_detection(sys_info, ["packages", "snaps", "services", "home", "config", "devtools"], path)
+    # Generate config
+    from clonebox.cli.utils import generate_clonebox_yaml
+    yaml_content = generate_clonebox_yaml(
+        snapshot,
+        detector,
+        deduplicate=getattr(args, "dedupe", True),
+        target_path=str(path) if args.path else None,
+        vm_name=getattr(args, "name", None),
+        network_mode=getattr(args, "network", "auto"),
+        base_image=getattr(args, "base_image", None),
+        disk_size_gb=getattr(args, "disk_size_gb", None),
+    )
     
-    # Ask for VM settings
-    if args.interactive:
-        config["vm"]["name"] = questionary.text(
-            "VM name:",
-            default=config["vm"]["name"],
-            style=custom_style,
-        ).ask()
-        
-        config["vm"]["ram_mb"] = questionary.text(
-            "RAM (MB):",
-            default=str(config["vm"]["ram_mb"]),
-            validate=lambda x: x.isdigit(),
-            style=custom_style,
-        ).ask()
-        
-        config["vm"]["ram_mb"] = int(config["vm"]["ram_mb"])
-        
-        config["vm"]["vcpus"] = questionary.text(
-            "vCPUs:",
-            default=str(config["vm"]["vcpus"]),
-            validate=lambda x: x.isdigit(),
-            style=custom_style,
-        ).ask()
-        
-        config["vm"]["vcpus"] = int(config["vm"]["vcpus"])
+    # Save config file
+    config_file = path / CLONEBOX_CONFIG_FILE
     
-    # Save configuration
-    config_file = path / ".clonebox.yaml"
-    with open(config_file, "w") as f:
-        import yaml
-        yaml.dump(config, f, default_flow_style=False, allow_unicode=True, sort_keys=False)
-    
-    console.print(f"\n[green]✅ Configuration saved to: {config_file}[/]")
-    
-    # Ask if user wants to create VM now
-    if args.interactive:
-        if questionary.confirm(
-            "Create VM now?",
-            default=True,
-            style=custom_style,
+    if config_file.exists() and not getattr(args, "replace", False):
+        console.print(f"[yellow]⚠️  Config file already exists: {config_file}[/]")
+        if not questionary.confirm(
+            "Overwrite existing config?", default=False, style=custom_style
         ).ask():
-            from clonebox.cli.utils import create_vm_from_config
-            console.print(f"\n[cyan]Creating VM '{config['vm']['name']}'...[/]")
-            vm_uuid = create_vm_from_config(
-                config, start=True, user_session=user_session, approved=args.approve
-            )
-            console.print(f"\n[bold green]🎉 VM created and started![/]")
-            console.print(f"[dim]UUID: {vm_uuid}[/]")
+            console.print("[dim]Cancelled.[/]")
+            return
+    
+    with open(config_file, "w") as f:
+        f.write(yaml_content)
+    
+    console.print(f"[green]✅ Config saved to: {config_file}[/]")
+    
+    # Edit if requested
+    if getattr(args, "edit", False):
+        editor = os.environ.get("EDITOR", "nano")
+        os.system(f"{editor} {config_file}")
+    
+    # Run VM if requested
+    if getattr(args, "run", False):
+        console.print("[cyan]🚀 Creating VM from config...[/]")
+        config = load_clonebox_config(config_file)
+        from clonebox.cli.utils import create_vm_from_config
+        vm_uuid = create_vm_from_config(
+            config, start=True, user_session=user_session, replace=getattr(args, "replace", False), approved=getattr(args, "approve", False)
+        )
+        console.print(f"[green]✅ VM created: {vm_uuid}[/]")
 
 
 def cmd_detect(args):
@@ -277,8 +265,8 @@ def build_config_from_detection(sys_info: Dict, choices: List[str], path: Path) 
     if "services" in choices and "services" in sys_info:
         # Only include user-enabled services
         user_services = [
-            svc["name"] for svc in sys_info["services"]
-            if svc.get("enabled") and not svc["name"].startswith(("systemd-", "dbus-", "networkd-"))
+            svc.name for svc in sys_info["services"]
+            if svc.enabled and not svc.name.startswith(("systemd-", "dbus-", "networkd-"))
         ]
         config["services"] = user_services
     

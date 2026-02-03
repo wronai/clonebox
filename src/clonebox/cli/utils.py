@@ -555,10 +555,10 @@ def create_vm_from_config(config, start=False, user_session=False, replace=False
     """Create VM from configuration dictionary."""
     vm_config = VMConfig(
         name=config["vm"]["name"],
-        ram_mb=config["vm"]["ram_mb"],
-        vcpus=config["vm"]["vcpus"],
+        ram_mb=config["vm"].get("ram_mb", 4096),
+        vcpus=config["vm"].get("vcpus", 4),
         disk_size_gb=config["vm"]["disk_size_gb"],
-        gui=config["vm"]["gui"],
+        gui=config["vm"].get("gui", True),
         base_image=config["vm"].get("base_image"),
         network_mode=config["vm"].get("network_mode", "auto"),
         username=config["vm"].get("username", "ubuntu"),

@@ -325,6 +325,37 @@ def main():
         action="store_true",
         help="Use user session (qemu:///session) - no root required",
     )
+    clone_parser.add_argument("--name", "-n", help="VM name (default: directory name)")
+    clone_parser.add_argument(
+        "--run", "-r", action="store_true", help="Create and start VM immediately"
+    )
+    clone_parser.add_argument(
+        "--edit", "-e", action="store_true", help="Open config in editor before creating"
+    )
+    clone_parser.add_argument(
+        "--dedupe", action="store_true", default=True, help="Remove duplicate entries"
+    )
+    clone_parser.add_argument(
+        "--network",
+        choices=["auto", "default", "user"],
+        default="auto",
+        help="Network mode: auto (default), default (libvirt network), user (slirp)",
+    )
+    clone_parser.add_argument(
+        "--base-image",
+        help="Path to a bootable qcow2 image to use as a base disk",
+    )
+    clone_parser.add_argument(
+        "--disk-size-gb",
+        type=int,
+        default=None,
+        help="Root disk size in GB (default: 20 for generated configs)",
+    )
+    clone_parser.add_argument(
+        "--replace",
+        action="store_true",
+        help="Replace existing VM if it exists",
+    )
     clone_parser.add_argument("--interactive", "-i", action="store_true", help="Interactive mode")
     clone_parser.add_argument(
         "--approve",

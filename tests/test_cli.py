@@ -256,8 +256,8 @@ class TestCLIIntegration:
         )
         assert result.returncode == expected_exit
 
-    @patch("clonebox.cli.SystemDetector")
-    @patch("clonebox.cli.console")
+    @patch("clonebox.cli.vm_commands.SystemDetector")
+    @patch("clonebox.cli.vm_commands.console")
     def test_detect_json_output(self, mock_console, mock_detector_class, tmp_path):
         """Test detect command with JSON output."""
         from clonebox.cli import cmd_detect
@@ -283,8 +283,8 @@ class TestCLIIntegration:
 
         mock_console.print.assert_called()
 
-    @patch("clonebox.cli.SystemDetector")
-    @patch("clonebox.cli.console")
+    @patch("clonebox.cli.vm_commands.SystemDetector")
+    @patch("clonebox.cli.vm_commands.console")
     def test_detect_yaml_output(self, mock_console, mock_detector_class):
         """Test detect command with YAML output."""
         from clonebox.cli import cmd_detect
@@ -368,7 +368,8 @@ class TestCLIIntegration:
         assert "version" in config
 
     @patch("clonebox.cli.SelectiveVMCloner")
-    def test_create_vm_from_config_propagates_disk_size(self, mock_cloner_class, tmp_path):
+    @patch("clonebox.cli.utils.SelectiveVMCloner")
+    def test_create_vm_from_config_propagates_disk_size(self, mock_cloner_class, mock_cloner_utils_class, tmp_path):
         from clonebox.cli import create_vm_from_config
 
         mock_cloner = MagicMock()
@@ -379,6 +380,7 @@ class TestCLIIntegration:
             "session_type": "user",
         }
         mock_cloner_class.return_value = mock_cloner
+        mock_cloner_utils_class.return_value = mock_cloner
 
         cfg = {
             "version": "1",

@@ -15,6 +15,7 @@ from rich.console import Console
 
 from clonebox.cloner import SelectiveVMCloner
 from clonebox.models import VMConfig
+from clonebox.detector import SystemDetector
 from clonebox.cli.utils import console, custom_style, CLONEBOX_CONFIG_FILE, load_clonebox_config, create_vm_from_config
 
 
@@ -317,8 +318,6 @@ def cmd_list(args):
 
 def cmd_detect(args) -> None:
     """Detect and show system state."""
-    from clonebox.detector import SystemDetector
-    
     console.print("[cyan]🔍 Detecting system state...[/]")
     
     try:

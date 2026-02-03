@@ -14,9 +14,12 @@ from .utils import (
 )
 
 # Re-export for tests
+import questionary
 from clonebox.cloner import SelectiveVMCloner
 from clonebox.detector import SystemDetector
 from clonebox.cli.vm_commands import cmd_detect
+from clonebox.cli.misc_commands import cmd_clone
+from clonebox.cli.utils import create_vm_from_config
 from rich.progress import Progress
 
 __all__ = [
@@ -30,5 +33,8 @@ __all__ = [
     "SelectiveVMCloner",
     "SystemDetector",
     "cmd_detect",
+    "cmd_clone",
+    "create_vm_from_config",
     "Progress",
+    "questionary",
 ]
