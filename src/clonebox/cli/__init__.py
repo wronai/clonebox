@@ -41,6 +41,26 @@ from clonebox.cli.policy_audit_commands import (
     cmd_policy_validate,
     cmd_policy_apply,
 )
+from clonebox.cli.plugin_commands import (
+    cmd_plugin_list,
+    cmd_plugin_enable,
+    cmd_plugin_disable,
+    cmd_plugin_discover,
+    cmd_plugin_install,
+    cmd_plugin_uninstall,
+    cmd_plugin_info,
+    cmd_plugin_run,
+)
+from clonebox.cli.remote_commands import (
+    cmd_remote_list,
+    cmd_remote_status,
+    cmd_remote_start,
+    cmd_remote_stop,
+    cmd_remote_delete,
+    cmd_remote_exec,
+    cmd_remote_health,
+    cmd_list_remote,
+)
 from rich.progress import Progress
 
 __all__ = [
@@ -75,4 +95,20 @@ __all__ = [
     "cmd_audit_export",
     "cmd_policy_validate",
     "cmd_policy_apply",
+    "cmd_plugin_list",
+    "cmd_plugin_enable",
+    "cmd_plugin_disable",
+    "cmd_plugin_discover",
+    "cmd_plugin_install",
+    "cmd_plugin_uninstall",
+    "cmd_plugin_info",
+    "cmd_plugin_run",
+    "cmd_remote_list",
+    "cmd_remote_status",
+    "cmd_remote_start",
+    "cmd_remote_stop",
+    "cmd_remote_delete",
+    "cmd_remote_exec",
+    "cmd_remote_health",
+    "cmd_list_remote",
 ]

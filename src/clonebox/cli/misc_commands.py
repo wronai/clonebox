@@ -457,7 +457,6 @@ def cmd_set_password(args):
     
     vm_name = args.name
     user_session = getattr(args, "user", False)
-    conn_uri = "qemu:///session" if user_session else "qemu:///system"
     
     # Resolve VM name from config if needed
     if not vm_name or vm_name == ".":
@@ -470,23 +469,17 @@ def cmd_set_password(args):
             return
     
     # Generate password if not provided
-    if args.password:
-        password = args.password
+    password = getattr(args, "password", None)
+    if password:
+        pass  # Use provided password
     else:
         password = generate_password(12)
         console.print(f"[cyan]Generated password: {password}[/]")
     
-    # Set password via QEMU Guest Agent
-    from clonebox.cli.utils import _qga_exec
-    
-    username = args.username or "ubuntu"
-    cmd = f'echo "{username}:{password}" | sudo chpasswd'
-    
-    if _qga_exec(vm_name, conn_uri, cmd):
-        console.print("[green]✅ Password updated successfully[/]")
-    else:
-        console.print("[red]❌ Failed to update password[/]")
-        console.print("[dim]Make sure QEMU Guest Agent is running in the VM[/]")
+    # Call set-vm-password script
+    script_path = Path(__file__).parent.parent.parent / "scripts" / "set-vm-password.sh"
+    cmd = [str(script_path), vm_name, password, "true" if user_session else "false"]
+    subprocess.run(cmd, check=True)
 
 
 def generate_password(length=12):

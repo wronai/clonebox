@@ -109,7 +109,7 @@ def cmd_audit_list(args):
             console.print(f"[red]❌ Invalid event type: {args.event_type}[/]")
             return
     
-    if args.outcome:
+    if getattr(args, 'outcome', None):
         try:
             outcome = AuditOutcome(args.outcome)
             query.outcome(outcome)
@@ -117,16 +117,16 @@ def cmd_audit_list(args):
             console.print(f"[red]❌ Invalid outcome: {args.outcome}[/]")
             return
     
-    if args.user:
+    if getattr(args, 'user', None):
         query.user(args.user)
     
-    if args.vm_name:
+    if getattr(args, 'vm_name', None):
         query.vm_name(args.vm_name)
     
-    if args.since:
+    if getattr(args, 'since', None):
         query.since(datetime.fromisoformat(args.since))
     
-    if args.limit:
+    if getattr(args, 'limit', None):
         query.limit(args.limit)
     
     # Execute query
