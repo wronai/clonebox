@@ -1498,16 +1498,15 @@ fi
             if limits.network.outbound_kbps:
                 ET.SubElement(bandwidth, "outbound", average=str(limits.network.outbound_kbps // 8))
 
-        # Serial console
+        # Serial console with logging
         serial = ET.SubElement(devices, "serial", type="pty")
-        ET.SubElement(serial, "target", port="0")
-
+        ET.SubElement(serial, "target", type="isa-serial", port="0")
+        
         if self.user_session:
             vm_dir = Path(str(root_disk)).parent
             serial_log_path = str(vm_dir / "serial.log")
-            serial_file = ET.SubElement(devices, "serial", type="file")
-            ET.SubElement(serial_file, "source", path=serial_log_path)
-            ET.SubElement(serial_file, "target", port="1")
+            # Use libvirt's built-in logging for the serial console
+            log_elem = ET.SubElement(serial, "log", file=serial_log_path, append="on")
 
         console_elem = ET.SubElement(devices, "console", type="pty")
         ET.SubElement(console_elem, "target", type="serial", port="0")
@@ -2726,12 +2725,8 @@ if __name__ == "__main__":
 
         runcmd_yaml = "\n".join(runcmd_lines) if runcmd_lines else ""
         
-        # Helper to log to consoles
-        # We explicitly redirect to ttyS0 (console) and ttyS1 (serial.log) to ensure visibility
-        log_cmd = 'echo "[clonebox] $1" | tee /dev/ttyS0'
-        if user_session:
-            log_cmd += ' > /dev/ttyS1'
-        log_cmd += ' || true'
+        # Helper to log to console
+        log_cmd = 'echo "[clonebox] $1" > /dev/ttyS0 || true'
 
         bootcmd_lines = [
             f'  - ["sh", "-c", "{log_cmd.replace("$1", "bootcmd - starting configuration")}"]',
@@ -2739,9 +2734,7 @@ if __name__ == "__main__":
         ]
         
         # Add network fallback for passt/user networking (10.0.2.x range)
-        # This ensures network works even if DHCP fails or is slow
         if user_session:
-            # More robust network setup that won't hang
             net_fallback = (
                 "NIC=$(ip -o link show | grep -E 'enp|eth' | head -1 | cut -d: -f2 | tr -d ' '); "
                 "if [ -z \"$NIC\" ]; then "
@@ -2793,8 +2786,6 @@ users:
         # No write_files needed - we'll use bootcmd to configure network directly
 
         output_targets = "/dev/ttyS0"
-        if user_session:
-            output_targets += " /dev/ttyS1"
 
         # Assemble final user-data
         user_data = f"""{user_data_header}
@@ -2840,6 +2831,7 @@ ethernets:
 
         iso_files = [
             str(cloudinit_dir / "user-data"),
+            str(cloudinit_dir / "meta-data"),
             str(cloudinit_dir / "network-config"),
         ]
 
