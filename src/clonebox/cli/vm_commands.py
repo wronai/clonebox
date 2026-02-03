@@ -313,3 +313,185 @@ def cmd_list(args):
             )
         
         console.print(table)
+
+
+def cmd_detect(args) -> None:
+    """Detect and show system state."""
+    from clonebox.detector import SystemDetector
+    
+    console.print("[cyan]🔍 Detecting system state...[/]")
+    
+    try:
+        detector = SystemDetector()
+        
+        # Detect system info
+        sys_info = detector.get_system_info()
+        
+        # Detect all services, apps, and paths
+        snapshot = detector.detect_all()
+        
+        # Detect Docker containers
+        containers = detector.detect_docker_containers()
+        
+        # Prepare output
+        output = {
+            "system": sys_info,
+            "services": [
+                {
+                    "name": s.name,
+                    "status": s.status,
+                    "enabled": s.enabled,
+                    "description": s.description,
+                }
+                for s in snapshot.running_services
+            ],
+            "applications": [
+                {
+                    "name": a.name,
+                    "pid": a.pid,
+                    "memory_mb": round(a.memory_mb, 2),
+                    "working_dir": a.working_dir or "",
+                }
+                for a in snapshot.applications
+            ],
+            "paths": [
+                {"path": p.path, "type": p.type, "size_mb": p.size_mb}
+                for p in snapshot.paths
+            ],
+            "docker_containers": [
+                {
+                    "name": c["name"],
+                    "status": c["status"],
+                    "image": c["image"],
+                    "ports": c.get("ports", ""),
+                }
+                for c in containers
+            ],
+        }
+        
+        # Apply deduplication if requested
+        if args.dedupe:
+            from clonebox.cli.utils import deduplicate_list
+            output["services"] = deduplicate_list(output["services"], key=lambda x: x["name"])
+            output["applications"] = deduplicate_list(output["applications"], key=lambda x: (x["name"], x["pid"]))
+            output["paths"] = deduplicate_list(output["paths"], key=lambda x: x["path"])
+        
+        # Format output
+        if args.json:
+            import json
+            content = json.dumps(output, indent=2)
+        elif args.yaml:
+            content = yaml.dump(output, default_flow_style=False, allow_unicode=True)
+        else:
+            # Pretty print
+            content = format_detection_output(output, sys_info)
+        
+        # Save to file or print
+        if args.output:
+            with open(args.output, "w") as f:
+                f.write(content)
+            console.print(f"[green]✅ Output saved to: {args.output}[/]")
+        else:
+            console.print(content)
+    
+    except Exception as e:
+        console.print(f"[red]Error: {e}[/]")
+        import traceback
+        traceback.print_exc()
+
+
+def format_detection_output(output, sys_info):
+    """Format detection output for console display."""
+    from rich.table import Table
+    from rich.text import Text
+    
+    # System info
+    system_text = Text()
+    system_text.append(f"Hostname: {sys_info['hostname']}\n", style="bold")
+    system_text.append(f"User: {sys_info['user']}\n")
+    system_text.append(f"CPU: {sys_info['cpu_count']} cores\n")
+    system_text.append(
+        f"Memory: {sys_info['memory_total_gb']:.1f} GB total, "
+        f"{sys_info['memory_available_gb']:.1f} GB available\n"
+    )
+    system_text.append(f"OS: {sys_info['os']} {sys_info['os_version']}\n")
+    system_text.append(f"Arch: {sys_info['arch']}")
+    
+    console.print("\n[bold]System Information[/]")
+    console.print(system_text)
+    
+    # Services
+    if output["services"]:
+        console.print("\n[bold]Running Services[/]")
+        services_table = Table()
+        services_table.add_column("Name", style="cyan")
+        services_table.add_column("Status", style="green")
+        services_table.add_column("Enabled", style="yellow")
+        services_table.add_column("Description")
+        
+        for service in output["services"]:
+            status_style = "green" if service["status"] == "running" else "red"
+            enabled_style = "green" if service["enabled"] else "dim"
+            services_table.add_row(
+                service["name"],
+                f"[{status_style}]{service['status']}[/{status_style}]",
+                f"[{enabled_style}]{service['enabled']}[/{enabled_style}]",
+                service["description"] or "",
+            )
+        
+        console.print(services_table)
+    
+    # Applications
+    if output["applications"]:
+        console.print("\n[bold]Running Applications[/]")
+        apps_table = Table()
+        apps_table.add_column("Name", style="cyan")
+        apps_table.add_column("PID", style="blue")
+        apps_table.add_column("Memory (MB)", style="yellow")
+        apps_table.add_column("Working Directory")
+        
+        for app in output["applications"]:
+            apps_table.add_row(
+                app["name"],
+                str(app["pid"]),
+                f"{app['memory_mb']:.1f}",
+                app["working_dir"] or "",
+            )
+        
+        console.print(apps_table)
+    
+    # Paths
+    if output["paths"]:
+        console.print("\n[bold]Detected Paths[/]")
+        paths_table = Table()
+        paths_table.add_column("Path", style="cyan")
+        paths_table.add_column("Type", style="green")
+        paths_table.add_column("Size (MB)", style="yellow")
+        
+        for path in output["paths"]:
+            paths_table.add_row(
+                path["path"],
+                path["type"],
+                f"{path['size_mb']:.1f}" if path["size_mb"] > 0 else "-",
+            )
+        
+        console.print(paths_table)
+    
+    # Docker containers
+    if output["docker_containers"]:
+        console.print("\n[bold]Docker Containers[/]")
+        docker_table = Table()
+        docker_table.add_column("Name", style="cyan")
+        docker_table.add_column("Status", style="green")
+        docker_table.add_column("Image", style="blue")
+        docker_table.add_column("Ports")
+        
+        for container in output["docker_containers"]:
+            docker_table.add_row(
+                container["name"],
+                container["status"],
+                container["image"],
+                container["ports"] or "",
+            )
+        
+        console.print(docker_table)

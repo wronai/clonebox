@@ -1,3 +1,24 @@
+## [1.1.32] - 2026-02-03
+
+### Summary
+
+refactor(goal): configuration management system
+
+### Core
+
+- update src/clonebox/cli/__init__.py
+- update src/clonebox/cli/interactive.py
+- update src/clonebox/cli/interactive_audit.py
+- update src/clonebox/cli/interactive_compose.py
+- update src/clonebox/cli/interactive_container.py
+- update src/clonebox/cli/interactive_import_export.py
+- update src/clonebox/cli/interactive_monitor.py
+- update src/clonebox/cli/interactive_original.py
+- update src/clonebox/cli/interactive_plugins.py
+- update src/clonebox/cli/interactive_remote.py
+- ... and 8 more
+
+
 ## [1.1.31] - 2026-02-03
 
 ### Summary

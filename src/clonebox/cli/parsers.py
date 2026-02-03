@@ -603,7 +603,7 @@ def main():
 
     compose_logs = compose_sub.add_parser("logs", help="Show service logs")
     compose_logs.add_argument("-f", "--file", help="Compose file path")
-    compose_logs.add_argument("-f", "--follow", action="store_true", help="Follow log output")
+    compose_logs.add_argument("--follow", action="store_true", help="Follow log output")
     compose_logs.add_argument("--tail", type=int, dest="lines", help="Number of lines to show")
     compose_logs.add_argument("services", nargs="*", help="Services to show logs for")
     compose_logs.set_defaults(func=cmd_compose_logs)

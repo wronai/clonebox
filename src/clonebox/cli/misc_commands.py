@@ -6,8 +6,9 @@ Miscellaneous commands for CloneBox CLI.
 import json
 import secrets
 import string
+from datetime import datetime
 from pathlib import Path
-from typing import Dict, List
+from typing import Dict, List, Optional, Tuple
 
 import questionary
 
@@ -504,3 +505,224 @@ def generate_password(length=12):
     """Generate a random password."""
     alphabet = string.ascii_letters + string.digits + "!@#$%^&*"
     return ''.join(secrets.choice(alphabet) for _ in range(length))
+
+
+def _resolve_vm_name_and_config_file(name: Optional[str]) -> Tuple[str, Optional[Path]]:
+    """Resolve VM name and find its config file."""
+    if name and name != ".":
+        # Use provided VM name
+        vm_name = name
+        config_file = Path.cwd() / CLONEBOX_CONFIG_FILE
+        if not config_file.exists():
+            # Try to find config in VM directory
+            vm_dir = Path.cwd() / vm_name
+            config_file = vm_dir / CLONEBOX_CONFIG_FILE
+    else:
+        # Use current directory
+        config_file = Path.cwd() / CLONEBOX_CONFIG_FILE
+        if not config_file.exists():
+            raise FileNotFoundError(
+                f"No {CLONEBOX_CONFIG_FILE} found in current directory. "
+                "Run 'clonebox init' first or specify a VM name."
+            )
+        # Load config to get VM name
+        config = load_clonebox_config(config_file)
+        vm_name = config["vm"]["name"]
+    
+    return vm_name, config_file
+
+
+def run_vm_diagnostics(
+    vm_name: str,
+    conn_uri: str,
+    config_file: Optional[Path] = None,
+    verbose: bool = False,
+    json_output: bool = False,
+):
+    """Run comprehensive VM diagnostics."""
+    import json
+    import subprocess
+    
+    diagnostics = {
+        "vm_name": vm_name,
+        "timestamp": datetime.now().isoformat(),
+        "checks": {},
+        "summary": {"passed": 0, "failed": 0, "warnings": 0},
+    }
+    
+    console.print(f"\n[bold cyan]🔍 Diagnosing VM: {vm_name}[/]\n")
+    
+    # Check 1: VM exists
+    console.print("[dim]Checking VM existence...[/]")
+    try:
+        result = subprocess.run(
+            ["virsh", "--connect", conn_uri, "dominfo", vm_name],
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+        if result.returncode == 0:
+            diagnostics["checks"]["vm_exists"] = {"status": "PASS", "message": "VM found"}
+            diagnostics["summary"]["passed"] += 1
+            console.print("[green]✅ VM exists[/]")
+            
+            # Parse VM info
+            for line in result.stdout.split('\n'):
+                if "State:" in line:
+                    state = line.split(':')[1].strip()
+                    diagnostics["vm_state"] = state
+        else:
+            diagnostics["checks"]["vm_exists"] = {"status": "FAIL", "message": "VM not found"}
+            diagnostics["summary"]["failed"] += 1
+            console.print("[red]❌ VM not found[/]")
+            return
+    except subprocess.TimeoutExpired:
+        diagnostics["checks"]["vm_exists"] = {"status": "FAIL", "message": "Timeout checking VM"}
+        diagnostics["summary"]["failed"] += 1
+        console.print("[red]❌ Timeout checking VM[/]")
+        return
+    except Exception as e:
+        diagnostics["checks"]["vm_exists"] = {"status": "FAIL", "message": str(e)}
+        diagnostics["summary"]["failed"] += 1
+        console.print(f"[red]❌ Error checking VM: {e}[/]")
+        return
+    
+    # Check 2: VM is running
+    console.print("\n[dim]Checking VM state...[/]")
+    if diagnostics.get("vm_state") == "running":
+        diagnostics["checks"]["vm_running"] = {"status": "PASS", "message": "VM is running"}
+        diagnostics["summary"]["passed"] += 1
+        console.print("[green]✅ VM is running[/]")
+        
+        # Check 3: QEMU Guest Agent
+        console.print("\n[dim]Checking QEMU Guest Agent...[/]")
+        try:
+            result = subprocess.run(
+                ["virsh", "--connect", conn_uri, "qemu-agent-command", vm_name, '{"execute": "guest-ping"}'],
+                capture_output=True,
+                text=True,
+                timeout=5,
+            )
+            if result.returncode == 0:
+                diagnostics["checks"]["guest_agent"] = {"status": "PASS", "message": "QEMU Guest Agent responding"}
+                diagnostics["summary"]["passed"] += 1
+                console.print("[green]✅ QEMU Guest Agent is responding[/]")
+                
+                # Get IP addresses
+                try:
+                    result = subprocess.run(
+                        ["virsh", "--connect", conn_uri, "domifaddr", vm_name],
+                        capture_output=True,
+                        text=True,
+                        timeout=5,
+                    )
+                    if result.returncode == 0:
+                        ips = []
+                        for line in result.stdout.split('\n'):
+                            if '192.168.' in line or '10.0.' in line:
+                                ip = line.split()[-1].rstrip('/')
+                                ips.append(ip)
+                        if ips:
+                            diagnostics["ip_addresses"] = ips
+                            console.print(f"[green]✅ IP addresses: {', '.join(ips)}[/]")
+                except:
+                    pass
+            else:
+                diagnostics["checks"]["guest_agent"] = {"status": "FAIL", "message": "QEMU Guest Agent not responding"}
+                diagnostics["summary"]["failed"] += 1
+                console.print("[red]❌ QEMU Guest Agent not responding[/]")
+        except subprocess.TimeoutExpired:
+            diagnostics["checks"]["guest_agent"] = {"status": "FAIL", "message": "QEMU Guest Agent timeout"}
+            diagnostics["summary"]["failed"] += 1
+            console.print("[red]❌ QEMU Guest Agent timeout[/]")
+        except Exception as e:
+            diagnostics["checks"]["guest_agent"] = {"status": "FAIL", "message": str(e)}
+            diagnostics["summary"]["failed"] += 1
+            console.print(f"[red]❌ Error checking QEMU Guest Agent: {e}[/]")
+    else:
+        diagnostics["checks"]["vm_running"] = {"status": "FAIL", "message": f"VM is not running (state: {diagnostics.get('vm_state')})"}
+        diagnostics["summary"]["failed"] += 1
+        console.print(f"[red]❌ VM is not running (state: {diagnostics.get('vm_state')})[/]")
+    
+    # Check 4: Config file
+    if config_file and config_file.exists():
+        console.print("\n[dim]Checking configuration file...[/]")
+        try:
+            config = load_clonebox_config(config_file)
+            diagnostics["checks"]["config_file"] = {"status": "PASS", "message": "Config file loaded"}
+            diagnostics["summary"]["passed"] += 1
+            console.print("[green]✅ Configuration file is valid[/]")
+            
+            # Show some config details
+            if verbose:
+                vm_config = config.get("vm", {})
+                console.print(f"[dim]  RAM: {vm_config.get('ram_mb', 'N/A')} MB[/]")
+                console.print(f"[dim]  vCPUs: {vm_config.get('vcpus', 'N/A')}[/]")
+                console.print(f"[dim]  Disk: {vm_config.get('disk_size_gb', 'N/A')} GB[/]")
+        except Exception as e:
+            diagnostics["checks"]["config_file"] = {"status": "FAIL", "message": str(e)}
+            diagnostics["summary"]["failed"] += 1
+            console.print(f"[red]❌ Error loading config: {e}[/]")
+    
+    # Summary
+    console.print(f"\n[bold]Summary:[/]")
+    console.print(f"  Passed: {diagnostics['summary']['passed']}")
+    console.print(f"  Failed: {diagnostics['summary']['failed']}")
+    console.print(f"  Warnings: {diagnostics['summary']['warnings']}")
+    
+    if json_output:
+        console.print("\n" + json.dumps(diagnostics, indent=2))
+
+
+def cmd_diagnose(args):
+    """Run detailed VM diagnostics (standalone)."""
+    name = args.name
+    user_session = getattr(args, "user", False)
+    conn_uri = "qemu:///session" if user_session else "qemu:///system"
+
+    try:
+        vm_name, config_file = _resolve_vm_name_and_config_file(name)
+    except FileNotFoundError as e:
+        console.print(f"[red]❌ {e}[/]")
+        return
+
+    run_vm_diagnostics(
+        vm_name,
+        conn_uri,
+        config_file,
+        verbose=getattr(args, "verbose", False),
+        json_output=getattr(args, "json", False),
+    )
+
+
+def cmd_status(args):
+    """Check VM installation status and health from workstation."""
+    import subprocess
+
+    name = args.name
+    user_session = getattr(args, "user", False)
+    conn_uri = "qemu:///session" if user_session else "qemu:///system"
+
+    try:
+        vm_name, config_file = _resolve_vm_name_and_config_file(name)
+    except FileNotFoundError as e:
+        console.print(f"[red]❌ {e}[/]")
+        return
+
+    run_vm_diagnostics(vm_name, conn_uri, config_file, verbose=False, json_output=False)
+
+    # Show useful commands
+    console.print("\n[bold]📋 Useful commands:[/]")
+    console.print(f"  [cyan]virt-viewer --connect {conn_uri} {vm_name}[/]  # Open GUI")
+    console.print(f"  [cyan]virsh --connect {conn_uri} console {vm_name}[/]  # Console access")
+    console.print("  [dim]Inside VM:[/]")
+    console.print("    [cyan]cat /var/log/clonebox-health.log[/]  # Full health report")
+    console.print("    [cyan]sudo cloud-init status[/]  # Cloud-init status")
+    console.print("    [cyan]clonebox-health[/]  # Re-run health check")
+    console.print("  [dim]On host:[/]")
+    console.print(
+        f"    [cyan]virsh --connect {conn_uri} dominfo {vm_name}[/]  # VM info"
+    )
+    console.print(
+        f"    [cyan]virsh --connect {conn_uri} domifaddr {vm_name}[/]  # IP addresses"
+    )
