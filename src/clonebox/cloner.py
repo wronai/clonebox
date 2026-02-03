@@ -1567,10 +1567,11 @@ fi
         auth_method = getattr(config, "auth_method", "ssh_key")
 
         ssh_authorized_keys = []
-        chpasswd_config_dict = {}
-        lock_passwd = "true"
-        ssh_pwauth = "false"
+        user_password = None
+        lock_passwd = True
+        ssh_pwauth = False
         bootcmd_extra = []
+        chpasswd_config_dict = {}
 
         if auth_method == "ssh_key":
             ssh_key_path = vm_dir / "ssh_key"
@@ -1586,46 +1587,41 @@ fi
 
             local_password = getattr(config, "password", None)
             if getattr(config, "gui", False) and local_password:
+                user_password = local_password
                 chpasswd_config_dict = {
                     "list": f"{config.username}:{local_password}\n",
                     "expire": False
                 }
-                lock_passwd = "false"
-                ssh_pwauth = "true"
+                lock_passwd = False
+                ssh_pwauth = True
 
         elif auth_method == "one_time_password":
-            otp, chpasswd_raw = SecretsManager.generate_one_time_password()
-            # chpasswd_raw is a full YAML block string, we need to parse it or set it directly
-            import yaml
-            try:
-                parsed = yaml.safe_load(chpasswd_raw)
-                if isinstance(parsed, dict) and "chpasswd" in parsed:
-                    chpasswd_config_dict = parsed["chpasswd"]
-                else:
-                    chpasswd_config_dict = parsed
-            except:
-                # Fallback if parsing fails
-                chpasswd_config_dict = {"list": f"{config.username}:{otp}\n", "expire": False}
-            
+            otp, _ = SecretsManager.generate_one_time_password()
+            user_password = otp
+            chpasswd_config_dict = {
+                "list": f"{config.username}:{otp}\n",
+                "expire": False
+            }
             bootcmd_extra = [
-                '["echo", "===================="]',
-                f'["echo", "ONE-TIME PASSWORD = {otp}"]',
-                '["echo", "You MUST change this on first login!"]',
-                '["echo", "===================="]',
+                ["echo", "===================="],
+                ["echo", f"ONE-TIME PASSWORD = {otp}"],
+                ["echo", "You MUST change this on first login!"],
+                ["echo", "===================="],
             ]
-            lock_passwd = "false"
-            ssh_pwauth = "true"
+            lock_passwd = False
+            ssh_pwauth = True
             log.warning("One-time password generated. It will be shown on VM console.")
 
         else:
             # Fallback to legacy password from environment/secrets
             password = secrets_mgr.get("VM_PASSWORD") or getattr(config, "password", "ubuntu")
+            user_password = password
             chpasswd_config_dict = {
                 "list": f"{config.username}:{password}\n",
                 "expire": False
             }
-            lock_passwd = "false"
-            ssh_pwauth = "true"
+            lock_passwd = False
+            ssh_pwauth = True
             log.warning("DEPRECATED: Using password authentication. Switch to 'ssh_key' for better security.")
 
         cloudinit_dir = vm_dir / "cloud-init"
@@ -1735,8 +1731,8 @@ fi
         # Network setup for passt/user-mode networking (must be first!)
         # This ensures network is configured before any package installs
         if user_session:
-            runcmd_lines.append("  - echo '[0/10] 🌐 Configuring network for user-mode (passt)...'")
-            runcmd_lines.append("  - |")
+            runcmd_lines.append("echo '[0/10] 🌐 Configuring network for user-mode (passt)...'")
+            runcmd_lines.append("|")
             runcmd_lines.append("    NIC=$(ip -o link show | grep -E 'enp|eth' | grep -v 'lo:' | head -1 | awk -F': ' '{print $2}' | tr -d ' ') ")
             runcmd_lines.append("    if [ -n \"$NIC\" ]; then")
             runcmd_lines.append("      echo \"  → Found interface: $NIC\"")
@@ -1754,87 +1750,75 @@ fi
             runcmd_lines.append("    else")
             runcmd_lines.append("      echo \"  → ⚠️ No network interface found\"")
             runcmd_lines.append("    fi")
-            runcmd_lines.append("  - echo ''")
+            runcmd_lines.append("echo ''")
 
         # Add detailed logging header
-        runcmd_lines.append("  - echo '═══════════════════════════════════════════════════════════'")
-        runcmd_lines.append("  - echo '           CloneBox VM Installation Progress'")
-        runcmd_lines.append("  - echo '═══════════════════════════════════════════════════════════'")
-        runcmd_lines.append("  - echo ''")
+        runcmd_lines.append("echo '═══════════════════════════════════════════════════════════'")
+        runcmd_lines.append("echo '           CloneBox VM Installation Progress'")
+        runcmd_lines.append("echo '═══════════════════════════════════════════════════════════'")
+        runcmd_lines.append("echo ''")
 
         # Phase 1: System Optimization (Pre-install)
-        runcmd_lines.append("  - echo '[1/10] 🛠️  Optimizing system resources...'")
-        runcmd_lines.append("  - echo '  → Limiting journal size to 50M'")
-        runcmd_lines.append("  - sed -i 's/^#SystemMaxUse=/SystemMaxUse=50M/' /etc/systemd/journald.conf || true")
-        runcmd_lines.append("  - systemctl restart systemd-journald || true")
-        runcmd_lines.append("  - echo '  → ✓ [1/10] System resources optimized'")
-        runcmd_lines.append("  - echo ''")
+        runcmd_lines.append("echo '[1/10] 🛠️  Optimizing system resources...'")
+        runcmd_lines.append("echo '  → Limiting journal size to 50M'")
+        runcmd_lines.append("sed -i 's/^#SystemMaxUse=/SystemMaxUse=50M/' /etc/systemd/journald.conf || true")
+        runcmd_lines.append("systemctl restart systemd-journald || true")
+        runcmd_lines.append("echo '  → ✓ [1/10] System resources optimized'")
+        runcmd_lines.append("echo ''")
         
         # Phase 2: APT Packages
         if all_packages:
-            runcmd_lines.append(f"  - echo '[2/10] 📦 Installing APT packages ({len(all_packages)} total)...'")
-            runcmd_lines.append("  - export DEBIAN_FRONTEND=noninteractive")
+            runcmd_lines.append(f"echo '[2/10] 📦 Installing APT packages ({len(all_packages)} total)...'")
+            runcmd_lines.append("export DEBIAN_FRONTEND=noninteractive")
             # Check space before starting
-            runcmd_lines.append("  - if [ $(df / --output=avail | tail -n 1) -lt 524288 ]; then echo '  → ⚠️  WARNING: Low disk space (<512MB) before APT install'; fi")
-            runcmd_lines.append("  - echo '  → Updating package repositories...'")
+            runcmd_lines.append("if [ $(df / --output=avail | tail -n 1) -lt 524288 ]; then echo '  → ⚠️  WARNING: Low disk space (<512MB) before APT install'; fi")
+            runcmd_lines.append("echo '  → Updating package repositories...'")
             if user_session:
-                runcmd_lines.append("  - echo '  → Ensuring DNS resolver is configured (user-mode networking)...'")
-                runcmd_lines.append(
-                    "  - mkdir -p /etc/systemd/resolved.conf.d || true"
-                )
-                runcmd_lines.append(
-                    "  - printf '[Resolve]\\nDNS=1.1.1.1 8.8.8.8\\nFallbackDNS=1.0.0.1 8.8.4.4\\n' > /etc/systemd/resolved.conf.d/clonebox.conf || true"
-                )
-                runcmd_lines.append("  - systemctl restart systemd-resolved || true")
-                runcmd_lines.append(
-                    "  - if [ -L /etc/resolv.conf ]; then rm -f /etc/resolv.conf; fi"
-                )
-                runcmd_lines.append(
-                    "  - if ! grep -q '^nameserver' /etc/resolv.conf 2>/dev/null; then printf 'nameserver 1.1.1.1\\nnameserver 8.8.8.8\\noptions timeout:1 attempts:5\\n' > /etc/resolv.conf; fi"
-                )
-                runcmd_lines.append(
-                    "  - timeout 60 sh -c 'until getent hosts archive.ubuntu.com >/dev/null 2>&1; do sleep 2; done' || true"
-                )
-            runcmd_lines.append("  - apt-get update")
+                runcmd_lines.append("echo '  → Ensuring DNS resolver is configured (user-mode networking)...'")
+                runcmd_lines.append("mkdir -p /etc/systemd/resolved.conf.d || true")
+                runcmd_lines.append("printf '[Resolve]\\nDNS=1.1.1.1 8.8.8.8\\nFallbackDNS=1.0.0.1 8.8.4.4\\n' > /etc/systemd/resolved.conf.d/clonebox.conf || true")
+                runcmd_lines.append("systemctl restart systemd-resolved || true")
+                runcmd_lines.append("if [ -L /etc/resolv.conf ]; then rm -f /etc/resolv.conf; fi")
+                runcmd_lines.append("if ! grep -q '^nameserver' /etc/resolv.conf 2>/dev/null; then printf 'nameserver 1.1.1.1\\nnameserver 8.8.8.8\\noptions timeout:1 attempts:5\\n' > /etc/resolv.conf; fi")
+                runcmd_lines.append("timeout 60 sh -c 'until getent hosts archive.ubuntu.com >/dev/null 2>&1; do sleep 2; done' || true")
+            runcmd_lines.append("apt-get update")
             for i, pkg in enumerate(all_packages, 1):
-                runcmd_lines.append(f"  - echo '  → [{i}/{len(all_packages)}] Installing {pkg}...'")
-                runcmd_lines.append(f"  - apt-get install -y {pkg} || echo '  → ❌ Failed to install {pkg}'")
+                runcmd_lines.append(f"echo '  → [{i}/{len(all_packages)}] Installing {pkg}...'")
+                runcmd_lines.append(f"apt-get install -y {pkg} || echo '  → ❌ Failed to install {pkg}'")
                 if pkg == "qemu-guest-agent":
-                    runcmd_lines.append(
-                        "  - systemctl enable --now qemu-guest-agent || echo '  → ❌ Failed to enable qemu-guest-agent'"
-                    )
-            runcmd_lines.append("  - apt-get clean")
-            runcmd_lines.append("  - echo '  → ✓ [2/10] APT packages installed'")
-            runcmd_lines.append("  - df -h / | sed 's/^/  → /'")
-            runcmd_lines.append("  - echo ''")
+                    runcmd_lines.append("systemctl enable --now qemu-guest-agent || echo '  → ❌ Failed to enable qemu-guest-agent'")
+            runcmd_lines.append("apt-get clean")
+            runcmd_lines.append("echo '  → ✓ [2/10] APT packages installed'")
+            runcmd_lines.append("df -h / | sed 's/^/  → /'")
+            runcmd_lines.append("echo ''")
         else:
-            runcmd_lines.append("  - echo '[2/10] 📦 No APT packages to install'")
-            runcmd_lines.append("  - echo ''")
+            runcmd_lines.append("echo '[2/10] 📦 No APT packages to install'")
+            runcmd_lines.append("echo ''")
 
         # Phase 3: Core services
-        runcmd_lines.append("  - echo '[3/10] 🔧 Enabling core services...'")
-        runcmd_lines.append("  - echo '  → [1/3] Enabling qemu-guest-agent'")
-        runcmd_lines.append("  - systemctl enable --now qemu-guest-agent || echo '  → ❌ Failed to enable qemu-guest-agent'")
-        runcmd_lines.append("  - echo '  → [2/3] Enabling SSH server'")
-        runcmd_lines.append("  - systemctl enable --now ssh || systemctl enable --now sshd || echo '  → ❌ Failed to enable ssh'")
-        runcmd_lines.append("  - echo '  → [3/3] Enabling snapd'")
-        runcmd_lines.append("  - systemctl enable --now snapd || echo '  → ❌ Failed to enable snapd'")
-        runcmd_lines.append("  - systemctl enable --now serial-getty@ttyS0.service >/dev/null 2>&1 || true")
-        runcmd_lines.append("  - echo '  → Waiting for snap system seed...'")
-        runcmd_lines.append("  - timeout 300 snap wait system seed.loaded || true")
-        runcmd_lines.append("  - echo '  → ✓ [3/10] Core services enabled'")
-        runcmd_lines.append("  - echo ''")
+        runcmd_lines.append("echo '[3/10] 🔧 Enabling core services...'")
+        runcmd_lines.append("echo '  → [1/3] Enabling qemu-guest-agent'")
+        runcmd_lines.append("systemctl enable --now qemu-guest-agent || echo '  → ❌ Failed to enable qemu-guest-agent'")
+        runcmd_lines.append("echo '  → [2/3] Enabling SSH server'")
+        runcmd_lines.append("systemctl enable --now ssh || systemctl enable --now sshd || echo '  → ❌ Failed to enable ssh'")
+        runcmd_lines.append("echo '  → [3/3] Enabling snapd'")
+        runcmd_lines.append("systemctl enable --now snapd || echo '  → ❌ Failed to enable snapd'")
+        runcmd_lines.append("systemctl enable --now serial-getty@ttyS0.service >/dev/null 2>&1 || true")
+        runcmd_lines.append("echo '  → Waiting for snap system seed...'")
+        runcmd_lines.append("timeout 300 snap wait system seed.loaded || true")
+        runcmd_lines.append("echo '  → ✓ [3/10] Core services enabled'")
+        runcmd_lines.append("echo ''")
 
         # Phase 4: User services
-        runcmd_lines.append(f"  - echo '[4/10] 🔧 Enabling user services ({len(config.services)} total)...'")
+        runcmd_lines.append(f"echo '[4/10] 🔧 Enabling user services ({len(config.services)} total)...'")
         for i, svc in enumerate(config.services, 1):
-            runcmd_lines.append(f"  - echo '  → [{i}/{len(config.services)}] {svc}'")
-            runcmd_lines.append(f"  - systemctl enable --now {svc} || echo '  → ❌ Failed to enable {svc}'")
-        runcmd_lines.append("  - echo '  → ✓ [4/10] User services enabled'")
-        runcmd_lines.append("  - echo ''")
+            runcmd_lines.append(f"echo '  → [{i}/{len(config.services)}] {svc}'")
+            runcmd_lines.append(f"systemctl enable --now {svc} || echo '  → ❌ Failed to enable {svc}'")
+        runcmd_lines.append("echo '  → ✓ [4/10] User services enabled'")
+        runcmd_lines.append("echo ''")
 
         # Phase 5: Filesystem mounts
-        runcmd_lines.append(f"  - echo '[5/10] 📁 Mounting shared directories ({len(existing_bind_paths)} mounts)...'")
+        runcmd_lines.append(f"echo '[5/10] 📁 Mounting shared directories ({len(existing_bind_paths)} mounts)...'")
         if bind_mount_commands:
             mount_idx = 0
             for cmd in bind_mount_commands:
@@ -1848,20 +1832,25 @@ fi
                         mp = parts[sep_idx - 1]
                     except ValueError:
                         mp = parts[-1]
-                    runcmd_lines.append(f"  - echo '  → [{mount_idx}/{len(existing_bind_paths)}] Mounting {mp}...'")
-                runcmd_lines.append(cmd)
+                    runcmd_lines.append(f"echo '  → [{mount_idx}/{len(existing_bind_paths)}] Mounting {mp}...'")
+                
+                # Strip prefix if present in the command string itself
+                clean_cmd = cmd.strip()
+                if clean_cmd.startswith("- "):
+                    clean_cmd = clean_cmd[2:]
+                runcmd_lines.append(clean_cmd)
         
         if fstab_entries:
             runcmd_lines.append(
-                "  - grep -q '^# CloneBox 9p mounts' /etc/fstab || echo '# CloneBox 9p mounts' >> /etc/fstab"
+                "grep -q '^# CloneBox 9p mounts' /etc/fstab || echo '# CloneBox 9p mounts' >> /etc/fstab"
             )
-            for i, entry in enumerate(fstab_entries, 1):
+            for entry in fstab_entries:
                 runcmd_lines.append(
-                    f"  - grep -qF \"{entry}\" /etc/fstab || echo '{entry}' >> /etc/fstab"
+                    f"grep -qF \"{entry}\" /etc/fstab || echo '{entry}' >> /etc/fstab"
                 )
-            runcmd_lines.append("  - mount -a || echo '  → ❌ Failed to mount shared directories'")
-        runcmd_lines.append("  - echo '  → ✓ [5/10] Mounts configured'")
-        runcmd_lines.append("  - echo ''")
+            runcmd_lines.append("mount -a || echo '  → ❌ Failed to mount shared directories'")
+        runcmd_lines.append("echo '  → ✓ [5/10] Mounts configured'")
+        runcmd_lines.append("echo ''")
 
         # Phase 6: Data Import (copied paths)
         if existing_copy_paths:
@@ -2839,11 +2828,11 @@ if __name__ == "__main__":
             cloud_config["bootcmd"] = bootcmd_list
 
         if all_packages:
-            # Only include if non-empty as per schema requirement
-            cloud_config["packages"] = [] # Actually, the error said "should be non-empty"
-            # But we are installing them in runcmd for better logging, so let's just omit 'packages' key if empty
+            # We install packages via runcmd for better progress logging.
+            # Do not emit the 'packages' key at all (an empty list triggers schema warnings).
+            pass
         else:
-            pass # Omit
+            pass
 
         # Assemble final user-data using yaml.dump for safety
         import yaml
@@ -2853,16 +2842,54 @@ if __name__ == "__main__":
             cloud_config["bootcmd"] = bootcmd_list
             
         # Add runcmd
-        clean_runcmd = []
-        for line in runcmd_lines:
-            line_stripped = line.strip()
-            if line_stripped.startswith("- "):
-                clean_runcmd.append(line_stripped[2:])
+        # runcmd_lines is built in a YAML-like form (e.g. "  - cmd" and "  - |" with indented block).
+        # Convert it back into a proper list of commands for cloud-init.
+        clean_runcmd: list[str] = []
+        i = 0
+        while i < len(runcmd_lines):
+            raw = runcmd_lines[i].rstrip("\n")
+            stripped = raw.strip()
+
+            if stripped.startswith("- "):
+                cmd = stripped[2:]
+
+                # Collapse "- |" blocks into a single multi-line command string.
+                # Emitting a standalone "|" would break runcmd execution.
+                if cmd == "|":
+                    block: list[str] = []
+                    i += 1
+                    while i < len(runcmd_lines):
+                        nxt = runcmd_lines[i].rstrip("\n")
+                        nxt_stripped = nxt.strip()
+                        if nxt_stripped.startswith("- "):
+                            break
+
+                        if nxt.startswith("    "):
+                            block.append(nxt[4:])
+                        else:
+                            block.append(nxt_stripped)
+                        i += 1
+
+                    clean_runcmd.append("\n".join(block))
+                    continue
+
+                clean_runcmd.append(cmd)
             else:
-                clean_runcmd.append(line_stripped)
+                # Shouldn't normally happen, but keep behavior predictable.
+                clean_runcmd.append(stripped)
+
+            i += 1
+
         cloud_config["runcmd"] = clean_runcmd
 
-        user_data = "#cloud-config\n" + yaml.dump(cloud_config, sort_keys=False, default_flow_style=False)
+        # Prevent PyYAML from inserting hard newlines into long shell commands.
+        user_data = "#cloud-config\n" + yaml.dump(
+            cloud_config,
+            sort_keys=False,
+            default_flow_style=False,
+            allow_unicode=True,
+            width=10000,
+        )
         (cloudinit_dir / "user-data").write_text(user_data)
 
         # Create ISO

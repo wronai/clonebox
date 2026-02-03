@@ -1,6 +1,6 @@
-# clonebox | 80f 24588L | python:80
+# clonebox | 88f 26967L | python:88
 # Keys: M=modules, D=details, i=imports, c=classes, f=functions, m=methods
-M[80]:
+M[88]:
   fix_qga.py,54
   tests/test_orchestrator.py,228
   tests/conftest.py,345
@@ -21,7 +21,15 @@ M[80]:
   tests/test_remote.py,283
   tests/test_detector.py,183
   tests/test_cli.py,373
+  scripts/advanced_vm_diagnostic.py,437
   scripts/fetch-logs.py,127
+  scripts/fix_interface_name.py,54
+  scripts/fix_network_config.py,110
+  scripts/fix_ssh_keys.py,130
+  scripts/vm_state_diagnostic.py,890
+  scripts/fix_yaml_quotes.py,71
+  scripts/fix_yaml_bootcmd.py,71
+  scripts/vm_console_interact.py,49
   tests/e2e/test_p2p_workflow.py,286
   tests/e2e/test_full_workflow.py,243
   tests/e2e/test_v2_features.py,419
@@ -43,7 +51,7 @@ M[80]:
   src/clonebox/container.py,154
   src/clonebox/logging.py,99
   src/clonebox/orchestrator.py,444
-  src/clonebox/cloner.py,2541
+  src/clonebox/cloner.py,2573
   src/clonebox/rollback.py,137
   src/clonebox/monitor.py,218
   src/clonebox/models.py,180
@@ -226,12 +234,54 @@ D:
     TestLoadCloneboxConfig: test_load_config_from_file(1),test_load_config_from_directory(1),test_load_config_not_found(1)  # Test loading .clonebox.yaml configs.
     TestCLIConstants: test_config_file_name(0)  # Test CLI constants.
     TestCLIIntegration: test_cli_help_commands(2),test_detect_json_output(3),test_detect_yaml_output(2),test_clone_creates_config_file(6),test_create_vm_from_config_propagates_disk_size(2)  # Integration tests for CLI commands.
+  scripts/advanced_vm_diagnostic.py:
+    i: subprocess,json,sys,os,time,re,signal,dataclasses.{dataclass,field},pathlib.Path
+    e: TestStatus,DiagnosticIssue,AdvancedVMDiagnostic,main
+    TestStatus: 
+    DiagnosticIssue:   # Represents a specific diagnostic issu...
+    AdvancedVMDiagnostic: __init__(2),run_cmd(2),analyze_serial_log(0),check_cloud_init_progress(0),detect_network_interface_name(0)  # Enhanced diagnostic with specific err...
+    main()->None
   scripts/fetch-logs.py:
     i: subprocess,json,sys,base64,time,os,zlib
     e: qga_exec,ssh_exec,main
     qga_exec(vm_name;conn_uri;command;timeout=10)->None
     ssh_exec(vm_name;command;timeout=20)->None
     main()->None
+  scripts/fix_interface_name.py:
+    i: sys,re,pathlib.Path
+    e: fix_interface_name
+    fix_interface_name(vm_name:str)->None
+  scripts/fix_network_config.py:
+    i: sys,re,pathlib.Path
+    e: detect_interface_name,fix_network_config
+    detect_interface_name(vm_name:str)->str
+    fix_network_config(vm_name:str)->None
+  scripts/fix_ssh_keys.py:
+    i: sys,os,re,pathlib.Path
+    e: fix_ssh_keys,run_command
+    fix_ssh_keys(vm_name:str)->None
+    run_command(cmd)->None
+  scripts/vm_state_diagnostic.py:
+    i: subprocess,json,sys,os,time,socket,base64,zlib,dataclasses.dataclass,pathlib.Path
+    e: TestStatus,TestResult,DiagnosticContext,VMDiagnostic,main
+    TestStatus: 
+    TestResult: 
+    DiagnosticContext: __post_init__(0)
+    VMDiagnostic: __init__(3),run_cmd(2),virsh(0),qga_exec(2),ssh_exec(2)  # Diagnostic test suite for CloneBox VMs.
+    main()->None
+  scripts/fix_yaml_quotes.py:
+    i: sys,pathlib.Path
+    e: fix_yaml_quotes
+    fix_yaml_quotes(vm_name:str)->None
+  scripts/fix_yaml_bootcmd.py:
+    i: sys,re,pathlib.Path
+    e: fix_yaml_bootcmd
+    fix_yaml_bootcmd(vm_name:str)->None
+  scripts/vm_console_interact.py:
+    i: sys,time,pexpect,pathlib.Path
+    e: interact_with_console,check_vm_network
+    interact_with_console(vm_name:str;commands:list;timeout:int=30)->None
+    check_vm_network(vm_name:str)->None
   tests/e2e/test_p2p_workflow.py:
     i: os,shutil,subprocess,tempfile,pytest,clonebox.exporter.{SecureExporter,VMExporter},pathlib.Path,unittest.mock.{MagicMock,patch}
     e: TestKeyGeneration,TestSecureExporter,TestSecureImporter,TestP2PManager,TestCLICommands,TestVMExporter,TestVMImporter
