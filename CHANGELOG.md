@@ -1,3 +1,21 @@
+## [1.1.26] - 2026-02-03
+
+### Summary
+
+feat(goal): CLI interface improvements
+
+### Core
+
+- update src/clonebox/cli.py
+- update src/clonebox/cloner.py
+
+### Other
+
+- update project.functions.toon
+- update project.toon
+- scripts: update diagnose-vm.sh
+
+
 ## [1.1.25] - 2026-02-03
 
 ### Summary

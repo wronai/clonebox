@@ -2753,6 +2753,8 @@ def create_vm_from_config(config, start=False, user_session=False, replace=False
     
     if start:
         cloner.start_vm(vm_config.name, open_viewer=True, console=console)
+        # Wait for setup to complete and show live logs
+        cloner.wait_for_setup(vm_config.name, console=console)
     
     return vm_uuid
 

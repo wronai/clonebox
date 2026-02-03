@@ -1,17 +1,18 @@
-# clonebox | 69f 23871L | python:69
+# clonebox | 80f 24588L | python:80
 # Keys: M=modules, D=details, i=imports, c=classes, f=functions, m=methods
-M[69]:
+M[80]:
+  fix_qga.py,54
   tests/test_orchestrator.py,228
   tests/conftest.py,345
   tests/test_profiles.py,39
   tests/test_audit.py,244
-  tests/test_cloner.py,258
+  tests/test_cloner.py,263
   tests/__init__.py,0
   tests/test_plugins.py,344
   tests/test_cloner_simple.py,27
   tests/test_validator.py,442
   tests/test_container.py,168
-  tests/test_coverage_boost_final.py,328
+  tests/test_coverage_boost_final.py,334
   tests/test_cli_new_commands.py,359
   tests/test_dashboard_coverage.py,90
   tests/test_models.py,260
@@ -20,7 +21,7 @@ M[69]:
   tests/test_remote.py,283
   tests/test_detector.py,183
   tests/test_cli.py,373
-  scripts/fetch-logs.py,81
+  scripts/fetch-logs.py,127
   tests/e2e/test_p2p_workflow.py,286
   tests/e2e/test_full_workflow.py,243
   tests/e2e/test_v2_features.py,419
@@ -29,9 +30,9 @@ M[69]:
   src/clonebox/resources.py,167
   src/clonebox/resource_monitor.py,124
   src/clonebox/dashboard.py,136
-  src/clonebox/validator.py,1108
+  src/clonebox/validator.py,2
   src/clonebox/p2p.py,140
-  src/clonebox/cli.py,3898
+  src/clonebox/cli.py,3964
   src/clonebox/importer.py,167
   src/clonebox/detector.py,589
   src/clonebox/exporter.py,145
@@ -42,7 +43,7 @@ M[69]:
   src/clonebox/container.py,154
   src/clonebox/logging.py,99
   src/clonebox/orchestrator.py,444
-  src/clonebox/cloner.py,2293
+  src/clonebox/cloner.py,2541
   src/clonebox/rollback.py,137
   src/clonebox/monitor.py,218
   src/clonebox/models.py,180
@@ -51,7 +52,7 @@ M[69]:
   src/clonebox/secrets.py,266
   src/clonebox/backends/subprocess_runner.py,50
   src/clonebox/backends/qemu_disk.py,40
-  src/clonebox/backends/libvirt_backend.py,178
+  src/clonebox/backends/libvirt_backend.py,180
   src/clonebox/health/manager.py,264
   src/clonebox/health/__init__.py,15
   src/clonebox/health/models.py,152
@@ -66,11 +67,25 @@ M[69]:
   src/clonebox/interfaces/hypervisor.py,71
   src/clonebox/interfaces/disk.py,32
   src/clonebox/interfaces/network.py,25
-  src/clonebox/policies/engine.py,62
+  src/clonebox/validation/apps.py,262
+  src/clonebox/validation/validator.py,20
+  src/clonebox/validation/mounts.py,106
+  src/clonebox/validation/smoke.py,146
+  src/clonebox/validation/overall.py,216
+  src/clonebox/validation/__init__.py,1
+  src/clonebox/validation/services.py,105
+  src/clonebox/validation/disk.py,131
+  src/clonebox/validation/core.py,189
+  src/clonebox/validation/packages.py,97
+  src/clonebox/policies/engine.py,84
   src/clonebox/policies/__init__.py,12
   src/clonebox/policies/validators.py,19
   src/clonebox/policies/models.py,41
 D:
+  fix_qga.py:
+    i: os,sys,tempfile,shutil,pathlib.Path
+    e: create_fixed_cloudinit
+    create_fixed_cloudinit()->None
   tests/test_orchestrator.py:
     i: tempfile,pytest,yaml,clonebox.orchestrator.{OrchestratedVM,OrchestrationPlan,OrchestrationResult,Orchestrator},pathlib.Path,unittest.mock.{MagicMock,patch}
     e: TestOrchestratedVM,TestOrchestrator,TestOrchestrationPlan,TestOrchestrationResult,TestParallelStartGroups
@@ -212,9 +227,10 @@ D:
     TestCLIConstants: test_config_file_name(0)  # Test CLI constants.
     TestCLIIntegration: test_cli_help_commands(2),test_detect_json_output(3),test_detect_yaml_output(2),test_clone_creates_config_file(6),test_create_vm_from_config_propagates_disk_size(2)  # Integration tests for CLI commands.
   scripts/fetch-logs.py:
-    i: subprocess,json,sys,base64,time
-    e: qga_exec,main
+    i: subprocess,json,sys,base64,time,os,zlib
+    e: qga_exec,ssh_exec,main
     qga_exec(vm_name;conn_uri;command;timeout=10)->None
+    ssh_exec(vm_name;command;timeout=20)->None
     main()->None
   tests/e2e/test_p2p_workflow.py:
     i: os,shutil,subprocess,tempfile,pytest,clonebox.exporter.{SecureExporter,VMExporter},pathlib.Path,unittest.mock.{MagicMock,patch}
@@ -269,17 +285,13 @@ D:
     api_vms_json()->JSONResponse
     api_containers_json()->JSONResponse
     run_dashboard(port:int=8080)->None
-  src/clonebox/validator.py:
-    i: subprocess,json,base64,time,pathlib.Path,rich.console.Console,typing.{Dict,List,Optional,Tuple}
-    e: VMValidator
-    VMValidator: __init__(6),_exec_in_vm(2),_setup_in_progress(0),validate_mounts(0),validate_packages(0)  # Validates VM configuration against ex...
   src/clonebox/p2p.py:
     i: subprocess,tempfile,pathlib.Path,typing.Optional
     e: P2PManager
     P2PManager: __init__(1),_run_ssh(2),_run_scp(3),export_remote(6),import_remote(5)  # Manage P2P VM transfers between works...
   src/clonebox/cli.py:
-    i: argparse,json,os,re,sys,time,typing.{Any,Dict,Optional,Tuple}
-    e: print_banner,run_vm_diagnostics,cmd_watch,cmd_repair,cmd_logs,cmd_set_password,interactive_mode,cmd_create
+    i: argparse,json,os,re,secrets,sys,time,dataclasses.asdict,typing.{Any,Dict}
+    e: print_banner,run_vm_diagnostics,cmd_watch,cmd_repair,cmd_logs,cmd_set_password,interactive_mode,cmd_init
     print_banner()->None
     _resolve_vm_name_and_config_file(name:Optional[str])->Tuple[str, Optional[Path]]
     _qga_ping(vm_name:str;conn_uri:str)->bool
@@ -341,7 +353,7 @@ D:
     Orchestrator: __init__(4),from_file(3),cloner(0),_create_plan(0),_topological_sort(1)  # Orchestrate multiple VMs with depende...
     load_compose_file(path:Path)->Dict[str, Any]
   src/clonebox/cloner.py:
-    i: base64,json,logging,os,secrets,shutil,string,subprocess,tempfile,time
+    i: base64,json,logging,os,secrets,shutil,socket,string,subprocess,tempfile
     e: SNAP_INTERFACES,DEFAULT_SNAP_INTERFACES,VMConfig,SelectiveVMCloner
     VMConfig: to_dict(0)  # Configuration for the VM to create.
     SelectiveVMCloner: __init__(6),SYSTEM_IMAGES_DIR(0),USER_IMAGES_DIR(0),DEFAULT_BASE_IMAGE_URL(0),DEFAULT_BASE_IMAGE_FILENAME(0)  # Creates VMs with only selected applic...
@@ -466,12 +478,48 @@ D:
     i: abc.{ABC,abstractmethod},typing.{Any,Dict,Optional}
     e: NetworkManager
     NetworkManager: create_network(2),delete_network(1),network_exists(1),is_network_active(1),get_vm_ip(1)  # Abstract interface for network operat...
+  src/clonebox/validation/apps.py:
+    i: rich.panel.Panel,rich.table.Table,typing.{Dict,List,Optional}
+    e: AppValidationMixin
+    AppValidationMixin: validate_apps(0)
+  src/clonebox/validation/validator.py:
+    i: clonebox.validation.apps.AppValidationMixin,clonebox.validation.core.VMValidatorCore,clonebox.validation.disk.DiskValidationMixin,clonebox.validation.mounts.MountValidationMixin,clonebox.validation.overall.OverallValidationMixin,clonebox.validation.packages.PackageValidationMixin,clonebox.validation.services.ServiceValidationMixin,clonebox.validation.smoke.SmokeValidationMixin
+    e: VMValidator
+    VMValidator: 
+  src/clonebox/validation/mounts.py:
+    i: rich.table.Table,typing.Dict
+    e: MountValidationMixin
+    MountValidationMixin: validate_mounts(0)
+  src/clonebox/validation/smoke.py:
+    i: rich.table.Table,typing.{Dict,Optional}
+    e: SmokeValidationMixin
+    SmokeValidationMixin: validate_smoke_tests(0)
+  src/clonebox/validation/overall.py:
+    i: subprocess,time,rich.panel.Panel,rich.table.Table,typing.{Dict,Optional}
+    e: OverallValidationMixin
+    OverallValidationMixin: validate_all(0)
+  src/clonebox/validation/services.py:
+    i: rich.table.Table,typing.Dict
+    e: ServiceValidationMixin
+    ServiceValidationMixin: validate_services(0)
+  src/clonebox/validation/disk.py:
+    i: rich.table.Table,typing.{Dict,List,Optional,Tuple}
+    e: DiskValidationMixin
+    DiskValidationMixin: validate_disk_space(0),_print_disk_usage_breakdown(0)
+  src/clonebox/validation/core.py:
+    i: base64,json,shutil,subprocess,time,zlib,pathlib.Path,rich.console.Console,typing.{Dict,Optional}
+    e: VMValidatorCore
+    VMValidatorCore: __init__(6),_get_ssh_key_path(0),_get_ssh_port(0),_ssh_exec(2),_exec_in_vm(2)
+  src/clonebox/validation/packages.py:
+    i: rich.table.Table,typing.Dict
+    e: PackageValidationMixin
+    PackageValidationMixin: validate_packages(0),validate_snap_packages(0)
   src/clonebox/policies/engine.py:
-    i: yaml,dataclasses.dataclass,models.PolicyFile,pathlib.Path,typing.Optional,validators.{extract_hostname,is_host_allowed}
+    i: fnmatch,yaml,dataclasses.dataclass,models.PolicyFile,pathlib.Path,typing.{List,Optional},validators.{extract_hostname,is_host_allowed}
     e: PolicyValidationError,PolicyViolationError,DEFAULT_PROJECT_POLICY_FILES,DEFAULT_GLOBAL_POLICY_FILE,PolicyEngine
     PolicyValidationError: 
     PolicyViolationError: 
-    PolicyEngine: load(1),find_policy_file(1),load_effective(1),assert_url_allowed(1)
+    PolicyEngine: load(1),find_policy_file(1),load_effective(1),assert_url_allowed(1),_operation_matches(2)
   src/clonebox/policies/validators.py:
     i: fnmatch,typing.List,urllib.parse.urlparse
     e: extract_hostname,host_matches,is_host_allowed

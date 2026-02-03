@@ -1595,11 +1595,12 @@ fi
         elif auth_method == "one_time_password":
             otp, chpasswd_raw = SecretsManager.generate_one_time_password()
             chpasswd_config = chpasswd_raw
+            # Use list format to avoid YAML parsing colons as key-value separators
             bootcmd_extra = [
-                '  - echo "===================="',
-                f'  - echo "ONE-TIME PASSWORD: {otp}"',
-                '  - echo "You MUST change this on first login!"',
-                '  - echo "===================="',
+                '  - ["echo", "===================="]',
+                f'  - ["echo", "ONE-TIME PASSWORD = {otp}"]',
+                '  - ["echo", "You MUST change this on first login!"]',
+                '  - ["echo", "===================="]',
             ]
             lock_passwd = "false"
             ssh_pwauth = "true"
@@ -1616,10 +1617,13 @@ fi
         cloudinit_dir = vm_dir / "cloud-init"
         cloudinit_dir.mkdir(exist_ok=True)
 
-        # Meta-data
+        # Meta-data - include network config disabled to let Ubuntu's default handle DHCP
         instance_id = f"{config.name}-{uuid.uuid4().hex}"
         meta_data = f"instance-id: {instance_id}\nlocal-hostname: {config.name}\n"
         (cloudinit_dir / "meta-data").write_text(meta_data)
+
+        # Don't create network-config file - let Ubuntu cloud image's default netplan handle DHCP
+        # The default /etc/netplan/50-cloud-init.yaml should configure DHCP on all interfaces
 
         # Generate mount commands and fstab entries for 9p filesystems
         bind_mount_commands = []
@@ -1714,6 +1718,30 @@ fi
 
         # wants_chrome moved to top of method to avoid NameError
 
+        # Network setup for passt/user-mode networking (must be first!)
+        # This ensures network is configured before any package installs
+        if user_session:
+            runcmd_lines.append("  - echo '[0/10] 🌐 Configuring network for user-mode (passt)...'")
+            runcmd_lines.append("  - |")
+            runcmd_lines.append("    NIC=$(ip -o link show | grep -E 'enp|eth' | grep -v 'lo:' | head -1 | awk -F': ' '{print $2}')")
+            runcmd_lines.append("    if [ -n \"$NIC\" ]; then")
+            runcmd_lines.append("      echo \"  → Found interface: $NIC\"")
+            runcmd_lines.append("      # Check if already has IPv4")
+            runcmd_lines.append("      if ! ip addr show $NIC | grep -q 'inet 10\\.'; then")
+            runcmd_lines.append("        echo \"  → No IPv4 address, configuring manually for passt...\"")
+            runcmd_lines.append("        ip addr add 10.0.2.15/24 dev $NIC 2>/dev/null || true")
+            runcmd_lines.append("        ip link set $NIC up")
+            runcmd_lines.append("        ip route add default via 10.0.2.2 2>/dev/null || true")
+            runcmd_lines.append("        echo 'nameserver 10.0.2.3' > /etc/resolv.conf")
+            runcmd_lines.append("        echo \"  → ✓ Network configured: 10.0.2.15/24\"")
+            runcmd_lines.append("      else")
+            runcmd_lines.append("        echo \"  → ✓ Network already configured via DHCP\"")
+            runcmd_lines.append("      fi")
+            runcmd_lines.append("    else")
+            runcmd_lines.append("      echo \"  → ⚠️ No network interface found\"")
+            runcmd_lines.append("    fi")
+            runcmd_lines.append("  - echo ''")
+
         # Add detailed logging header
         runcmd_lines.append("  - echo '═══════════════════════════════════════════════════════════'")
         runcmd_lines.append("  - echo '           CloneBox VM Installation Progress'")
@@ -1735,6 +1763,24 @@ fi
             # Check space before starting
             runcmd_lines.append("  - if [ $(df / --output=avail | tail -n 1) -lt 524288 ]; then echo '  → ⚠️  WARNING: Low disk space (<512MB) before APT install'; fi")
             runcmd_lines.append("  - echo '  → Updating package repositories...'")
+            if user_session:
+                runcmd_lines.append("  - echo '  → Ensuring DNS resolver is configured (user-mode networking)...'")
+                runcmd_lines.append(
+                    "  - mkdir -p /etc/systemd/resolved.conf.d || true"
+                )
+                runcmd_lines.append(
+                    "  - printf '[Resolve]\\nDNS=1.1.1.1 8.8.8.8\\nFallbackDNS=1.0.0.1 8.8.4.4\\n' > /etc/systemd/resolved.conf.d/clonebox.conf || true"
+                )
+                runcmd_lines.append("  - systemctl restart systemd-resolved || true")
+                runcmd_lines.append(
+                    "  - if [ -L /etc/resolv.conf ]; then rm -f /etc/resolv.conf; fi"
+                )
+                runcmd_lines.append(
+                    "  - if ! grep -q '^nameserver' /etc/resolv.conf 2>/dev/null; then printf 'nameserver 1.1.1.1\\nnameserver 8.8.8.8\\noptions timeout:1 attempts:5\\n' > /etc/resolv.conf; fi"
+                )
+                runcmd_lines.append(
+                    "  - timeout 60 sh -c 'until getent hosts archive.ubuntu.com >/dev/null 2>&1; do sleep 2; done' || true"
+                )
             runcmd_lines.append("  - apt-get update")
             for i, pkg in enumerate(all_packages, 1):
                 runcmd_lines.append(f"  - echo '  → [{i}/{len(all_packages)}] Installing {pkg}...'")
@@ -2680,11 +2726,41 @@ if __name__ == "__main__":
 
         runcmd_yaml = "\n".join(runcmd_lines) if runcmd_lines else ""
         
-        # Build bootcmd combining mount commands and extra security bootcmds
+        # Helper to log to consoles
+        # We explicitly redirect to ttyS0 (console) and ttyS1 (serial.log) to ensure visibility
+        log_cmd = 'echo "[clonebox] $1" | tee /dev/ttyS0'
+        if user_session:
+            log_cmd += ' > /dev/ttyS1'
+        log_cmd += ' || true'
+
         bootcmd_lines = [
-            "  - sh -c 'echo \"[clonebox] bootcmd: enabling serial console (ttyS0)\" > /dev/ttyS0 || true'",
-            '  - systemctl enable --now serial-getty@ttyS0.service >/dev/null 2>&1 || true',
+            f'  - ["sh", "-c", "{log_cmd.replace("$1", "bootcmd - starting configuration")}"]',
+            '  - ["systemctl", "enable", "--now", "serial-getty@ttyS0.service"]',
         ]
+        
+        # Add network fallback for passt/user networking (10.0.2.x range)
+        # This ensures network works even if DHCP fails or is slow
+        if user_session:
+            # More robust network setup that won't hang
+            net_fallback = (
+                "NIC=$(ip -o link show | grep -E 'enp|eth' | head -1 | cut -d: -f2 | tr -d ' '); "
+                "if [ -z \"$NIC\" ]; then "
+                f"  {log_cmd.replace('$1', 'No NIC found')}; "
+                "else "
+                "  ip addr show $NIC | grep -q 'inet ' || ( "
+                f"    {log_cmd.replace('$1', 'Configuring $NIC with 10.0.2.15')}; "
+                "    ip addr add 10.0.2.15/24 dev $NIC 2>/dev/null; "
+                "    ip link set $NIC up; "
+                "    ip route add default via 10.0.2.2 2>/dev/null; "
+                "    echo nameserver 10.0.2.3 > /etc/resolv.conf "
+                "  ); "
+                "fi"
+            )
+            bootcmd_lines.extend([
+                f'  - ["sh", "-c", "{log_cmd.replace("$1", "Checking network...")}"]',
+                f'  - ["sh", "-c", "{net_fallback}"]',
+            ])
+        
         if bootcmd_extra:
             bootcmd_lines.extend(list(bootcmd_extra))
             
@@ -2713,6 +2789,8 @@ users:
             user_data_header += f"\n{chpasswd_config}\n"
             
         user_data_header += f"ssh_pwauth: {ssh_pwauth}\n"
+
+        # No write_files needed - we'll use bootcmd to configure network directly
 
         output_targets = "/dev/ttyS0"
         if user_session:
@@ -2748,6 +2826,23 @@ final_message: "CloneBox VM is ready after $UPTIME seconds"
 
         # Create ISO
         iso_path = vm_dir / "cloud-init.iso"
+
+        network_config = """version: 2
+ethernets:
+  id0:
+    match:
+      driver: "virtio_net"
+    dhcp4: true
+    dhcp6: false
+    optional: true
+"""
+        (cloudinit_dir / "network-config").write_text(network_config)
+
+        iso_files = [
+            str(cloudinit_dir / "user-data"),
+            str(cloudinit_dir / "network-config"),
+        ]
+
         subprocess.run(
             [
                 "genisoimage",
@@ -2757,9 +2852,7 @@ final_message: "CloneBox VM is ready after $UPTIME seconds"
                 "cidata",
                 "-joliet",
                 "-rock",
-                str(cloudinit_dir / "user-data"),
-                str(cloudinit_dir / "meta-data"),
-            ],
+            ] + iso_files,
             check=True,
             capture_output=True,
         )
@@ -2831,6 +2924,68 @@ final_message: "CloneBox VM is ready after $UPTIME seconds"
                 log("[dim]   Install it with: sudo apt install virt-viewer[/]")
 
         return True
+
+    def wait_for_setup(self, vm_name: str, timeout_mins: int = 15, console=None) -> bool:
+        """Wait for the VM to complete setup by monitoring serial.log."""
+        import time
+        from rich.live import Live
+        from rich.panel import Panel
+        from rich.text import Text
+
+        def log(msg):
+            if console:
+                console.print(msg)
+            else:
+                print(msg)
+
+        vm_dir = self.get_images_dir() / vm_name
+        serial_log_path = vm_dir / "serial.log"
+        
+        # Ensure log file exists or wait for it
+        start_wait = time.time()
+        while not serial_log_path.exists() and time.time() - start_wait < 30:
+            time.sleep(1)
+        
+        if not serial_log_path.exists():
+            log(f"[yellow]⚠️  Serial log not found at {serial_log_path}. Cannot monitor progress.[/]")
+            return False
+
+        log(f"[cyan]⏳ Monitoring VM setup progress (timeout: {timeout_mins}m)...[/]")
+        
+        last_pos = 0
+        setup_complete = False
+        start_time = time.time()
+        timeout_secs = timeout_mins * 60
+
+        with open(serial_log_path, "r") as f:
+            while time.time() - start_time < timeout_secs:
+                f.seek(last_pos)
+                new_data = f.read()
+                if new_data:
+                    last_pos = f.tell()
+                    # Print new lines to console
+                    if console:
+                        # Clean up escape sequences if any, but keep it simple for now
+                        console.print(new_data, end="")
+                    else:
+                        print(new_data, end="")
+
+                    if "CloneBox VM is ready" in new_data or "HEALTH_STATUS=OK" in new_data:
+                        setup_complete = True
+                        break
+                    
+                    if "HEALTH_STATUS=FAILED" in new_data:
+                        log("[red]❌ VM setup failed (detected in logs)[/]")
+                        return False
+
+                time.sleep(1)
+        
+        if setup_complete:
+            log(f"\n[green]✅ VM setup completed successfully![/]")
+            return True
+        else:
+            log(f"\n[yellow]⚠️  Timeout waiting for VM setup to complete.[/]")
+            return False
 
     def stop_vm(self, vm_name: str, force: bool = False, console=None) -> bool:
         """Stop a VM."""
