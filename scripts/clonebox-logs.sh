@@ -77,27 +77,28 @@ if [ "$USE_QGA" = "true" ]; then
     echo ""
     
     read -p "Select option: " choice
+    echo ""
     
     case "$choice" in
         1)
             echo "📄 Boot diagnostic log:"
             echo "======================"
-            less "$TEMP_DIR/clonebox-boot.log"
+            [ -f "$TEMP_DIR/clonebox-boot.log" ] && cat "$TEMP_DIR/clonebox-boot.log" || echo "Log not found"
             ;;
         2)
             echo "📄 Monitor log:"
             echo "==============="
-            less "$TEMP_DIR/clonebox-monitor.log"
+            [ -f "$TEMP_DIR/clonebox-monitor.log" ] && cat "$TEMP_DIR/clonebox-monitor.log" || echo "Log not found"
             ;;
         3)
             echo "📄 Cloud-init output log:"
             echo "========================"
-            less "$TEMP_DIR/cloud-init-output.log"
+            [ -f "$TEMP_DIR/cloud-init-output.log" ] && cat "$TEMP_DIR/cloud-init-output.log" || echo "Log not found"
             ;;
         4)
             echo "📄 Cloud-init log:"
             echo "=================="
-            less "$TEMP_DIR/cloud-init.log"
+            [ -f "$TEMP_DIR/cloud-init.log" ] && cat "$TEMP_DIR/cloud-init.log" || echo "Log not found"
             ;;
         5)
             echo "📊 Logs summary:"

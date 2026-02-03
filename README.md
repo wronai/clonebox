@@ -318,7 +318,7 @@ Simply run `clonebox` to start the interactive wizard:
 ```bash
 clonebox
 
-clonebox clone . --user --run --replace --base-image ~/ubuntu-22.04-cloud.qcow2 --disk-size-gb 30
+clonebox clone . --user --run --replace --base-image ~/ubuntu-22.04-cloud.qcow2 --disk-size-gb 60
 # Sprawdź diagnostykę na żywo
 clonebox watch . --user
 

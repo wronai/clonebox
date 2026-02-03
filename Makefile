@@ -23,6 +23,17 @@ help:
 	@echo "  publish      Build and upload to PyPI"
 	@echo "  docs         Generate documentation"
 	@echo "  run          Run clonebox (interactive mode)"
+	@echo ""
+	@echo "CloneBox commands (after installation):"
+	@echo "  init         Initialize a new CloneBox configuration"
+	@echo "  clone        Generate clone config from path"
+	@echo "  create       Create VM from config"
+	@echo "  start        Start a VM"
+	@echo "  stop         Stop a VM"
+	@echo "  delete       Delete a VM"
+	@echo "  list         List all VMs"
+	@echo "  detect       Detect system state"
+	@echo "  test         Test VM configuration"
 
 # Installation
 install:
@@ -33,6 +44,24 @@ install:
 		python3 -m venv .venv; \
 		.venv/bin/pip install -e . --upgrade; \
 	fi
+	@echo "Creating wrapper script..."
+	@echo '#!/bin/bash' > clonebox.sh
+	@echo 'DIR="$$(cd "$$(dirname "$${BASH_SOURCE[0]}")" && pwd)"' >> clonebox.sh
+	@echo 'if [ -d "$$DIR/.venv" ]; then' >> clonebox.sh
+	@echo '    "$$DIR/.venv/bin/python" -m clonebox "$$@"' >> clonebox.sh
+	@echo 'else' >> clonebox.sh
+	@echo '    echo "Error: Virtual environment not found. Please run make install first." >&2' >> clonebox.sh
+	@echo '    exit 1' >> clonebox.sh
+	@echo 'fi' >> clonebox.sh
+	@chmod +x clonebox.sh
+	@echo "✅ Installation complete!"
+	@echo ""
+	@echo "You can now run CloneBox using:"
+	@echo "  ./clonebox.sh <command>"
+	@echo ""
+	@echo "Or activate the virtual environment:"
+	@echo "  source .venv/bin/activate"
+	@echo "  clonebox <command>"
 
 install-dev:
 	@if [ -d ".venv" ]; then \
@@ -149,6 +178,7 @@ clean:
 	rm -rf htmlcov/
 	find . -type d -name __pycache__ -exec rm -rf {} +
 	find . -type f -name "*.pyc" -delete
+	rm -f clonebox.sh
 
 build: clean
 	@if [ -d ".venv" ]; then \

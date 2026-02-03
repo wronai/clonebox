@@ -992,6 +992,56 @@ def interactive_mode():
         raise
 
 
+def cmd_init(args):
+    """Initialize a new CloneBox configuration."""
+    from pathlib import Path
+    
+    config_path = Path(args.path) if args.path else Path.cwd() / CLONEBOX_CONFIG_FILE
+    
+    # If path is a directory, use .clonebox.yaml
+    if config_path.is_dir():
+        config_path = config_path / CLONEBOX_CONFIG_FILE
+    
+    # Check if config already exists
+    if config_path.exists() and not args.force:
+        console.print(f"[red]❌ Configuration already exists: {config_path}[/]")
+        console.print("[dim]Use --force to overwrite[/]")
+        return
+    
+    # Create default configuration
+    default_config = {
+        "version": "1",
+        "generated": datetime.now().isoformat(),
+        "vm": {
+            "name": args.name or "clonebox-vm",
+            "ram_mb": args.ram or 4096,
+            "vcpus": args.vcpus or 4,
+            "disk_size_gb": args.disk_size_gb or 20,
+            "gui": not args.no_gui,
+            "base_image": args.base_image,
+            "network_mode": args.network or "auto",
+            "username": "ubuntu",
+            "password": "ubuntu",
+        },
+        "paths": {},
+        "packages": [],
+        "snap_packages": [],
+        "services": [],
+        "post_commands": [],
+        "copy_paths": {},
+    }
+    
+    # Save configuration
+    with open(config_path, "w") as f:
+        yaml.dump(default_config, f, default_flow_style=False, allow_unicode=True, sort_keys=False)
+    
+    console.print(f"[green]✅ Initialized CloneBox configuration: {config_path}[/]")
+    console.print("\n[dim]Next steps:[/]")
+    console.print(f"  1. Edit the configuration: [cyan]nano {config_path}[/]")
+    console.print(f"  2. Create VM: [cyan]clonebox create -c {config_path}[/]")
+    console.print(f"  3. Or use: [cyan]clonebox start {config_path.parent}[/]")
+
+
 def cmd_create(args):
     """Create VM from JSON config."""
     config_data = json.loads(args.config)
@@ -4040,6 +4090,21 @@ def main():
 
     # Interactive mode (default)
     parser.set_defaults(func=lambda args: interactive_mode())
+
+    # Init command
+    init_parser = subparsers.add_parser("init", help="Initialize a new CloneBox configuration")
+    init_parser.add_argument(
+        "path", nargs="?", default=None, help="Path for config file (default: ./.clonebox.yaml)"
+    )
+    init_parser.add_argument("--name", "-n", help="VM name (default: clonebox-vm)")
+    init_parser.add_argument("--ram", type=int, help="RAM in MB (default: 4096)")
+    init_parser.add_argument("--vcpus", type=int, help="Number of vCPUs (default: 4)")
+    init_parser.add_argument("--disk-size-gb", type=int, help="Root disk size in GB (default: 20)")
+    init_parser.add_argument("--base-image", help="Path to base qcow2 image")
+    init_parser.add_argument("--no-gui", action="store_true", help="Disable SPICE graphics")
+    init_parser.add_argument("--network", help="Network mode (default: auto)")
+    init_parser.add_argument("--force", "-f", action="store_true", help="Overwrite existing config")
+    init_parser.set_defaults(func=cmd_init)
 
     # Create command
     create_parser = subparsers.add_parser("create", help="Create VM from config")

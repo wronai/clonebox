@@ -1,3 +1,27 @@
+## [1.1.24] - 2026-02-03
+
+### Summary
+
+fix(build): CLI interface improvements
+
+### Core
+
+- update src/clonebox/cli.py
+
+### Docs
+
+- docs: update README
+
+### Other
+
+- build: update Makefile
+- scripts: update clonebox.sh
+- scripts: update debug_qga.sh
+- update fix_qga.py
+- scripts: update manual_qga_fix.sh
+- scripts: update clonebox-logs.sh
+
+
 ## [1.1.23] - 2026-02-02
 
 ### Summary
