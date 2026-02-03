@@ -1548,6 +1548,10 @@ fi
 
         return ET.tostring(root, encoding="unicode")
 
+    def _yaml_single_quote(self, s: str) -> str:
+        """Escape a string for single-quoted YAML value."""
+        return "'" + s.replace("'", "''") + "'"
+
     def _create_cloudinit_iso(self, vm_dir: Path, config: VMConfig, user_session: bool = False) -> Path:
         """Create cloud-init ISO with secure credential handling."""
         secrets_mgr = SecretsManager()
@@ -1722,11 +1726,11 @@ fi
         if user_session:
             runcmd_lines.append("  - echo '[0/10] 🌐 Configuring network for user-mode (passt)...'")
             runcmd_lines.append("  - |")
-            runcmd_lines.append("    NIC=$(ip -o link show | grep -E 'enp|eth' | grep -v 'lo:' | head -1 | awk -F': ' '{print $2}')")
+            runcmd_lines.append("    NIC=$(ip -o link show | grep -E 'enp|eth' | grep -v 'lo:' | head -1 | awk -F': ' '{print $2}' | tr -d ' ') ")
             runcmd_lines.append("    if [ -n \"$NIC\" ]; then")
             runcmd_lines.append("      echo \"  → Found interface: $NIC\"")
             runcmd_lines.append("      # Check if already has IPv4")
-            runcmd_lines.append("      if ! ip addr show $NIC | grep -q 'inet 10\\.'; then")
+            runcmd_lines.append("      if ! ip addr show $NIC | grep -q 'inet '; then")
             runcmd_lines.append("        echo \"  → No IPv4 address, configuring manually for passt...\"")
             runcmd_lines.append("        ip addr add 10.0.2.15/24 dev $NIC 2>/dev/null || true")
             runcmd_lines.append("        ip link set $NIC up")
@@ -1734,7 +1738,7 @@ fi
             runcmd_lines.append("        echo 'nameserver 10.0.2.3' > /etc/resolv.conf")
             runcmd_lines.append("        echo \"  → ✓ Network configured: 10.0.2.15/24\"")
             runcmd_lines.append("      else")
-            runcmd_lines.append("        echo \"  → ✓ Network already configured via DHCP\"")
+            runcmd_lines.append("        echo \"  → ✓ Network already configured\"")
             runcmd_lines.append("      fi")
             runcmd_lines.append("    else")
             runcmd_lines.append("      echo \"  → ⚠️ No network interface found\"")
@@ -2728,20 +2732,23 @@ if __name__ == "__main__":
         # Helper to log to console
         log_cmd = "echo '[clonebox] $1' > /dev/ttyS0 || true"
 
-        bootcmd_lines = [
-            f'  - ["sh", "-c", "{log_cmd.replace("$1", "bootcmd - starting configuration")}"]',
-            '  - ["systemctl", "enable", "--now", "serial-getty@ttyS0.service"]',
+        # bootcmd needs to be a list of lists or list of strings
+        # We'll use list of lists for maximum compatibility
+        bootcmd_list = [
+            ["sh", "-c", log_cmd.replace("$1", "bootcmd - starting configuration")],
+            ["systemctl", "enable", "--now", "serial-getty@ttyS0.service"],
         ]
         
         # Add network fallback for passt/user networking (10.0.2.x range)
         if user_session:
+            # More robust NIC detection
             net_fallback = (
-                "NIC=$(ip -o link show | grep -E 'enp|eth' | head -1 | cut -d: -f2 | tr -d ' '); "
+                "NIC=$(ip -o link show | grep -E 'enp|eth' | head -1 | awk -F': ' '{print $2}' | tr -d ' '); "
                 "if [ -z \"$NIC\" ]; then "
-                "  echo \"[clonebox] No NIC found\" > /dev/ttyS0 || true; "
+                f"  {log_cmd.replace('$1', 'No NIC found')}; "
                 "else "
-                "  ip addr show $NIC | grep -q \"inet \" || ( "
-                "    echo \"[clonebox] Configuring $NIC with 10.0.2.15\" > /dev/ttyS0 || true; "
+                "  ip addr show $NIC | grep -q 'inet ' || ( "
+                f"    {log_cmd.replace('$1', 'Configuring $NIC with 10.0.2.15')}; "
                 "    ip addr add 10.0.2.15/24 dev $NIC 2>/dev/null; "
                 "    ip link set $NIC up; "
                 "    ip route add default via 10.0.2.2 2>/dev/null; "
@@ -2749,19 +2756,35 @@ if __name__ == "__main__":
                 "  ); "
                 "fi"
             )
-            bootcmd_lines.extend(
-                [
-                    f"  - {_yaml_single_quote('echo "[clonebox] Checking network..." > /dev/ttyS0 || true')}",
-                    f"  - {_yaml_single_quote(net_fallback)}",
-                ]
-            )
+            bootcmd_list.extend([
+                ["sh", "-c", log_cmd.replace("$1", "Checking network...")],
+                ["sh", "-c", net_fallback],
+            ])
         
         if bootcmd_extra:
-            bootcmd_lines.extend(list(bootcmd_extra))
+            # bootcmd_extra might be list of strings or list of lists
+            import yaml
+            for extra in bootcmd_extra:
+                try:
+                    # If it looks like a YAML list item, parse it
+                    if isinstance(extra, str) and extra.strip().startswith("["):
+                        parsed = yaml.safe_load(extra)
+                        if isinstance(parsed, list):
+                            bootcmd_list.append(parsed)
+                        else:
+                            bootcmd_list.append(["sh", "-c", extra])
+                    else:
+                        bootcmd_list.append(["sh", "-c", extra])
+                except:
+                    bootcmd_list.append(["sh", "-c", str(extra)])
             
         bootcmd_block = ""
-        if bootcmd_lines:
-            bootcmd_block = "\nbootcmd:\n" + "\n".join(bootcmd_lines) + "\n"
+        if bootcmd_list:
+            import yaml
+            # Convert list of lists to YAML block
+            bootcmd_yaml = yaml.dump(bootcmd_list, default_flow_style=None)
+            # Indent for the cloud-config
+            bootcmd_block = "\nbootcmd:\n" + "\n".join("  " + line for line in bootcmd_yaml.strip().splitlines()) + "\n"
 
         # User-data components
         user_data_header = f"""#cloud-config
