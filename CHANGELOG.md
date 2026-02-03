@@ -1,3 +1,20 @@
+## [1.1.28] - 2026-02-03
+
+### Summary
+
+refactor(scripts): configuration management system
+
+### Core
+
+- update src/clonebox/cloner.py
+
+### Other
+
+- scripts: update clonebox.sh
+- config: update clonebox.yaml
+- update scripts/fix_interface_name.py
+
+
 ## [1.1.26] - 2026-02-03
 
 ### Summary
