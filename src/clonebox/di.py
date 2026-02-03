@@ -161,8 +161,10 @@ def create_default_container() -> DependencyContainer:
     from .backends.libvirt_backend import LibvirtBackend
     from .backends.qemu_disk import QemuDiskManager
     from .backends.subprocess_runner import SubprocessRunner
+    from .backends.libvirt_network import LibvirtNetworkManager
     from .interfaces.disk import DiskManager
     from .interfaces.hypervisor import HypervisorBackend
+    from .interfaces.network import NetworkManager
     from .interfaces.process import ProcessRunner
     from .secrets import SecretsManager
 
@@ -170,6 +172,7 @@ def create_default_container() -> DependencyContainer:
 
     container.register(HypervisorBackend, LibvirtBackend)
     container.register(DiskManager, QemuDiskManager)
+    container.register(NetworkManager, LibvirtNetworkManager)
     container.register(ProcessRunner, SubprocessRunner)
     container.register(SecretsManager, SecretsManager)
 
