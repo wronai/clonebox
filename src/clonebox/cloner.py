@@ -2740,7 +2740,7 @@ if __name__ == "__main__":
                 "if [ -z \"$NIC\" ]; then "
                 "  echo \"[clonebox] No NIC found\" > /dev/ttyS0 || true; "
                 "else "
-                "  ip addr show $NIC | grep -q \"inet \\" || ( "
+                "  ip addr show $NIC | grep -q \"inet \" || ( "
                 "    echo \"[clonebox] Configuring $NIC with 10.0.2.15\" > /dev/ttyS0 || true; "
                 "    ip addr add 10.0.2.15/24 dev $NIC 2>/dev/null; "
                 "    ip link set $NIC up; "
