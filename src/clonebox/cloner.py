@@ -1567,7 +1567,7 @@ fi
         auth_method = getattr(config, "auth_method", "ssh_key")
 
         ssh_authorized_keys = []
-        chpasswd_config = ""
+        chpasswd_config_dict = {}
         lock_passwd = "true"
         ssh_pwauth = "false"
         bootcmd_extra = []
@@ -1586,24 +1586,32 @@ fi
 
             local_password = getattr(config, "password", None)
             if getattr(config, "gui", False) and local_password:
-                chpasswd_config = (
-                    "chpasswd:\n"
-                    "  list: |\n"
-                    f"    {config.username}:{local_password}\n"
-                    "  expire: False"
-                )
+                chpasswd_config_dict = {
+                    "list": f"{config.username}:{local_password}\n",
+                    "expire": False
+                }
                 lock_passwd = "false"
                 ssh_pwauth = "true"
 
         elif auth_method == "one_time_password":
             otp, chpasswd_raw = SecretsManager.generate_one_time_password()
-            chpasswd_config = chpasswd_raw
-            # Use list format to avoid YAML parsing colons as key-value separators
+            # chpasswd_raw is a full YAML block string, we need to parse it or set it directly
+            import yaml
+            try:
+                parsed = yaml.safe_load(chpasswd_raw)
+                if isinstance(parsed, dict) and "chpasswd" in parsed:
+                    chpasswd_config_dict = parsed["chpasswd"]
+                else:
+                    chpasswd_config_dict = parsed
+            except:
+                # Fallback if parsing fails
+                chpasswd_config_dict = {"list": f"{config.username}:{otp}\n", "expire": False}
+            
             bootcmd_extra = [
-                '  - ["echo", "===================="]',
-                f'  - ["echo", "ONE-TIME PASSWORD = {otp}"]',
-                '  - ["echo", "You MUST change this on first login!"]',
-                '  - ["echo", "===================="]',
+                '["echo", "===================="]',
+                f'["echo", "ONE-TIME PASSWORD = {otp}"]',
+                '["echo", "You MUST change this on first login!"]',
+                '["echo", "===================="]',
             ]
             lock_passwd = "false"
             ssh_pwauth = "true"
@@ -1612,7 +1620,10 @@ fi
         else:
             # Fallback to legacy password from environment/secrets
             password = secrets_mgr.get("VM_PASSWORD") or getattr(config, "password", "ubuntu")
-            chpasswd_config = f"chpasswd:\n  list: |\n    {config.username}:{password}\n  expire: False"
+            chpasswd_config_dict = {
+                "list": f"{config.username}:{password}\n",
+                "expire": False
+            }
             lock_passwd = "false"
             ssh_pwauth = "true"
             log.warning("DEPRECATED: Using password authentication. Switch to 'ssh_key' for better security.")
@@ -2732,112 +2743,126 @@ if __name__ == "__main__":
         # Helper to log to console
         log_cmd = "echo '[clonebox] $1' > /dev/ttyS0 || true"
 
-        # bootcmd needs to be a list of lists or list of strings
-        # We'll use list of lists for maximum compatibility
+        # bootcmd standardization
         bootcmd_list = [
             ["sh", "-c", log_cmd.replace("$1", "bootcmd - starting configuration")],
             ["systemctl", "enable", "--now", "serial-getty@ttyS0.service"],
         ]
         
-        # Add network fallback for passt/user networking (10.0.2.x range)
         if user_session:
-            # More robust NIC detection
-            net_fallback = (
-                "NIC=$(ip -o link show | grep -E 'enp|eth' | head -1 | awk -F': ' '{print $2}' | tr -d ' '); "
-                "if [ -z \"$NIC\" ]; then "
-                f"  {log_cmd.replace('$1', 'No NIC found')}; "
-                "else "
+            # Enhanced network fallback for user-mode (passt)
+            # We do this in bootcmd to have network as early as possible for packages
+            net_setup_cmd = (
+                "NIC=$(ip -o link show | grep -E 'enp|eth' | grep -v 'lo' | head -1 | awk -F': ' '{print $2}' | tr -d ' '); "
+                "if [ -n \"$NIC\" ]; then "
+                f"  {log_cmd.replace('$1', 'Found NIC: $NIC')}; "
                 "  ip addr show $NIC | grep -q 'inet ' || ( "
-                f"    {log_cmd.replace('$1', 'Configuring $NIC with 10.0.2.15')}; "
+                f"    {log_cmd.replace('$1', 'Manual network config for $NIC')}; "
                 "    ip addr add 10.0.2.15/24 dev $NIC 2>/dev/null; "
                 "    ip link set $NIC up; "
                 "    ip route add default via 10.0.2.2 2>/dev/null; "
                 "    echo nameserver 10.0.2.3 > /etc/resolv.conf "
                 "  ); "
+                "else "
+                f"  {log_cmd.replace('$1', 'No NIC found for network setup')}; "
                 "fi"
             )
             bootcmd_list.extend([
-                ["sh", "-c", log_cmd.replace("$1", "Checking network...")],
-                ["sh", "-c", net_fallback],
+                ["sh", "-c", log_cmd.replace("$1", "Running network fallback...")],
+                ["sh", "-c", net_setup_cmd],
             ])
         
         if bootcmd_extra:
-            # bootcmd_extra might be list of strings or list of lists
-            import yaml
             for extra in bootcmd_extra:
-                try:
-                    # If it looks like a YAML list item, parse it
-                    if isinstance(extra, str) and extra.strip().startswith("["):
-                        parsed = yaml.safe_load(extra)
-                        if isinstance(parsed, list):
-                            bootcmd_list.append(parsed)
-                        else:
-                            bootcmd_list.append(["sh", "-c", extra])
+                if isinstance(extra, list):
+                    bootcmd_list.append(extra)
+                elif isinstance(extra, str):
+                    if extra.strip().startswith("["):
+                        try:
+                            # Use top-level json import
+                            bootcmd_list.append(json.loads(extra))
+                        except:
+                            bootcmd_list.append(["sh", "-c", extra.strip("- ")])
                     else:
-                        bootcmd_list.append(["sh", "-c", extra])
-                except:
-                    bootcmd_list.append(["sh", "-c", str(extra)])
+                        bootcmd_list.append(["sh", "-c", extra.strip("- ")])
             
         bootcmd_block = ""
         if bootcmd_list:
             import yaml
-            # Convert list of lists to YAML block
-            bootcmd_yaml = yaml.dump(bootcmd_list, default_flow_style=None)
-            # Indent for the cloud-config
-            bootcmd_block = "\nbootcmd:\n" + "\n".join("  " + line for line in bootcmd_yaml.strip().splitlines()) + "\n"
+            # Use yaml.dump for the whole block to ensure perfect formatting
+            # cloud-init is very picky about indentation and types
+            bootcmd_yaml = yaml.dump({"bootcmd": bootcmd_list}, default_flow_style=False)
+            bootcmd_block = "\n" + bootcmd_yaml + "\n"
 
         # User-data components
-        user_data_header = f"""#cloud-config
-hostname: {config.name}
-manage_etc_hosts: true
-
-users:
-  - name: {config.username}
-    sudo: ALL=(ALL) NOPASSWD:ALL
-    shell: /bin/bash
-    groups: sudo,adm,dialout,cdrom,floppy,audio,dip,video,plugdev,netdev,docker
-    lock_passwd: {lock_passwd}
-"""
-        if ssh_authorized_keys:
-            user_data_header += "    ssh_authorized_keys:\n"
-            for key in ssh_authorized_keys:
-                user_data_header += f"      - {key}\n"
-        
-        if chpasswd_config:
-            user_data_header += f"\n{chpasswd_config}\n"
-            
-        user_data_header += f"ssh_pwauth: {ssh_pwauth}\n"
-
         # No write_files needed - we'll use bootcmd to configure network directly
 
         output_targets = "/dev/ttyS0"
 
-        # Assemble final user-data
-        user_data = f"""{user_data_header}
-# Make sure root partition + filesystem grows to fill the qcow2 disk size
-growpart:
-  mode: auto
-  devices: ["/"]
-  ignore_growroot_disabled: false
-resize_rootfs: true
+        # Build the cloud-config dictionary
+        cloud_config = {
+            "hostname": config.name,
+            "manage_etc_hosts": True,
+            "users": [
+                {
+                    "name": config.username,
+                    "sudo": "ALL=(ALL) NOPASSWD:ALL",
+                    "shell": "/bin/bash",
+                    "groups": "sudo,adm,dialout,cdrom,floppy,audio,dip,video,plugdev,netdev,docker",
+                    "lock_passwd": lock_passwd == "true",
+                }
+            ],
+            "ssh_pwauth": ssh_pwauth == "true",
+            "growpart": {
+                "mode": "auto",
+                "devices": ["/"],
+                "ignore_growroot_disabled": False,
+            },
+            "resize_rootfs": True,
+            "package_update": True,
+            "package_upgrade": False,
+            "output": {
+                "all": f'| tee -a /var/log/cloud-init-output.log {output_targets}'
+            },
+            "final_message": "CloneBox VM is ready after $UPTIME seconds",
+        }
 
-# Update package cache and upgrade
-package_update: true
-package_upgrade: false
+        if ssh_authorized_keys:
+            cloud_config["users"][0]["ssh_authorized_keys"] = ssh_authorized_keys
 
-output:
-  all: "| tee -a /var/log/cloud-init-output.log {output_targets}"
-{bootcmd_block}
+        if chpasswd_config_dict:
+            # Modern way is to put it in the user object or use the chpasswd module correctly
+            # cloud-init schema prefers it in the user object or as a top-level module
+            cloud_config["chpasswd"] = chpasswd_config_dict
 
-# Install packages moved to runcmd for better logging
-packages: []
+        if bootcmd_list:
+            cloud_config["bootcmd"] = bootcmd_list
 
-# Run after packages are installed
-runcmd:
-{runcmd_yaml}
+        if all_packages:
+            # Only include if non-empty as per schema requirement
+            cloud_config["packages"] = [] # Actually, the error said "should be non-empty"
+            # But we are installing them in runcmd for better logging, so let's just omit 'packages' key if empty
+        else:
+            pass # Omit
 
-final_message: "CloneBox VM is ready after $UPTIME seconds"
-"""
+        # Assemble final user-data using yaml.dump for safety
+        import yaml
+        
+        # Merge extra blocks into cloud_config
+        if bootcmd_list:
+            cloud_config["bootcmd"] = bootcmd_list
+            
+        # Add runcmd
+        clean_runcmd = []
+        for line in runcmd_lines:
+            line_stripped = line.strip()
+            if line_stripped.startswith("- "):
+                clean_runcmd.append(line_stripped[2:])
+            else:
+                clean_runcmd.append(line_stripped)
+        cloud_config["runcmd"] = clean_runcmd
+
+        user_data = "#cloud-config\n" + yaml.dump(cloud_config, sort_keys=False, default_flow_style=False)
         (cloudinit_dir / "user-data").write_text(user_data)
 
         # Create ISO
