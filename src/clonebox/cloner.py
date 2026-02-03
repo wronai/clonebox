@@ -1854,30 +1854,30 @@ fi
 
         # Phase 6: Data Import (copied paths)
         if existing_copy_paths:
-            runcmd_lines.append(f"  - echo '[6/10] 📥 Importing data ({len(existing_copy_paths)} paths)...'")
+            runcmd_lines.append(f"echo '[6/10] 📥 Importing data ({len(existing_copy_paths)} paths)...'")
             # Check space before starting large import
-            runcmd_lines.append("  - if [ $(df / --output=avail | tail -n 1) -lt 1048576 ]; then echo '  → ⚠️  WARNING: Low disk space (<1GB) before data import'; fi")
+            runcmd_lines.append("if [ $(df / --output=avail | tail -n 1) -lt 1048576 ]; then echo '  → ⚠️  WARNING: Low disk space (<1GB) before data import'; fi")
             # Add import commands with progress
             import_count = 0
             for cmd in import_mount_commands:
                 if "Importing" in cmd:
                     import_count += 1
                     # Replace the placeholder 'Importing' with numbered progress, ensuring no double prefix
-                    msg = cmd.replace("  - echo '  → Importing", f"  - echo '  → [{import_count}/{len(existing_copy_paths)}] Importing")
+                    msg = cmd.replace("echo '  → Importing", f"echo '  → [{import_count}/{len(existing_copy_paths)}] Importing")
                     runcmd_lines.append(msg)
                 else:
                     runcmd_lines.append(cmd)
-            runcmd_lines.append("  - echo '  → ✓ [6/10] Data import completed'")
-            runcmd_lines.append("  - df -h / | sed 's/^/  → /'")
-            runcmd_lines.append("  - echo ''")
+            runcmd_lines.append("echo '  → ✓ [6/10] Data import completed'")
+            runcmd_lines.append("df -h / | sed 's/^/  → /'")
+            runcmd_lines.append("echo ''")
         else:
-            runcmd_lines.append("  - echo '[6/10] 📥 No data to import'")
-            runcmd_lines.append("  - echo ''")
+            runcmd_lines.append("echo '[6/10] 📥 No data to import'")
+            runcmd_lines.append("echo ''")
 
         # Phase 7: GUI Environment Setup
         if config.gui:
-            runcmd_lines.append("  - echo '[7/10] 🖥️  Setting up GUI environment...'")
-            runcmd_lines.append("  - echo '  → Creating user directories'")
+            runcmd_lines.append("echo '[7/10] 🖥️  Setting up GUI environment...'")
+            runcmd_lines.append("echo '  → Creating user directories'")
             # Create directories that GNOME services need
             gui_dirs = [
                 f"/home/{config.username}/.config/pulse",
@@ -1888,26 +1888,26 @@ fi
                 f"/home/{config.username}/.config/autostart",
             ]
             for i, d in enumerate(gui_dirs, 1):
-                runcmd_lines.append(f"  - mkdir -p {d} && echo '  → [{i}/{len(gui_dirs)}] Created {d}'")
+                runcmd_lines.append(f"mkdir -p {d} && echo '  → [{i}/{len(gui_dirs)}] Created {d}'")
             
             runcmd_lines.extend(
                 [
-                    f"  - chown -R 1000:1000 /home/{config.username}/.config /home/{config.username}/.cache /home/{config.username}/.local",
-                    f"  - chmod 700 /home/{config.username}/.config /home/{config.username}/.cache",
-                    "  - systemctl set-default graphical.target",
-                    "  - echo '  → Starting display manager'",
+                    f"chown -R 1000:1000 /home/{config.username}/.config /home/{config.username}/.cache /home/{config.username}/.local",
+                    f"chmod 700 /home/{config.username}/.config /home/{config.username}/.cache",
+                    "systemctl set-default graphical.target",
+                    "echo '  → Starting display manager'",
                 ]
             )
-            runcmd_lines.append("  - systemctl enable --now gdm3 || systemctl enable --now gdm || true")
-            runcmd_lines.append("  - systemctl start display-manager || true")
-            runcmd_lines.append("  - echo '  → ✓ [7/10] GUI environment ready'")
-            runcmd_lines.append("  - echo ''")
+            runcmd_lines.append("systemctl enable --now gdm3 || systemctl enable --now gdm || true")
+            runcmd_lines.append("systemctl start display-manager || true")
+            runcmd_lines.append("echo '  → ✓ [7/10] GUI environment ready'")
+            runcmd_lines.append("echo ''")
         else:
-            runcmd_lines.append("  - echo '[7/10] 🖥️  No GUI requested'")
-            runcmd_lines.append("  - echo ''")
+            runcmd_lines.append("echo '[7/10] 🖥️  No GUI requested'")
+            runcmd_lines.append("echo ''")
 
-        runcmd_lines.append(f"  - chown -R 1000:1000 /home/{config.username} || true")
-        runcmd_lines.append(f"  - chown -R 1000:1000 /home/{config.username}/snap || true")
+        runcmd_lines.append(f"chown -R 1000:1000 /home/{config.username} || true")
+        runcmd_lines.append(f"chown -R 1000:1000 /home/{config.username}/snap || true")
 
         # Phase 8: Snap packages
         if config.snap_packages:
