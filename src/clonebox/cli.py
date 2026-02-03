@@ -1910,6 +1910,25 @@ def cmd_test(args):
 
     console.print()
 
+    if user_session:
+        try:
+            vm_dir = Path.home() / ".local/share/libvirt/images" / vm_name
+            ssh_key_path = vm_dir / "ssh_key"
+            ssh_port_path = vm_dir / "ssh_port"
+            serial_log_path = vm_dir / "serial.log"
+
+            if ssh_key_path.exists() and ssh_port_path.exists():
+                ssh_port = (ssh_port_path.read_text() or "").strip()
+                if ssh_port:
+                    console.print(
+                        f"[dim]SSH (passthrough): ssh -i {ssh_key_path} -p {ssh_port} ubuntu@127.0.0.1[/]"
+                    )
+
+            console.print(f"[dim]Host serial log: {serial_log_path}[/]")
+            console.print(f"[dim]Follow: tail -f {serial_log_path}[/]")
+        except Exception:
+            pass
+
     # Test 1: Check VM exists
     console.print("[bold]1. VM Existence Check[/]")
     try:
@@ -1969,6 +1988,14 @@ def cmd_test(args):
                     console.print(
                         f"[dim]Tip: you can watch live cloud-init output via serial console: virsh --connect {conn_uri} console {vm_name}[/]"
                     )
+
+                    if user_session:
+                        try:
+                            serial_log_path = Path.home() / ".local/share/libvirt/images" / vm_name / "serial.log"
+                            console.print(f"[dim]Tip: host serial log (cloud-init output): {serial_log_path}[/]")
+                            console.print(f"[dim]     tail -f {serial_log_path}[/]")
+                        except Exception:
+                            pass
 
             # Check cloud-init status immediately if QGA is ready
             if qga_ready:

@@ -2788,6 +2788,35 @@ final_message: "CloneBox VM is ready after $UPTIME seconds"
             vm.create()
             log("[green]✅ VM started![/]")
 
+        if self.user_session:
+            try:
+                vm_dir = self.get_images_dir() / vm_name
+                serial_log_path = vm_dir / "serial.log"
+                qemu_log_path = Path.home() / ".cache/libvirt/qemu/log" / f"{vm_name}.log"
+
+                log(f"[dim]Host serial log: {serial_log_path}[/]")
+                log(f"[dim]Follow: tail -f {serial_log_path}[/]")
+                if serial_log_path.exists():
+                    try:
+                        tail = subprocess.run(
+                            ["tail", "-n", "60", str(serial_log_path)],
+                            capture_output=True,
+                            text=True,
+                            timeout=2,
+                        )
+                        if (tail.stdout or "").strip():
+                            log("[dim]--- serial.log (last 60 lines) ---[/]")
+                            if console:
+                                console.print(tail.stdout.rstrip())
+                            else:
+                                print(tail.stdout.rstrip())
+                    except Exception:
+                        pass
+
+                log(f"[dim]Host QEMU log: {qemu_log_path}[/]")
+            except Exception:
+                pass
+
         if open_viewer:
             import shutil
             if shutil.which("virt-viewer"):
