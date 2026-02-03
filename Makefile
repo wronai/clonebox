@@ -143,10 +143,15 @@ format:
 		exit 1; \
 	fi
 
+ BUMP2VERSION_FLAGS :=
+ ifneq ($(strip $(ALLOW_DIRTY)),)
+ 	BUMP2VERSION_FLAGS += --allow-dirty
+ endif
+
 # Version bump
 bump-patch:
 	@if [ -d ".venv" ]; then \
-		.venv/bin/bump2version patch; \
+		.venv/bin/bump2version $(BUMP2VERSION_FLAGS) patch; \
 	else \
 		echo "No virtual environment found. Run 'make install-dev' first."; \
 		exit 1; \
@@ -154,7 +159,7 @@ bump-patch:
 
 bump-minor:
 	@if [ -d ".venv" ]; then \
-		.venv/bin/bump2version minor; \
+		.venv/bin/bump2version $(BUMP2VERSION_FLAGS) minor; \
 	else \
 		echo "No virtual environment found. Run 'make install-dev' first."; \
 		exit 1; \
@@ -162,7 +167,7 @@ bump-minor:
 
 bump-major:
 	@if [ -d ".venv" ]; then \
-		.venv/bin/bump2version major; \
+		.venv/bin/bump2version $(BUMP2VERSION_FLAGS) major; \
 	else \
 		echo "No virtual environment found. Run 'make install-dev' first."; \
 		exit 1; \

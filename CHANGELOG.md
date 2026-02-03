@@ -1,3 +1,20 @@
+## [1.1.25] - 2026-02-03
+
+### Summary
+
+feat(build): CLI interface with 3 supporting modules
+
+### Core
+
+- update src/clonebox/cloner.py
+- update src/clonebox/validation/core.py
+
+### Other
+
+- build: update Makefile
+- update scripts/fetch-logs.py
+
+
 ## [1.1.24] - 2026-02-03
 
 ### Summary

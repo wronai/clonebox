@@ -71,7 +71,14 @@ def ssh_exec(vm_name, command, timeout=20):
         if not os.path.exists(key_path):
             return None
 
-        ssh_port = 22000 + (zlib.crc32(vm_name.encode("utf-8")) % 1000)
+        port_path = os.path.expanduser(f"~/.local/share/libvirt/images/{vm_name}/ssh_port")
+        if os.path.exists(port_path):
+            try:
+                ssh_port = int(open(port_path, "r").read().strip())
+            except Exception:
+                ssh_port = 22000 + (zlib.crc32(vm_name.encode("utf-8")) % 1000)
+        else:
+            ssh_port = 22000 + (zlib.crc32(vm_name.encode("utf-8")) % 1000)
         user = "ubuntu"
         result = subprocess.run(
             [

@@ -59,7 +59,20 @@ class VMValidatorCore:
             return None
 
     def _get_ssh_port(self) -> int:
-        """Deterministic host-side SSH port for passt port forwarding."""
+        """Host-side SSH port for passt port forwarding."""
+        try:
+            if self.conn_uri.endswith("/session"):
+                images_dir = Path.home() / ".local/share/libvirt/images"
+            else:
+                images_dir = Path("/var/lib/libvirt/images")
+            port_file = images_dir / self.vm_name / "ssh_port"
+            if port_file.exists():
+                port = int(port_file.read_text().strip())
+                if 1 <= port <= 65535:
+                    return port
+        except Exception:
+            pass
+
         return 22000 + (zlib.crc32(self.vm_name.encode("utf-8")) % 1000)
 
     def _ssh_exec(self, command: str, timeout: int = 10) -> Optional[str]:

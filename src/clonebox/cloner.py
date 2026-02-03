@@ -9,6 +9,7 @@ import logging
 import os
 import secrets
 import shutil
+import socket
 import string
 import subprocess
 import tempfile
@@ -300,6 +301,60 @@ class SelectiveVMCloner:
         except Exception:
             return False
 
+    def _read_passt_ssh_port(self, vm_name: str, vm_dir: Path) -> int:
+        port_file = vm_dir / "ssh_port"
+        if port_file.exists():
+            try:
+                port = int(port_file.read_text().strip())
+                if 1 <= port <= 65535:
+                    return port
+            except Exception:
+                pass
+        return 22000 + (zlib.crc32(vm_name.encode("utf-8")) % 1000)
+
+    def _allocate_passt_ssh_port(self, vm_name: str, vm_dir: Path, host: str = "127.0.0.1") -> int:
+        def _is_free(port: int) -> bool:
+            try:
+                with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+                    s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+                    s.bind((host, port))
+                return True
+            except OSError:
+                return False
+
+        port_file = vm_dir / "ssh_port"
+
+        if port_file.exists():
+            try:
+                stored = int(port_file.read_text().strip())
+                if 1 <= stored <= 65535 and _is_free(stored):
+                    return stored
+            except Exception:
+                pass
+
+        base = 22000 + (zlib.crc32(vm_name.encode("utf-8")) % 1000)
+        base_offset = base - 22000
+        for i in range(1000):
+            candidate = 22000 + ((base_offset + i) % 1000)
+            if _is_free(candidate):
+                try:
+                    port_file.write_text(str(candidate))
+                except Exception:
+                    pass
+                return candidate
+
+        try:
+            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+                s.bind((host, 0))
+                candidate = int(s.getsockname()[1])
+            try:
+                port_file.write_text(str(candidate))
+            except Exception:
+                pass
+            return candidate
+        except Exception:
+            return base
+
     def resolve_network_mode(self, config: VMConfig) -> str:
         """Resolve network mode based on config and session type."""
         mode = (config.network_mode or "auto").lower()
@@ -562,7 +617,7 @@ class SelectiveVMCloner:
                             if shutil.which("passt") and self._passt_supported():
                                 ssh_key_path = vm_dir / "ssh_key"
                                 if ssh_key_path.exists():
-                                    ssh_port = 22000 + (zlib.crc32(config.name.encode("utf-8")) % 1000)
+                                    ssh_port = self._read_passt_ssh_port(config.name, vm_dir)
                                     console.print(
                                         f"[dim]SSH access (passthrough): ssh -i {ssh_key_path} -p {ssh_port} {config.username}@127.0.0.1[/]"
                                     )
@@ -1425,7 +1480,8 @@ fi
             if shutil.which("passt") and self._passt_supported():
                 ET.SubElement(iface, "backend", type="passt")
 
-                ssh_port = 22000 + (zlib.crc32(config.name.encode("utf-8")) % 1000)
+                vm_dir = Path(str(root_disk)).parent
+                ssh_port = self._allocate_passt_ssh_port(config.name, vm_dir)
                 pf = ET.SubElement(iface, "portForward", proto="tcp", address="127.0.0.1")
                 ET.SubElement(pf, "range", start=str(ssh_port), to="22")
         else:
@@ -2626,7 +2682,7 @@ if __name__ == "__main__":
         
         # Build bootcmd combining mount commands and extra security bootcmds
         bootcmd_lines = [
-            '  - sh -c "echo \"[clonebox] bootcmd: enabling serial console (ttyS0)\" > /dev/ttyS0 || true"',
+            "  - sh -c 'echo \"[clonebox] bootcmd: enabling serial console (ttyS0)\" > /dev/ttyS0 || true'",
             '  - systemctl enable --now serial-getty@ttyS0.service >/dev/null 2>&1 || true',
         ]
         if bootcmd_extra:
