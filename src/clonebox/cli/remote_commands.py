@@ -157,7 +157,7 @@ def cmd_remote_delete(args):
     remote = RemoteCloner(conn)
     
     try:
-        remote.delete_vm(vm_name, keep_storage=args.keep_storage, approved=args.approve, console=console)
+        remote.delete_vm(vm_name, delete_storage=not args.keep_storage, approved=args.approve, console=console)
         console.print(f"[green]✅ VM '{vm_name}' deleted on {host}[/]")
         
     finally:

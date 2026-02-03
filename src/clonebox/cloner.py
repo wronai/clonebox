@@ -81,9 +81,20 @@ class SelectiveVMCloner:
         
         self.conn_uri = conn_uri
         if libvirt:
-            self.conn = libvirt.open(conn_uri)
+            try:
+                self.conn = libvirt.open(conn_uri)
+            except Exception as e:
+                raise ConnectionError(
+                    f"Cannot connect to libvirt at {conn_uri}.\n"
+                    f"Error: {e}\n\n"
+                    f"Troubleshooting:\n"
+                    f"1. Check libvirtd is running: sudo systemctl status libvirtd\n"
+                    f"2. Check permissions: groups | grep libvirt\n"
+                    f"3. For user session: virsh --connect qemu:///session list\n"
+                    f"4. For system session: sudo virsh --connect qemu:///system list"
+                )
         else:
-            self.conn = None
+            raise ImportError("libvirt-python is required. Install with: pip install libvirt-python")
 
     def create_vm(
         self,
@@ -109,7 +120,7 @@ class SelectiveVMCloner:
         ):
             # Check if VM already exists
             if replace:
-                self.delete_vm(config.name, keep_storage=True, approved=approved)
+                self.delete_vm(config.name, delete_storage=False, approved=approved)
             else:
                 try:
                     self.conn.lookupByName(config.name)
@@ -213,7 +224,7 @@ class SelectiveVMCloner:
         time.sleep(2)
         self.start_vm(vm_name, open_viewer=open_viewer)
 
-    def delete_vm(self, vm_name: str, keep_storage: bool = False, approved: bool = False, console: Any = None) -> None:
+    def delete_vm(self, vm_name: str, delete_storage: bool = False, approved: bool = False, console: Any = None) -> None:
         """Delete a VM and its storage."""
         
         with log_operation(
@@ -221,7 +232,7 @@ class SelectiveVMCloner:
             "vm_delete",
             vm_name=vm_name,
             user=os.getenv("USER"),
-            details={"keep_storage": keep_storage}
+            details={"delete_storage": delete_storage}
         ):
             try:
                 vm = self.conn.lookupByName(vm_name)
@@ -245,7 +256,7 @@ class SelectiveVMCloner:
                 log.info(f"VM '{vm_name}' undefined")
                 
                 # Delete storage if requested
-                if not keep_storage:
+                if delete_storage:
                     for disk_path in disk_paths:
                         if os.path.exists(disk_path):
                             os.remove(disk_path)
@@ -287,31 +298,188 @@ class SelectiveVMCloner:
             return self.USER_IMAGES_DIR
         return self.SYSTEM_IMAGES_DIR
 
+    def _get_downloads_dir(self) -> Path:
+        """Get the downloads directory."""
+        return Path.home() / "Downloads"
+
+    def check_prerequisites(self, config: Optional[VMConfig] = None) -> dict:
+        """Check system prerequisites for VM creation."""
+        images_dir = self.get_images_dir()
+
+        resolved_network_mode: Optional[str] = None
+        if config is not None:
+            try:
+                resolved_network_mode = self.resolve_network_mode(config)
+            except Exception:
+                resolved_network_mode = None
+
+        checks = {
+            "libvirt_connected": False,
+            "kvm_available": False,
+            "default_network": False,
+            "default_network_required": True,
+            "images_dir_writable": False,
+            "images_dir": str(images_dir),
+            "session_type": "user" if self.user_session else "system",
+            "genisoimage_installed": False,
+            "virt_viewer_installed": False,
+            "qemu_img_installed": False,
+            "passt_installed": shutil.which("passt") is not None,
+            "passt_available": False,
+        }
+
+        checks["passt_available"] = checks["passt_installed"] and self._passt_supported()
+
+        # Check for genisoimage
+        checks["genisoimage_installed"] = shutil.which("genisoimage") is not None
+
+        # Check for virt-viewer
+        checks["virt_viewer_installed"] = shutil.which("virt-viewer") is not None
+
+        # Check for qemu-img
+        checks["qemu_img_installed"] = shutil.which("qemu-img") is not None
+
+        # Check libvirt connection
+        if self.conn and self.conn.isAlive():
+            checks["libvirt_connected"] = True
+
+        # Check KVM
+        kvm_path = Path("/dev/kvm")
+        checks["kvm_available"] = kvm_path.exists()
+        if not checks["kvm_available"]:
+            checks["kvm_error"] = "KVM not available. Enable virtualization in BIOS."
+        elif not os.access(kvm_path, os.R_OK | os.W_OK):
+            checks["kvm_error"] = (
+                "No access to /dev/kvm. Add user to kvm group: sudo usermod -aG kvm $USER"
+            )
+
+        # Check default network
+        default_net_state = self._default_network_state()
+        checks["default_network_required"] = (resolved_network_mode or "default") != "user"
+        if checks["default_network_required"]:
+            checks["default_network"] = default_net_state == "active"
+        else:
+            checks["default_network"] = True
+
+        if checks["default_network_required"] and default_net_state in {"inactive", "missing", "unknown"}:
+            checks["network_error"] = (
+                "Default network not found or inactive.\n"
+                "  For user session, CloneBox can use user-mode networking (slirp) automatically.\n"
+                "  Or create a user network:\n"
+                "    virsh --connect qemu:///session net-define /tmp/default-network.xml\n"
+                "    virsh --connect qemu:///session net-start default\n"
+                "  Or use system session: clonebox clone . (without --user)\n"
+            )
+
+        if resolved_network_mode is not None:
+            checks["network_mode"] = resolved_network_mode
+
+        # Check images directory
+        if images_dir.exists():
+            checks["images_dir_writable"] = os.access(images_dir, os.W_OK)
+            if not checks["images_dir_writable"]:
+                checks["images_dir_error"] = (
+                    f"Cannot write to {images_dir}\n"
+                    f"  Option 1: Run with sudo\n"
+                    f"  Option 2: Use --user flag for user session (recommended):\n"
+                    f"     clonebox clone . --user\n\n"
+                    f"  3. Fix permissions: sudo chown -R $USER:libvirt {images_dir}"
+                )
+        else:
+            try:
+                images_dir.mkdir(parents=True, exist_ok=True)
+                checks["images_dir_writable"] = True
+            except PermissionError:
+                checks["images_dir_writable"] = False
+                checks["images_dir_error"] = (
+                    f"Cannot create {images_dir}\n"
+                    f"  Use --user flag for user session (stores in ~/.local/share/libvirt/images/)"
+                )
+
+        return checks
+
+    def _passt_supported(self) -> bool:
+        """Check if passt is supported."""
+        return shutil.which("passt") is not None
+
+    def _default_network_state(self) -> str:
+        """Get default network state."""
+        try:
+            networks = self.conn.listNetworks()
+            defined_networks = self.conn.listDefinedNetworks()
+            if "default" in networks:
+                return "active"
+            elif "default" in defined_networks:
+                return "inactive"
+            else:
+                return "missing"
+        except Exception:
+            return "unknown"
+
+    def _default_network_active(self) -> bool:
+        """Check if default network is active."""
+        return self._default_network_state() == "active"
+
+    def resolve_network_mode(self, config: VMConfig) -> str:
+        """Resolve network mode for VM."""
+        if config.network_mode == "auto":
+            # Auto mode - use default network if available, otherwise user mode
+            if self._default_network_active():
+                return "default"
+            elif self.user_session:
+                return "user"
+            else:
+                return "default"
+        return config.network_mode
+
     def list_vms(self) -> List[Dict]:
         """List all VMs."""
         
         vms = []
         
         try:
-            for domain_id in self.conn.listAllDomains(0):
-                info = domain_id.info()
-                state = self._get_state_string(info[0])
-                
-                vm_data = {
-                    "name": domain_id.name(),
-                    "state": state,
-                    "uuid": domain_id.UUIDString(),
-                    "memory": info[1] // 1024,  # Convert to MB
-                    "vcpus": info[3],
-                }
-                
-                # Get IP address if running
-                if state == "running":
-                    ip = self._get_vm_ip(domain_id)
-                    if ip:
-                        vm_data["ip"] = ip
-                
-                vms.append(vm_data)
+            # Get running VMs by ID
+            for domain_id in self.conn.listDomainsID():
+                try:
+                    domain = self.conn.lookupByID(domain_id)
+                    info = domain.info()
+                    state = self._get_state_string(info[0])
+                    
+                    vm_data = {
+                        "name": domain.name(),
+                        "state": state,
+                        "uuid": domain.UUIDString(),
+                        "memory": info[1] // 1024,
+                        "vcpus": info[3],
+                    }
+                    
+                    if state == "running":
+                        ip = self._get_vm_ip(domain)
+                        if ip:
+                            vm_data["ip"] = ip
+                    
+                    vms.append(vm_data)
+                except Exception:
+                    pass
+            
+            # Get stopped VMs
+            for domain_name in self.conn.listDefinedDomains():
+                try:
+                    domain = self.conn.lookupByName(domain_name)
+                    info = domain.info()
+                    state = self._get_state_string(info[0])
+                    
+                    vm_data = {
+                        "name": domain.name(),
+                        "state": state,
+                        "uuid": domain.UUIDString(),
+                        "memory": info[1] // 1024,
+                        "vcpus": info[3],
+                    }
+                    
+                    vms.append(vm_data)
+                except Exception:
+                    pass
                 
         except Exception as e:
             log.error(f"Failed to list VMs: {e}")
@@ -495,6 +663,80 @@ class SelectiveVMCloner:
                 return path
         
         raise FileNotFoundError("No base image found. Please download or specify one.")
+
+    def _ensure_default_base_image(self, console=None) -> Path:
+        """Ensure a default base image exists, downloading if necessary."""
+        # Check common locations first
+        try:
+            return Path(self._get_default_base_image())
+        except FileNotFoundError:
+            pass
+        
+        # Download default image if not found
+        if console:
+            console.print("[yellow]Base image not found. Attempting to download...[/]")
+        
+        # Download to user images directory
+        images_dir = self.get_images_dir()
+        images_dir.mkdir(parents=True, exist_ok=True)
+        
+        base_image_path = images_dir / "ubuntu-22.04.qcow2"
+        
+        # Placeholder for download - in real implementation would download from cloud-images.ubuntu.com
+        raise FileNotFoundError(
+            f"No base image found. Please download one:\n"
+            f"  wget -P {images_dir} https://cloud-images.ubuntu.com/jammy/current/"
+            f"jammy-server-cloudimg-amd64.img"
+        )
+
+    def _create_cloudinit_iso(self, vm_dir: Path, config: VMConfig, user_session: bool = False) -> Path:
+        """Create cloud-init ISO image for VM."""
+        from clonebox.cloud_init import generate_cloud_init_config
+        
+        # Generate cloud-init config
+        user_data = generate_cloud_init_config(config)
+        
+        # Create ISO in temp directory
+        with tempfile.TemporaryDirectory() as tmpdir:
+            user_data_path = Path(tmpdir) / "user-data"
+            user_data_path.write_text(user_data)
+            
+            meta_data_path = Path(tmpdir) / "meta-data"
+            meta_data_path.write_text(f"instance-id: {config.name}\nlocal-hostname: {config.name}\n")
+            
+            iso_path = Path(tmpdir) / "cloud-init.iso"
+            
+            # Use genisoimage or mkisofs
+            cmd = [
+                "genisoimage" if shutil.which("genisoimage") else "mkisofs",
+                "-o", str(iso_path),
+                "-V", "cidata",
+                "-J", "-r",
+                str(user_data_path),
+                str(meta_data_path),
+            ]
+            
+            subprocess.run(cmd, check=True, capture_output=True)
+            
+            # Copy to vm_dir
+            final_iso = vm_dir / f"{config.name}-cloud-init.iso"
+            shutil.copy2(iso_path, final_iso)
+            
+            return final_iso
+
+    def _get_state_string(self, state_code: int) -> str:
+        """Convert libvirt state code to string."""
+        states = {
+            0: "nostate",
+            1: "running",
+            2: "blocked",
+            3: "paused",
+            4: "shutdown",
+            5: "shutoff",
+            6: "crashed",
+            7: "suspended",
+        }
+        return states.get(state_code, "unknown")
 
     def __del__(self):
         """Cleanup libvirt connection."""

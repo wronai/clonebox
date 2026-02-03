@@ -31,7 +31,7 @@ from clonebox.orchestrator import Orchestrator
 from clonebox.plugins.manager import get_plugin_manager
 from clonebox.remote import RemoteCloner
 from clonebox.cli.monitoring_commands import cmd_logs
-from clonebox.cli.vm_commands import cmd_set_password
+from clonebox.cli.misc_commands import cmd_set_password
 from rich.progress import Progress
 
 __all__ = [

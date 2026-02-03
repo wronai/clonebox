@@ -279,7 +279,7 @@ def cmd_delete(args):
             return
     
     cloner = SelectiveVMCloner(user_session=user_session)
-    cloner.delete_vm(name, keep_storage=args.keep_storage, approved=args.approve, console=console)
+    cloner.delete_vm(name, delete_storage=not args.keep_storage, approved=args.approve, console=console)
 
 
 def cmd_list(args):
