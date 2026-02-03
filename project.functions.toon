@@ -1,5 +1,5 @@
 project: clonebox
-generated: "2026-02-03T19:50:37.254992"
+generated: "2026-02-03T19:56:10.645872"
 modules[88]{path,lang,items}:
   fix_qga.py,python,1
   tests/test_orchestrator.py,python,19
@@ -837,37 +837,37 @@ function_details:
       Orchestrator.exec,method,"(vm_name:str, command:str, timeout:int=30) -> Optional[str]",542-553,false,12,4,Execute command in a VM.
   src/clonebox/cloner.py:
     functions[31]{name,kind,sig,loc,async,lines,cc,does}:
-      VMConfig.to_dict,method,() -> dict,121-126,false,6,1,converts dict
-      SelectiveVMCloner.__init__,method,"(conn_uri:str=None, user_session:bool=False, hypervisor:HypervisorBackend=None, disk_manager:DiskManager=None, network_manager:NetworkManager=None, secrets_manager:SecretsManager=None) -> None",135-159,false,25,6,creates
-      SelectiveVMCloner.SYSTEM_IMAGES_DIR,method,() -> Path,162-163,false,2,1,system images dir
-      SelectiveVMCloner.USER_IMAGES_DIR,method,() -> Path,166-169,false,4,1,user images dir
-      SelectiveVMCloner.DEFAULT_BASE_IMAGE_URL,method,() -> str,172-176,false,5,1,default base image url
-      SelectiveVMCloner.DEFAULT_BASE_IMAGE_FILENAME,method,() -> str,179-180,false,2,1,default base image filename
-      SelectiveVMCloner._connect,method,() -> None,182-211,false,30,4,Connect to libvirt.
-      SelectiveVMCloner.get_images_dir,method,() -> Path,213-217,false,5,2,Get the appropriate images directory based on session type.
-      SelectiveVMCloner._get_downloads_dir,method,() -> Path,219-220,false,2,1,retrieves downloads dir
-      SelectiveVMCloner._ensure_default_base_image,method,(console=None) -> Path,222-275,false,54,9,Ensure a default Ubuntu 22.04 base image is available.
-      SelectiveVMCloner._default_network_state,method,() -> str,277-287,false,11,6,default network state
-      SelectiveVMCloner._default_network_active,method,() -> bool,289-291,false,3,1,Check if libvirt default network is active.
-      SelectiveVMCloner._passt_supported,method,() -> bool,293-302,false,10,4,passt supported
-      SelectiveVMCloner._read_passt_ssh_port,method,"(vm_name:str, vm_dir:Path) -> int",304-313,false,10,4,retrieves passt ssh port
-      SelectiveVMCloner._allocate_passt_ssh_port,method,"(vm_name:str, vm_dir:Path, host:str='127.0.0.1') -> int",315-356,false,42,10,allocate passt ssh port
-      SelectiveVMCloner.resolve_network_mode,method,"(config:VMConfig) -> str",358-367,false,10,6,Resolve network mode based on config and session type.
-      SelectiveVMCloner.check_prerequisites,method,"(config:Optional[VMConfig]=None) -> dict",369-465,false,97,17,Check system prerequisites for VM creation.
-      SelectiveVMCloner.create_vm,method,"(config:VMConfig, console=None, replace:bool=False, approved:bool=False) -> str",467-652,false,186,32,Create a VM with only selected applications/paths.
-      SelectiveVMCloner._generate_boot_diagnostic_script,method,"(config:VMConfig) -> str",654-1066,false,413,21,Generate boot diagnostic script with self-healing capabilities.
-      SelectiveVMCloner._generate_health_check_script,method,"(config:VMConfig) -> str",1068-1338,false,271,12,Generate a health check script that validates all installed components.
-      SelectiveVMCloner._generate_vm_xml,method,"(config:VMConfig=None, root_disk:Path=None, cloudinit_iso:Optional[Path]=None) -> str",1340-1549,false,210,40,Generate libvirt XML for the VM.
-      SelectiveVMCloner._yaml_single_quote,method,"(s:str) -> str",1551-1553,false,3,1,Escape a string for single-quoted YAML value.
-      SelectiveVMCloner._create_cloudinit_iso,method,"(vm_dir:Path, config:VMConfig, user_session:bool=False) -> Path",1555-2929,false,1375,97,Create cloud-init ISO with secure credential handling.
-      SelectiveVMCloner.start_vm,method,"(vm_name:str, open_viewer:bool=True, console=None) -> bool",2931-2995,false,65,12,Start a VM and optionally open virt-viewer.
-      SelectiveVMCloner.wait_for_setup,method,"(vm_name:str, timeout_mins:int=15, console=None) -> bool",2997-3057,false,61,11,Wait for the VM to complete setup by monitoring serial.log.
-      SelectiveVMCloner.stop_vm,method,"(vm_name:str, force:bool=False, console=None) -> bool",3059-3112,false,54,10,Stop a VM.
-      SelectiveVMCloner.delete_vm,method,"(vm_name:str, delete_storage:bool=True, console=None, ignore_not_found:bool=False, approved:bool=False) -> bool",3114-3162,false,49,7,Delete a VM and optionally its storage.
-      SelectiveVMCloner.list_vms,method,() -> list,3164-3175,false,12,3,List all VMs.
-      SelectiveVMCloner.close,method,() -> None,3177-3180,false,4,2,Close libvirt connection.
-      SelectiveVMCloner._get_base_image_info,method,"(image_path:str) -> dict",3183-3188,false,6,2,Get base image information - backward compatibility shim.
-      SelectiveVMCloner.get_vm_info,method,"(vm_name:str) -> dict",3190-3203,false,14,4,Get VM information - backward compatibility shim.
+      VMConfig.to_dict,method,() -> dict,122-127,false,6,1,converts dict
+      SelectiveVMCloner.__init__,method,"(conn_uri:str=None, user_session:bool=False, hypervisor:HypervisorBackend=None, disk_manager:DiskManager=None, network_manager:NetworkManager=None, secrets_manager:SecretsManager=None) -> None",136-160,false,25,6,creates
+      SelectiveVMCloner.SYSTEM_IMAGES_DIR,method,() -> Path,163-164,false,2,1,system images dir
+      SelectiveVMCloner.USER_IMAGES_DIR,method,() -> Path,167-170,false,4,1,user images dir
+      SelectiveVMCloner.DEFAULT_BASE_IMAGE_URL,method,() -> str,173-177,false,5,1,default base image url
+      SelectiveVMCloner.DEFAULT_BASE_IMAGE_FILENAME,method,() -> str,180-181,false,2,1,default base image filename
+      SelectiveVMCloner._connect,method,() -> None,183-212,false,30,4,Connect to libvirt.
+      SelectiveVMCloner.get_images_dir,method,() -> Path,214-218,false,5,2,Get the appropriate images directory based on session type.
+      SelectiveVMCloner._get_downloads_dir,method,() -> Path,220-221,false,2,1,retrieves downloads dir
+      SelectiveVMCloner._ensure_default_base_image,method,(console=None) -> Path,223-276,false,54,9,Ensure a default Ubuntu 22.04 base image is available.
+      SelectiveVMCloner._default_network_state,method,() -> str,278-288,false,11,6,default network state
+      SelectiveVMCloner._default_network_active,method,() -> bool,290-292,false,3,1,Check if libvirt default network is active.
+      SelectiveVMCloner._passt_supported,method,() -> bool,294-303,false,10,4,passt supported
+      SelectiveVMCloner._read_passt_ssh_port,method,"(vm_name:str, vm_dir:Path) -> int",305-314,false,10,4,retrieves passt ssh port
+      SelectiveVMCloner._allocate_passt_ssh_port,method,"(vm_name:str, vm_dir:Path, host:str='127.0.0.1') -> int",316-357,false,42,10,allocate passt ssh port
+      SelectiveVMCloner.resolve_network_mode,method,"(config:VMConfig) -> str",359-368,false,10,6,Resolve network mode based on config and session type.
+      SelectiveVMCloner.check_prerequisites,method,"(config:Optional[VMConfig]=None) -> dict",370-466,false,97,17,Check system prerequisites for VM creation.
+      SelectiveVMCloner.create_vm,method,"(config:VMConfig, console=None, replace:bool=False, approved:bool=False) -> str",468-653,false,186,32,Create a VM with only selected applications/paths.
+      SelectiveVMCloner._generate_boot_diagnostic_script,method,"(config:VMConfig) -> str",655-1067,false,413,21,Generate boot diagnostic script with self-healing capabilities.
+      SelectiveVMCloner._generate_health_check_script,method,"(config:VMConfig) -> str",1069-1339,false,271,12,Generate a health check script that validates all installed components.
+      SelectiveVMCloner._generate_vm_xml,method,"(config:VMConfig=None, root_disk:Path=None, cloudinit_iso:Optional[Path]=None) -> str",1341-1550,false,210,40,Generate libvirt XML for the VM.
+      SelectiveVMCloner._yaml_single_quote,method,"(s:str) -> str",1552-1554,false,3,1,Escape a string for single-quoted YAML value.
+      SelectiveVMCloner._create_cloudinit_iso,method,"(vm_dir:Path, config:VMConfig, user_session:bool=False) -> Path",1556-2908,false,1353,97,Create cloud-init ISO with secure credential handling.
+      SelectiveVMCloner.start_vm,method,"(vm_name:str, open_viewer:bool=True, console=None) -> bool",2910-2974,false,65,12,Start a VM and optionally open virt-viewer.
+      SelectiveVMCloner.wait_for_setup,method,"(vm_name:str, timeout_mins:int=15, console=None) -> bool",2976-3036,false,61,11,Wait for the VM to complete setup by monitoring serial.log.
+      SelectiveVMCloner.stop_vm,method,"(vm_name:str, force:bool=False, console=None) -> bool",3038-3091,false,54,10,Stop a VM.
+      SelectiveVMCloner.delete_vm,method,"(vm_name:str, delete_storage:bool=True, console=None, ignore_not_found:bool=False, approved:bool=False) -> bool",3093-3188,false,96,9,Delete a VM and optionally its storage.
+      SelectiveVMCloner.list_vms,method,() -> list,3190-3201,false,12,3,List all VMs.
+      SelectiveVMCloner.close,method,() -> None,3203-3206,false,4,2,Close libvirt connection.
+      SelectiveVMCloner._get_base_image_info,method,"(image_path:str) -> dict",3209-3214,false,6,2,Get base image information - backward compatibility shim.
+      SelectiveVMCloner.get_vm_info,method,"(vm_name:str) -> dict",3216-3229,false,14,4,Get VM information - backward compatibility shim.
   src/clonebox/rollback.py:
     functions[9]{name,kind,sig,loc,async,lines,cc,does}:
       vm_creation_transaction,function,"(cloner:Any, config:Any, console:Optional[Any]=None) -> None",147-172,false,26,3,Context manager for VM creation with automatic rollback.

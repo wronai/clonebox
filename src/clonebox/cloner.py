@@ -3113,9 +3113,54 @@ ethernets:
                 approved=approved,
             )
 
+        # Best-effort cleanup for orphaned passt helpers.
+        # When passt processes linger, they keep SSH forward ports busy and cause port drift.
+        def _cleanup_passt() -> None:
+            try:
+                procs = subprocess.run(
+                    ["pgrep", "-af", "passt"],
+                    capture_output=True,
+                    text=True,
+                    check=False,
+                )
+                lines = (procs.stdout or "").splitlines()
+                pids: list[int] = []
+                for line in lines:
+                    if vm_name not in line:
+                        continue
+                    try:
+                        pid = int(line.strip().split()[0])
+                    except Exception:
+                        continue
+                    pids.append(pid)
+
+                for pid in pids:
+                    try:
+                        os.kill(pid, signal.SIGTERM)
+                    except Exception:
+                        pass
+                if pids:
+                    time.sleep(0.5)
+                for pid in pids:
+                    try:
+                        os.kill(pid, signal.SIGKILL)
+                    except Exception:
+                        pass
+            except Exception:
+                pass
+
         try:
             vm = self.conn.lookupByName(vm_name)
         except libvirt.libvirtError:
+            _cleanup_passt()
+            if delete_storage:
+                vm_dir = self.get_images_dir() / vm_name
+                if vm_dir.exists():
+                    import shutil
+
+                    shutil.rmtree(vm_dir)
+                    log(f"[green]🗑️  Storage deleted: {vm_dir}[/]")
+
             if ignore_not_found:
                 return True
             log(f"[red]❌ VM '{vm_name}' not found[/]")
@@ -3125,40 +3170,7 @@ ethernets:
         if vm.isActive():
             vm.destroy()
 
-        # Best-effort cleanup for orphaned passt helpers.
-        # When passt processes linger, they keep SSH forward ports busy and cause port drift.
-        try:
-            procs = subprocess.run(
-                ["pgrep", "-af", "passt"],
-                capture_output=True,
-                text=True,
-                check=False,
-            )
-            lines = (procs.stdout or "").splitlines()
-            pids: list[int] = []
-            for line in lines:
-                if vm_name not in line:
-                    continue
-                try:
-                    pid = int(line.strip().split()[0])
-                except Exception:
-                    continue
-                pids.append(pid)
-
-            for pid in pids:
-                try:
-                    os.kill(pid, signal.SIGTERM)
-                except Exception:
-                    pass
-            if pids:
-                time.sleep(0.5)
-            for pid in pids:
-                try:
-                    os.kill(pid, signal.SIGKILL)
-                except Exception:
-                    pass
-        except Exception:
-            pass
+        _cleanup_passt()
 
         # Undefine
         vm.undefine()
