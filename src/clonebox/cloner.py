@@ -2726,7 +2726,7 @@ if __name__ == "__main__":
         runcmd_yaml = "\n".join(runcmd_lines) if runcmd_lines else ""
         
         # Helper to log to console
-        log_cmd = 'echo "[clonebox] $1" > /dev/ttyS0 || true'
+        log_cmd = "echo '[clonebox] $1' > /dev/ttyS0 || true"
 
         bootcmd_lines = [
             f'  - ["sh", "-c", "{log_cmd.replace("$1", "bootcmd - starting configuration")}"]',
@@ -2738,10 +2738,10 @@ if __name__ == "__main__":
             net_fallback = (
                 "NIC=$(ip -o link show | grep -E 'enp|eth' | head -1 | cut -d: -f2 | tr -d ' '); "
                 "if [ -z \"$NIC\" ]; then "
-                f"  {log_cmd.replace('$1', 'No NIC found')}; "
+                "  echo \"[clonebox] No NIC found\" > /dev/ttyS0 || true; "
                 "else "
-                "  ip addr show $NIC | grep -q 'inet ' || ( "
-                f"    {log_cmd.replace('$1', 'Configuring $NIC with 10.0.2.15')}; "
+                "  ip addr show $NIC | grep -q \"inet \\" || ( "
+                "    echo \"[clonebox] Configuring $NIC with 10.0.2.15\" > /dev/ttyS0 || true; "
                 "    ip addr add 10.0.2.15/24 dev $NIC 2>/dev/null; "
                 "    ip link set $NIC up; "
                 "    ip route add default via 10.0.2.2 2>/dev/null; "
@@ -2749,10 +2749,12 @@ if __name__ == "__main__":
                 "  ); "
                 "fi"
             )
-            bootcmd_lines.extend([
-                f'  - ["sh", "-c", "{log_cmd.replace("$1", "Checking network...")}"]',
-                f'  - ["sh", "-c", "{net_fallback}"]',
-            ])
+            bootcmd_lines.extend(
+                [
+                    f"  - {_yaml_single_quote('echo "[clonebox] Checking network..." > /dev/ttyS0 || true')}",
+                    f"  - {_yaml_single_quote(net_fallback)}",
+                ]
+            )
         
         if bootcmd_extra:
             bootcmd_lines.extend(list(bootcmd_extra))
