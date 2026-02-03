@@ -422,6 +422,11 @@ class SelectiveVMCloner:
 
     def resolve_network_mode(self, config: VMConfig) -> str:
         """Resolve network mode for VM."""
+        valid_modes = {"auto", "default", "user", "bridge", "nat"}
+        
+        if config.network_mode not in valid_modes:
+            return "default"
+        
         if config.network_mode == "auto":
             # Auto mode - use default network if available, otherwise user mode
             if self._default_network_active():

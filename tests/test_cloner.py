@@ -216,10 +216,12 @@ class TestSelectiveVMClonerMethods:
         running_vm = MagicMock()
         running_vm.name.return_value = "running-vm"
         running_vm.UUIDString.return_value = "uuid-1234"
+        running_vm.info.return_value = [1, 4194304, 0, 2]  # running, 4GB mem, 0 cpu time, 2 vcpus
 
         stopped_vm = MagicMock()
         stopped_vm.name.return_value = "stopped-vm"
         stopped_vm.UUIDString.return_value = "uuid-5678"
+        stopped_vm.info.return_value = [5, 4194304, 0, 2]  # shutoff, 4GB mem, 0 cpu time, 2 vcpus
 
         mock_conn.lookupByID.return_value = running_vm
         mock_conn.lookupByName.return_value = stopped_vm
@@ -233,7 +235,7 @@ class TestSelectiveVMClonerMethods:
         assert vms[0]["name"] == "running-vm"
         assert vms[0]["state"] == "running"
         assert vms[1]["name"] == "stopped-vm"
-        assert vms[1]["state"] == "stopped"
+        assert vms[1]["state"] == "shutoff"
 
     @patch("clonebox.cloner.libvirt")
     def test_close(self, mock_libvirt):

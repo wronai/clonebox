@@ -32,6 +32,15 @@ from clonebox.plugins.manager import get_plugin_manager
 from clonebox.remote import RemoteCloner
 from clonebox.cli.monitoring_commands import cmd_logs
 from clonebox.cli.misc_commands import cmd_set_password
+from clonebox.cli.policy_audit_commands import (
+    cmd_audit_list,
+    cmd_audit_show,
+    cmd_audit_failures,
+    cmd_audit_search,
+    cmd_audit_export,
+    cmd_policy_validate,
+    cmd_policy_apply,
+)
 from rich.progress import Progress
 
 __all__ = [
@@ -59,4 +68,11 @@ __all__ = [
     "RemoteCloner",
     "cmd_logs",
     "cmd_set_password",
+    "cmd_audit_list",
+    "cmd_audit_show",
+    "cmd_audit_failures",
+    "cmd_audit_search",
+    "cmd_audit_export",
+    "cmd_policy_validate",
+    "cmd_policy_apply",
 ]
