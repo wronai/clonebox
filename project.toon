@@ -1,32 +1,33 @@
-# clonebox | 88f 27012L | python:88
+# clonebox | 121f 35976L | python:121
 # Keys: M=modules, D=details, i=imports, c=classes, f=functions, m=methods
-M[88]:
+M[121]:
   fix_qga.py,54
   tests/test_orchestrator.py,228
   tests/conftest.py,345
   tests/test_profiles.py,39
   tests/test_audit.py,244
-  tests/test_cloner.py,263
+  tests/test_cloner.py,266
   tests/__init__.py,0
   tests/test_plugins.py,344
   tests/test_cloner_simple.py,27
   tests/test_validator.py,442
   tests/test_container.py,168
-  tests/test_coverage_boost_final.py,334
+  tests/test_coverage_boost_final.py,337
   tests/test_cli_new_commands.py,359
   tests/test_dashboard_coverage.py,90
   tests/test_models.py,260
-  tests/test_network.py,146
+  tests/test_network.py,149
   tests/test_coverage_additional.py,28
   tests/test_remote.py,283
   tests/test_detector.py,183
-  tests/test_cli.py,373
+  tests/test_cli.py,375
   scripts/advanced_vm_diagnostic.py,437
   scripts/fetch-logs.py,127
+  scripts/vm_state_diagnostic_models.py,39
   scripts/fix_interface_name.py,54
   scripts/fix_network_config.py,110
   scripts/fix_ssh_keys.py,130
-  scripts/vm_state_diagnostic.py,890
+  scripts/vm_state_diagnostic.py,851
   scripts/fix_yaml_quotes.py,71
   scripts/fix_yaml_bootcmd.py,71
   scripts/vm_console_interact.py,49
@@ -36,35 +37,67 @@ M[88]:
   tests/e2e/__init__.py,1
   tests/e2e/test_container_workflow.py,61
   src/clonebox/resources.py,167
+  src/clonebox/cli_original.py,3931
+  src/clonebox/cloud_init.py,259
   src/clonebox/resource_monitor.py,124
   src/clonebox/dashboard.py,136
   src/clonebox/validator.py,2
   src/clonebox/p2p.py,140
-  src/clonebox/cli.py,3964
+  src/clonebox/cli.py,6
   src/clonebox/importer.py,167
   src/clonebox/detector.py,589
   src/clonebox/exporter.py,145
   src/clonebox/__init__.py,10
-  src/clonebox/di.py,127
+  src/clonebox/di.py,130
   src/clonebox/remote.py,411
   src/clonebox/__main__.py,4
   src/clonebox/container.py,154
   src/clonebox/logging.py,99
+  src/clonebox/cloner_original.py,2617
   src/clonebox/orchestrator.py,444
-  src/clonebox/cloner.py,2617
+  src/clonebox/cloner.py,339
   src/clonebox/rollback.py,137
   src/clonebox/monitor.py,218
-  src/clonebox/models.py,180
+  src/clonebox/models.py,224
   src/clonebox/profiles.py,47
+  src/clonebox/cloner_utils.py,86
   src/clonebox/audit.py,355
   src/clonebox/secrets.py,266
+  src/clonebox/vm_xml.py,196
   src/clonebox/backends/subprocess_runner.py,50
   src/clonebox/backends/qemu_disk.py,40
   src/clonebox/backends/libvirt_backend.py,180
+  src/clonebox/backends/libvirt_network.py,19
   src/clonebox/health/manager.py,264
   src/clonebox/health/__init__.py,15
   src/clonebox/health/models.py,152
   src/clonebox/health/probes.py,299
+  src/clonebox/cli/interactive_plugins.py,77
+  src/clonebox/cli/interactive_ssh.py,76
+  src/clonebox/cli/vm_commands.py,389
+  src/clonebox/cli/remote_commands.py,178
+  src/clonebox/cli/interactive_settings.py,98
+  src/clonebox/cli/interactive_audit.py,74
+  src/clonebox/cli/compose_commands.py,217
+  src/clonebox/cli/snapshot_commands.py,86
+  src/clonebox/cli/interactive_vm.py,211
+  src/clonebox/cli/parsers.py,660
+  src/clonebox/cli/interactive.py,77
+  src/clonebox/cli/__init__.py,35
+  src/clonebox/cli/interactive_snapshots.py,95
+  src/clonebox/cli/interactive_import_export.py,103
+  src/clonebox/cli/interactive_compose.py,99
+  src/clonebox/cli/misc_commands.py,541
+  src/clonebox/cli/import_export_commands.py,216
+  src/clonebox/cli/utils.py,463
+  src/clonebox/cli/monitoring_commands.py,289
+  src/clonebox/cli/interactive_container.py,90
+  src/clonebox/cli/container_commands.py,65
+  src/clonebox/cli/interactive_remote.py,84
+  src/clonebox/cli/policy_audit_commands.py,233
+  src/clonebox/cli/plugin_commands.py,195
+  src/clonebox/cli/interactive_original.py,1136
+  src/clonebox/cli/interactive_monitor.py,130
   src/clonebox/plugins/base.py,245
   src/clonebox/plugins/manager.py,392
   src/clonebox/plugins/__init__.py,22
@@ -233,7 +266,7 @@ D:
     TestGenerateCloneboxYaml: create_mock_snapshot(0),create_mock_detector(0),test_generate_yaml_basic(0),test_generate_yaml_vm_name_from_path(0),test_generate_yaml_custom_vm_name(0)  # Test YAML config generation.
     TestLoadCloneboxConfig: test_load_config_from_file(1),test_load_config_from_directory(1),test_load_config_not_found(1)  # Test loading .clonebox.yaml configs.
     TestCLIConstants: test_config_file_name(0)  # Test CLI constants.
-    TestCLIIntegration: test_cli_help_commands(2),test_detect_json_output(3),test_detect_yaml_output(2),test_clone_creates_config_file(6),test_create_vm_from_config_propagates_disk_size(2)  # Integration tests for CLI commands.
+    TestCLIIntegration: test_cli_help_commands(2),test_detect_json_output(3),test_detect_yaml_output(2),test_clone_creates_config_file(6),test_create_vm_from_config_propagates_disk_size(3)  # Integration tests for CLI commands.
   scripts/advanced_vm_diagnostic.py:
     i: subprocess,json,sys,os,time,re,signal,dataclasses.{dataclass,field},pathlib.Path
     e: TestStatus,DiagnosticIssue,AdvancedVMDiagnostic,main
@@ -247,6 +280,12 @@ D:
     qga_exec(vm_name;conn_uri;command;timeout=10)->None
     ssh_exec(vm_name;command;timeout=20)->None
     main()->None
+  scripts/vm_state_diagnostic_models.py:
+    i: dataclasses.{dataclass,field},enum.Enum,pathlib.Path,typing.{Any,Dict,List,Optional}
+    e: TestStatus,TestResult,DiagnosticContext
+    TestStatus: 
+    TestResult: 
+    DiagnosticContext: __post_init__(0)
   scripts/fix_interface_name.py:
     i: sys,re,pathlib.Path
     e: fix_interface_name
@@ -262,11 +301,8 @@ D:
     fix_ssh_keys(vm_name:str)->None
     run_command(cmd)->None
   scripts/vm_state_diagnostic.py:
-    i: subprocess,json,sys,os,time,socket,base64,zlib,dataclasses.dataclass,pathlib.Path
-    e: TestStatus,TestResult,DiagnosticContext,VMDiagnostic,main
-    TestStatus: 
-    TestResult: 
-    DiagnosticContext: __post_init__(0)
+    i: subprocess,json,time,socket,base64,pathlib.Path,typing.{Any,Dict,List,Optional}
+    e: VMDiagnostic,main
     VMDiagnostic: __init__(3),run_cmd(2),virsh(0),qga_exec(2),ssh_exec(2)  # Diagnostic test suite for CloneBox VMs.
     main()->None
   scripts/fix_yaml_quotes.py:
@@ -319,6 +355,21 @@ D:
     ResourceLimits: from_dict(1)  # Combined resource limits for a VM.
     parse_size(value:Union[str;int])->int
     parse_bandwidth(value:Union[str;int])->int
+  src/clonebox/cli_original.py:
+    i: clonebox.cli.parsers.main
+    e: print_banner,run_vm_diagnostics,cmd_watch,cmd_repair,cmd_logs,cmd_set_password,interactive_mode,cmd_init
+    print_banner()->None
+    _resolve_vm_name_and_config_file(name:Optional[str])->Tuple[str, Optional[Path]]
+    _qga_ping(vm_name:str;conn_uri:str)->bool
+    _qga_exec(vm_name:str;conn_uri:str;command:str;timeout:int=10)->Optional[str]
+    run_vm_diagnostics(vm_name:str;conn_uri:str;config_file:Optional[Path])->dict
+    cmd_watch(args)->None
+    cmd_repair(args)->None
+    cmd_logs(args)->None
+  src/clonebox/cloud_init.py:
+    i: json,yaml,clonebox.models.VMConfig,typing.{Dict,List,Optional,Tuple}
+    e: generate_cloud_init_config,SNAP_INTERFACES,DEFAULT_SNAP_INTERFACES
+    generate_cloud_init_config(config:VMConfig;autostart_apps:List[Dict]=None;user_session:bool=False;bootcmd_extra:List=None)->str
   src/clonebox/resource_monitor.py:
     i: datetime,libvirt,dataclasses.dataclass,typing.{Any,Dict,List,Optional},xml.etree.ElementTree
     e: ResourceUsage,ResourceMonitor
@@ -339,17 +390,6 @@ D:
     i: subprocess,tempfile,pathlib.Path,typing.Optional
     e: P2PManager
     P2PManager: __init__(1),_run_ssh(2),_run_scp(3),export_remote(6),import_remote(5)  # Manage P2P VM transfers between works...
-  src/clonebox/cli.py:
-    i: argparse,json,os,re,secrets,sys,time,dataclasses.asdict,typing.{Any,Dict}
-    e: print_banner,run_vm_diagnostics,cmd_watch,cmd_repair,cmd_logs,cmd_set_password,interactive_mode,cmd_init
-    print_banner()->None
-    _resolve_vm_name_and_config_file(name:Optional[str])->Tuple[str, Optional[Path]]
-    _qga_ping(vm_name:str;conn_uri:str)->bool
-    _qga_exec(vm_name:str;conn_uri:str;command:str;timeout:int=10)->Optional[str]
-    run_vm_diagnostics(vm_name:str;conn_uri:str;config_file:Optional[Path])->dict
-    cmd_watch(args)->None
-    cmd_repair(args)->None
-    cmd_logs(args)->None
   src/clonebox/importer.py:
     i: shutil,subprocess,tarfile,tempfile,libvirt,cryptography.fernet.Fernet,pathlib.Path,typing.Optional,xml.etree.ElementTree
     e: VMImporter,SecureImporter
@@ -393,6 +433,11 @@ D:
     configure_logging(level:str='INFO';json_output:bool=False;log_file:Optional[Path]=None;console_output:bool=True)->None
     get_logger(name:str='clonebox')->structlog.stdlib.BoundLogger
     log_operation(logger:Any;operation:str)->None
+  src/clonebox/cloner_original.py:
+    i: base64,json,logging,os,secrets,shutil,socket,string,subprocess,tempfile
+    e: SNAP_INTERFACES,DEFAULT_SNAP_INTERFACES,VMConfig,SelectiveVMCloner
+    VMConfig: to_dict(0)  # Configuration for the VM to create.
+    SelectiveVMCloner: __init__(6),SYSTEM_IMAGES_DIR(0),USER_IMAGES_DIR(0),DEFAULT_BASE_IMAGE_URL(0),DEFAULT_BASE_IMAGE_FILENAME(0)  # Creates VMs with only selected applic...
   src/clonebox/orchestrator.py:
     i: collections.defaultdict,concurrent.futures.{Future,ThreadPoolExecutor,as_completed},dataclasses.{dataclass,field},enum.Enum,pathlib.Path,typing.{List,Optional}
     e: VMOrchestrationState,OrchestratedVM,OrchestrationPlan,OrchestrationResult,Orchestrator,load_compose_file
@@ -404,9 +449,8 @@ D:
     load_compose_file(path:Path)->Dict[str, Any]
   src/clonebox/cloner.py:
     i: base64,json,logging,os,secrets,shutil,socket,string,subprocess,tempfile
-    e: SNAP_INTERFACES,DEFAULT_SNAP_INTERFACES,VMConfig,SelectiveVMCloner
-    VMConfig: to_dict(0)  # Configuration for the VM to create.
-    SelectiveVMCloner: __init__(6),SYSTEM_IMAGES_DIR(0),USER_IMAGES_DIR(0),DEFAULT_BASE_IMAGE_URL(0),DEFAULT_BASE_IMAGE_FILENAME(0)  # Creates VMs with only selected applic...
+    e: SelectiveVMCloner
+    SelectiveVMCloner: __init__(6),create_vm(5),start_vm(3),stop_vm(3),restart_vm(4)  # Creates VMs with only selected applic...
   src/clonebox/rollback.py:
     i: logging,shutil,contextlib.contextmanager,dataclasses.{dataclass,field},pathlib.Path,typing.{Any,Callable,List,Optional}
     e: RollbackAction,RollbackContext,vm_creation_transaction
@@ -421,8 +465,9 @@ D:
     ResourceMonitor: __init__(1),conn(0),get_vm_stats(1),get_all_vm_stats(0),get_container_stats(1)  # Monitor VM and container resources in...
     format_bytes(num_bytes:int)->str
   src/clonebox/models.py:
-    i: pathlib.Path,pydantic.{BaseModel,Field,field_validator},typing.{Any,Dict,List,Literal,Optional},uuid.uuid4
-    e: VMSettings,CloneBoxConfig,ContainerConfig
+    i: os,dataclasses.{dataclass,field},pathlib.Path,typing.{Any,Dict,List,Literal,Optional},uuid.uuid4
+    e: VMConfig,VMSettings,CloneBoxConfig,ContainerConfig
+    VMConfig: to_dict(0)  # Configuration for the VM to create.
     VMSettings: name_must_be_valid(1),network_mode_must_be_valid(1)  # VM-specific settings.
     CloneBoxConfig: paths_must_be_absolute(1),handle_nested_vm(1),save(1),load(1),to_vm_config(0)  # Complete CloneBox configuration with...
     ContainerConfig: name_must_be_valid(1),extra_mounts_must_be_absolute(1),coerce_ports(1),ports_must_be_valid(1),mounts(0)
@@ -432,6 +477,16 @@ D:
     load_profile(profile_name:str;search_paths:list[Path])->Optional[Dict[str, Any]]
     _deep_merge(base:Dict[str;Any];override:Dict[str;Any])->Dict[str, Any]
     merge_with_profile(base_config:Dict[str;Any];profile_name:Optional[str]=None)->Dict[str, Any]
+  src/clonebox/cloner_utils.py:
+    i: subprocess,time,json,os,pathlib.Path
+    e: log,get_running_processes,is_app_running,restart_app,check_mounts,write_status,main
+    log(msg)->None
+    get_running_processes()->None
+    is_app_running(app_name;ps_output)->None
+    restart_app(app_name)->None
+    check_mounts()->None
+    write_status(status)->None
+    main()->None
   src/clonebox/audit.py:
     i: datetime,contextlib.contextmanager,dataclasses.{dataclass,field},enum.Enum,pathlib.Path,typing.{Any,Dict,List,Optional}
     e: AuditEventType,AuditOutcome,AuditEvent,AuditContext,AuditLogger,AuditQuery,get_audit_logger,set_audit_logger
@@ -451,6 +506,17 @@ D:
     EnvSecretsProvider: __init__(1),_load_env_file(0),get_secret(1),list_secrets(0),is_available(0)  # Load secrets from environment variabl...
     VaultSecretsProvider: __init__(3),_get_client(0),get_secret(1),list_secrets(0),is_available(0)  # Load secrets from HashiCorp Vault.
     SOPSSecretsProvider: __init__(1),_decrypt(0),get_secret(1),list_secrets(0),is_available(0)  # Load secrets from SOPS-encrypted files.
+  src/clonebox/vm_xml.py:
+    i: uuid,clonebox.models.VMConfig,typing.{Dict,List,Optional},xml.etree.ElementTree
+    e: generate_vm_xml,generate_network_xml,generate_pool_xml,generate_volume_xml
+    generate_vm_xml(config:VMConfig;vm_uuid:str;disk_path:str;cdrom_path:Optional[str]=None;user_session:bool=False)->str
+    _add_network_interface(devices:Any;config:VMConfig;user_session:bool)->None
+    _add_graphics(devices:Any;config:VMConfig)->None
+    _add_sound_device(devices:Any)->None
+    _add_resource_limits(domain:Any;config:VMConfig)->None
+    _generate_mac_address()->str
+    generate_network_xml(network_name:str;bridge_name:str='virbr0';dhcp:bool=True)->str
+    generate_pool_xml(pool_name:str;pool_path:str;pool_type:str='dir')->str
   src/clonebox/backends/subprocess_runner.py:
     i: subprocess,interfaces.process.{ProcessResult,ProcessRunner},pathlib.Path,typing.{Dict,List,Optional}
     e: SubprocessRunner
@@ -463,6 +529,10 @@ D:
     i: base64,json,time,libvirt,interfaces.hypervisor.{HypervisorBackend,VMInfo},typing.{Any,Dict,List,Optional}
     e: LibvirtBackend
     LibvirtBackend: __init__(2),connect(0),disconnect(0),conn(0),define_vm(1)  # libvirt hypervisor backend.
+  src/clonebox/backends/libvirt_network.py:
+    i: clonebox.interfaces.network.NetworkManager
+    e: LibvirtNetworkManager
+    LibvirtNetworkManager: create_network(2),delete_network(1),get_vm_ip(1),is_network_active(1),network_exists(1)  # Default network manager using libvirt.
   src/clonebox/health/manager.py:
     i: json,time,datetime,models.{HealthCheckResult,HealthStatus},pathlib.Path,typing.{Any,Dict,List,Optional}
     e: HealthCheckManager
@@ -484,6 +554,183 @@ D:
     CommandProbe: check(1)  # Command execution probe.
     ScriptProbe: check(1)  # Script execution probe.
     get_probe(probe_type:str)->HealthProbe
+  src/clonebox/cli/interactive_plugins.py:
+    i: questionary,clonebox.cli.utils.{console,custom_style},rich.console.Console
+    e: interactive_plugin_menu
+    interactive_plugin_menu()->None
+  src/clonebox/cli/interactive_ssh.py:
+    i: questionary,clonebox.cli.utils.{console,custom_style},pathlib.Path,rich.console.Console
+    e: interactive_ssh_menu
+    interactive_ssh_menu()->None
+  src/clonebox/cli/vm_commands.py:
+    i: json,subprocess,datetime,questionary,yaml,clonebox.cloner.SelectiveVMCloner,clonebox.models.VMConfig,pathlib.Path,rich.console.Console,typing.Optional
+    e: cmd_init,cmd_create,cmd_start,cmd_open,cmd_stop,cmd_restart,cmd_delete,cmd_list
+    cmd_init(args)->None
+    cmd_create(args)->None
+    cmd_start(args)->None
+    cmd_open(args)->None
+    cmd_stop(args)->None
+    cmd_restart(args)->None
+    cmd_delete(args)->None
+    cmd_list(args)->None
+  src/clonebox/cli/remote_commands.py:
+    i: tempfile,clonebox.cli.utils.{CLONEBOX_CONFIG_FILE,console,custom_style,load_clonebox_config},clonebox.remote.{RemoteCloner,RemoteConnection},pathlib.Path,typing.Optional
+    e: cmd_remote_list,cmd_remote_status,cmd_remote_start,cmd_remote_stop,cmd_remote_delete,cmd_remote_exec,cmd_remote_health,cmd_list_remote
+    cmd_remote_list(args)->None
+    cmd_remote_status(args)->None
+    cmd_remote_start(args)->None
+    cmd_remote_stop(args)->None
+    cmd_remote_delete(args)->None
+    cmd_remote_exec(args)->None
+    cmd_remote_health(args)->None
+    cmd_list_remote(args)->None
+  src/clonebox/cli/interactive_settings.py:
+    i: yaml,questionary,clonebox.cli.utils.{console,custom_style},pathlib.Path,rich.console.Console
+    e: interactive_settings
+    interactive_settings()->None
+  src/clonebox/cli/interactive_audit.py:
+    i: questionary,clonebox.cli.utils.{console,custom_style},rich.console.Console
+    e: interactive_audit_menu
+    interactive_audit_menu()->None
+  src/clonebox/cli/compose_commands.py:
+    i: yaml,clonebox.cli.utils.{console,custom_style,load_clonebox_config},clonebox.orchestrator.{OrchestrationResult,Orchestrator},pathlib.Path,rich.table.Table,typing.{Dict,List}
+    e: cmd_compose_up,cmd_compose_down,cmd_compose_status,cmd_compose_logs,cmd_compose_ps,cmd_compose_exec,cmd_compose_restart
+    cmd_compose_up(args)->None
+    cmd_compose_down(args)->None
+    cmd_compose_status(args)->None
+    cmd_compose_logs(args)->None
+    cmd_compose_ps(args)->None
+    cmd_compose_exec(args)->None
+    cmd_compose_restart(args)->None
+  src/clonebox/cli/snapshot_commands.py:
+    i: clonebox.cli.utils.{CLONEBOX_CONFIG_FILE,console,load_clonebox_config},clonebox.snapshots.{SnapshotManager,SnapshotType},pathlib.Path,typing.Optional
+    e: cmd_snapshot_create,cmd_snapshot_list,cmd_snapshot_restore,cmd_snapshot_delete
+    cmd_snapshot_create(args)->None
+    cmd_snapshot_list(args)->None
+    cmd_snapshot_restore(args)->None
+    cmd_snapshot_delete(args)->None
+  src/clonebox/cli/interactive_vm.py:
+    i: secrets,string,questionary,clonebox.cli.utils.{CLONEBOX_CONFIG_FILE,console,custom_style},pathlib.Path,rich.console.Console,typing.{Dict,List}
+    e: interactive_create_vm,interactive_start_vm,interactive_list_vms
+    interactive_create_vm()->None
+    interactive_start_vm()->None
+    interactive_list_vms()->None
+  src/clonebox/cli/parsers.py:
+    i: argparse,sys,clonebox.__version__,clonebox.cli.interactive.interactive_mode,clonebox.cli.utils.{console,custom_style},rich.console.Console
+    e: main
+    main()->None
+  src/clonebox/cli/interactive.py:
+    i: questionary,clonebox.__version__,clonebox.cli.interactive_container.interactive_container_menu,clonebox.cli.interactive_vm.{interactive_create_vm,interactive_list_vms,interactive_start_vm},clonebox.cli.utils.{console,custom_style,print_banner},rich.console.Console
+    e: interactive_mode,handle_choice
+    interactive_mode()->None
+    handle_choice(choice:str)->None
+  src/clonebox/cli/interactive_snapshots.py:
+    i: questionary,clonebox.cli.utils.{console,custom_style},rich.console.Console
+    e: interactive_snapshot_menu
+    interactive_snapshot_menu()->None
+  src/clonebox/cli/interactive_import_export.py:
+    i: questionary,clonebox.cli.utils.{console,custom_style},pathlib.Path,rich.console.Console
+    e: interactive_import_export_menu
+    interactive_import_export_menu()->None
+  src/clonebox/cli/interactive_compose.py:
+    i: yaml,questionary,clonebox.cli.utils.{console,custom_style},pathlib.Path,rich.console.Console
+    e: interactive_compose_menu
+    interactive_compose_menu()->None
+  src/clonebox/cli/misc_commands.py:
+    i: json,secrets,string,datetime,questionary,pathlib.Path,typing.{Dict,List,Optional,Tuple}
+    e: cmd_clone,cmd_detect,format_detection_output,build_config_from_detection,cmd_test,cmd_dashboard,cmd_status,cmd_set_password
+    cmd_clone(args)->None
+    cmd_detect(args)->None
+    format_detection_output(sys_info;console)->None
+    build_config_from_detection(sys_info:Dict;choices:List[str];path:Path)->Dict
+    cmd_test(args)->None
+    cmd_dashboard(args)->None
+    cmd_status(args)->None
+    cmd_set_password(args)->None
+  src/clonebox/cli/import_export_commands.py:
+    i: os,questionary,clonebox.cli.utils.{console,custom_style},clonebox.exporter.{SecureExporter,VMExporter},clonebox.importer.{SecureImporter,VMImporter},pathlib.Path,typing.Optional
+    e: cmd_export,cmd_import,cmd_export_encrypted,cmd_import_encrypted,cmd_export_remote,cmd_import_remote,cmd_sync_key,cmd_keygen
+    cmd_export(args)->None
+    cmd_import(args)->None
+    cmd_export_encrypted(args)->None
+    cmd_import_encrypted(args)->None
+    cmd_export_remote(args)->None
+    cmd_import_remote(args)->None
+    cmd_sync_key(args)->None
+    cmd_keygen(args)->None
+  src/clonebox/cli/utils.py:
+    i: os,re,secrets,time,questionary,pathlib.Path,typing.{Any,Dict,Optional,Tuple}
+    e: CLONEBOX_CONFIG_FILE,print_banner,load_env_file,expand_env_vars,deduplicate_list,generate_clonebox_yaml,load_env_file,expand_env_vars
+    print_banner()->None
+    _resolve_vm_name_and_config_file(name:Optional[str])->Tuple[str, Optional[Path]]
+    _qga_ping(vm_name:str;conn_uri:str)->bool
+    _qga_exec(vm_name:str;conn_uri:str;command:str;timeout:int=10)->Optional[str]
+    load_env_file(env_path:Path)->dict
+    expand_env_vars(value;env_vars:dict)->None
+    _find_unexpanded_env_placeholders(value)->set
+    deduplicate_list(items:list;key=None)->list
+  src/clonebox/cli/monitoring_commands.py:
+    i: time,clonebox.health.{HealthCheckManager,ProbeConfig,ProbeType},clonebox.monitor.{ResourceMonitor,format_bytes},pathlib.Path,rich.live.Live,rich.table.Table,typing.Optional
+    e: cmd_monitor,cmd_health,cmd_exec,cmd_watch,cmd_repair,cmd_logs
+    cmd_monitor(args)->None
+    cmd_health(args)->None
+    cmd_exec(args)->None
+    cmd_watch(args)->None
+    cmd_repair(args)->None
+    cmd_logs(args)->None
+  src/clonebox/cli/interactive_container.py:
+    i: questionary,clonebox.cli.utils.{console,custom_style},pathlib.Path,rich.console.Console
+    e: interactive_container_menu
+    interactive_container_menu()->None
+  src/clonebox/cli/container_commands.py:
+    i: clonebox.cli.utils.console,clonebox.container.ContainerCloner,pathlib.Path
+    e: cmd_container_up,cmd_container_ps,cmd_container_stop,cmd_container_rm,cmd_container_down
+    cmd_container_up(args)->None
+    cmd_container_ps(args)->None
+    cmd_container_stop(args)->None
+    cmd_container_rm(args)->None
+    cmd_container_down(args)->None
+  src/clonebox/cli/interactive_remote.py:
+    i: questionary,clonebox.cli.utils.{console,custom_style},rich.console.Console
+    e: interactive_remote_menu
+    interactive_remote_menu()->None
+  src/clonebox/cli/policy_audit_commands.py:
+    i: json,datetime,clonebox.audit.{AuditQuery,get_audit_logger},clonebox.policies.{PolicyEngine,PolicyValidationError,PolicyViolationError},pathlib.Path,rich.table.Table,typing.Optional
+    e: cmd_policy_validate,cmd_policy_apply,cmd_audit_list,cmd_audit_show,cmd_audit_failures,cmd_audit_search,cmd_audit_export
+    cmd_policy_validate(args)->None
+    cmd_policy_apply(args)->None
+    cmd_audit_list(args)->None
+    cmd_audit_show(args)->None
+    cmd_audit_failures(args)->None
+    cmd_audit_search(args)->None
+    cmd_audit_export(args)->None
+  src/clonebox/cli/plugin_commands.py:
+    i: json,clonebox.cli.utils.console,clonebox.plugins.{PluginContext,PluginHook,get_plugin_manager},pathlib.Path,rich.table.Table
+    e: cmd_plugin_list,cmd_plugin_enable,cmd_plugin_disable,cmd_plugin_discover,cmd_plugin_install,cmd_plugin_uninstall,cmd_plugin_info,cmd_plugin_run
+    cmd_plugin_list(args)->None
+    cmd_plugin_enable(args)->None
+    cmd_plugin_disable(args)->None
+    cmd_plugin_discover(args)->None
+    cmd_plugin_install(args)->None
+    cmd_plugin_uninstall(args)->None
+    cmd_plugin_info(args)->None
+    cmd_plugin_run(args)->None
+  src/clonebox/cli/interactive_original.py:
+    i: os,secrets,string,questionary,clonebox.__version__,pathlib.Path,rich.console.Console,typing.{Dict,List,Optional}
+    e: interactive_mode,handle_choice,interactive_create_vm,interactive_start_vm,interactive_list_vms,interactive_container_menu,interactive_snapshot_menu,interactive_monitor
+    interactive_mode()->None
+    handle_choice(choice:str)->None
+    interactive_create_vm()->None
+    interactive_start_vm()->None
+    interactive_list_vms()->None
+    interactive_container_menu()->None
+    interactive_snapshot_menu()->None
+    interactive_monitor()->None
+  src/clonebox/cli/interactive_monitor.py:
+    i: time,questionary,clonebox.cli.utils.{console,custom_style},clonebox.monitor.{ResourceMonitor,format_bytes},rich.console.Console,rich.live.Live,rich.table.Table,typing.List
+    e: interactive_monitor,interactive_health_check
+    interactive_monitor()->None
+    interactive_health_check()->None
   src/clonebox/plugins/base.py:
     i: abc.{ABC,abstractmethod},dataclasses.{dataclass,field},enum.Enum,typing.{Any,Callable,Dict,List,Optional}
     e: PluginHook,PluginMetadata,PluginContext,Plugin

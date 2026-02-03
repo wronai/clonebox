@@ -1,3 +1,27 @@
+## [1.1.33] - 2026-02-03
+
+### Summary
+
+refactor(tests): configuration management system
+
+### Core
+
+- update src/clonebox/cli/__init__.py
+- update src/clonebox/cloner.py
+- update src/clonebox/vm_xml.py
+
+### Test
+
+- update tests/test_cloner.py
+- update tests/test_coverage_boost_final.py
+- update tests/test_network.py
+
+### Other
+
+- update project.functions.toon
+- update project.toon
+
+
 ## [1.1.32] - 2026-02-03
 
 ### Summary

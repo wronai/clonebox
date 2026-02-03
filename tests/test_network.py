@@ -9,7 +9,9 @@ from clonebox.cloner import SelectiveVMCloner, VMConfig
 from clonebox.di import DependencyContainer, set_container
 from clonebox.interfaces.hypervisor import HypervisorBackend
 from clonebox.interfaces.disk import DiskManager
+from clonebox.interfaces.network import NetworkManager
 from clonebox.secrets import SecretsManager
+from clonebox.backends.libvirt_network import LibvirtNetworkManager
 
 @pytest.fixture(autouse=True)
 def mock_container():
@@ -17,6 +19,7 @@ def mock_container():
     container = DependencyContainer()
     container.register(HypervisorBackend, instance=MagicMock(spec=HypervisorBackend))
     container.register(DiskManager, instance=MagicMock(spec=DiskManager))
+    container.register(NetworkManager, LibvirtNetworkManager)
     container.register(SecretsManager, instance=MagicMock(spec=SecretsManager))
     set_container(container)
     yield container

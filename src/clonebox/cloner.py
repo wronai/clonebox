@@ -70,7 +70,9 @@ class SelectiveVMCloner:
         self.disk = disk_manager or self.container.resolve(DiskManager)
         self.network = network_manager or self.container.resolve(NetworkManager)
         self.secrets = secrets_manager or self.container.resolve(SecretsManager)
-        self.policy_engine = self.container.resolve(PolicyEngine)
+        # Load policy engine from filesystem if available
+        from .policies import PolicyEngine
+        self.policy_engine = PolicyEngine.load_effective()
         self.audit_logger = get_audit_logger()
 
         # Initialize libvirt connection
@@ -78,10 +80,10 @@ class SelectiveVMCloner:
             conn_uri = "qemu:///session" if user_session else "qemu:///system"
         
         self.conn_uri = conn_uri
-        self.conn = libvirt.open(conn_uri) if libvirt else None
-        
-        if not self.conn:
-            raise RuntimeError("Failed to connect to libvirt")
+        if libvirt:
+            self.conn = libvirt.open(conn_uri)
+        else:
+            self.conn = None
 
     def create_vm(
         self,
@@ -94,7 +96,7 @@ class SelectiveVMCloner:
         """Create a new VM with the given configuration."""
         
         with log_operation(
-            self.audit_logger,
+            log,
             "vm_create",
             vm_name=config.name,
             user=os.getenv("USER"),
@@ -112,18 +114,18 @@ class SelectiveVMCloner:
                 try:
                     self.conn.lookupByName(config.name)
                     raise ValueError(f"VM '{config.name}' already exists")
-                except libvirt.libvirtError:
+                except Exception:
                     pass
             
             # Validate configuration against policies
-            if not approved:
+            if not approved and self.policy_engine is not None:
                 self.policy_engine.validate_vm_creation(config)
             
             # Generate VM UUID
             vm_uuid = str(uuid.uuid4())
             
             # Create transaction for rollback
-            with vm_creation_transaction(config.name, vm_uuid):
+            with vm_creation_transaction(self, config, console) as ctx:
                 # Create base disk
                 disk_path = self._create_vm_disk(config)
                 
@@ -215,7 +217,7 @@ class SelectiveVMCloner:
         """Delete a VM and its storage."""
         
         with log_operation(
-            self.audit_logger,
+            log,
             "vm_delete",
             vm_name=vm_name,
             user=os.getenv("USER"),
@@ -248,10 +250,42 @@ class SelectiveVMCloner:
                         if os.path.exists(disk_path):
                             os.remove(disk_path)
                             log.info(f"Deleted disk: {disk_path}")
-                
-            except libvirt.libvirtError as e:
-                log.error(f"Failed to delete VM '{vm_name}': {e}")
-                raise
+                            
+            except Exception as e:
+                if "no domain with matching name" in str(e):
+                    # VM doesn't exist, that's OK when replacing
+                    log.info(f"VM '{vm_name}' does not exist, skipping deletion")
+                else:
+                    log.error(f"Failed to delete VM '{vm_name}': {e}")
+                    raise
+
+    @property
+    def SYSTEM_IMAGES_DIR(self) -> Path:
+        """Get the system images directory."""
+        return Path(os.getenv("CLONEBOX_SYSTEM_IMAGES_DIR", "/var/lib/libvirt/images"))
+
+    @property
+    def USER_IMAGES_DIR(self) -> Path:
+        """Get the user images directory."""
+        return Path(
+            os.getenv("CLONEBOX_USER_IMAGES_DIR", str(Path.home() / ".local/share/libvirt/images"))
+        )
+
+    def _generate_vm_xml(self, config: VMConfig, disk_path: Path, cloud_init_path: Optional[Path]) -> str:
+        """Generate VM XML configuration."""
+        return generate_vm_xml(
+            config=config,
+            vm_uuid=str(uuid.uuid4()),
+            disk_path=str(disk_path),
+            cdrom_path=str(cloud_init_path) if cloud_init_path else None,
+            user_session=self.user_session
+        )
+
+    def get_images_dir(self) -> Path:
+        """Get the appropriate images directory based on session type."""
+        if self.user_session:
+            return self.USER_IMAGES_DIR
+        return self.SYSTEM_IMAGES_DIR
 
     def list_vms(self) -> List[Dict]:
         """List all VMs."""
@@ -279,10 +313,16 @@ class SelectiveVMCloner:
                 
                 vms.append(vm_data)
                 
-        except libvirt.libvirtError as e:
+        except Exception as e:
             log.error(f"Failed to list VMs: {e}")
             
         return vms
+
+    def close(self):
+        """Close the libvirt connection."""
+        if hasattr(self, 'conn') and self.conn:
+            self.conn.close()
+            self.conn = None
 
     def _create_vm_disk(self, config: VMConfig) -> str:
         """Create the VM disk image."""
@@ -307,6 +347,7 @@ class SelectiveVMCloner:
             "qemu-img",
             "create",
             "-f", "qcow2",
+            "-F", "qcow2",
             "-b", base_image,
             str(disk_path),
             f"{config.disk_size_gb}G"
@@ -322,7 +363,7 @@ class SelectiveVMCloner:
         
         # Generate SSH key if not provided
         if not config.ssh_public_key and config.auth_method == "ssh_key":
-            key_pair = self.secrets.generate_ssh_key_pair()
+            key_pair = SSHKeyPair.generate()
             config.ssh_public_key = key_pair.public_key
         
         # Generate cloud-init config

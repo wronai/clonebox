@@ -18,6 +18,7 @@ def generate_vm_xml(
     user_session: bool = False,
 ) -> str:
     """Generate libvirt XML configuration for VM."""
+    from pathlib import Path
     
     # Create root domain element
     domain = ET.Element("domain", type="kvm")
@@ -38,7 +39,7 @@ def generate_vm_xml(
     
     # OS configuration
     os_elem = ET.SubElement(domain, "os")
-    ET.SubElement(os_elem, "type", arch="x86_64", machine="pc-q35-rhel8.6.0").text = "hvm"
+    ET.SubElement(os_elem, "type", arch="x86_64", machine="pc").text = "hvm"
     ET.SubElement(os_elem, "boot", dev="hd")
     if cdrom_path:
         ET.SubElement(os_elem, "boot", dev="cdrom")
@@ -66,33 +67,22 @@ def generate_vm_xml(
     # Devices
     devices = ET.SubElement(domain, "devices")
     
-    # Controller for USB
-    controller = ET.SubElement(devices, "controller", type="usb", index="0", model="qemu-xhci")
-    ET.SubElement(controller, "address", type="pci", domain="0x0000", bus="0x02", slot="0x00", function="0x0")
-    
-    # Controller for PCI
-    controller = ET.SubElement(devices, "controller", type="pci", index="0", model="pcie-root")
-    
     # Controller for SCSI
     controller = ET.SubElement(devices, "controller", type="scsi", index="0", model="virtio-scsi")
-    ET.SubElement(controller, "address", type="pci", domain="0x0000", bus="0x03", slot="0x00", function="0x0")
     
     # Disk
     disk = ET.SubElement(devices, "disk", type="file", device="disk")
     ET.SubElement(disk, "driver", name="qemu", type="qcow2", cache="writeback", io="threads")
     ET.SubElement(disk, "source", file=disk_path)
     ET.SubElement(disk, "target", dev="vda", bus="virtio")
-    ET.SubElement(disk, "boot", order="1")
-    ET.SubElement(disk, "address", type="pci", domain="0x0000", bus="0x04", slot="0x00", function="0x0")
     
     # CDROM (if provided)
     if cdrom_path:
         disk = ET.SubElement(devices, "disk", type="file", device="cdrom")
         ET.SubElement(disk, "driver", name="qemu", type="raw")
         ET.SubElement(disk, "source", file=cdrom_path)
-        ET.SubElement(disk, "target", dev="hda", bus="ide")
+        ET.SubElement(disk, "target", dev="sda", bus="sata")
         ET.SubElement(disk, "readonly")
-        ET.SubElement(disk, "address", type="pci", domain="0x0000", bus="0x01", slot="0x01", function="0x0")
     
     # Network interface
     _add_network_interface(devices, config, user_session)
@@ -101,17 +91,12 @@ def generate_vm_xml(
     if config.gui:
         _add_graphics(devices, config)
     
-    # Channel for QEMU Guest Agent
-    channel = ET.SubElement(devices, "channel", type="unix")
-    ET.SubElement(channel, "source", mode="bind", path=f"/var/lib/libvirt/qemu/channel/target/domain-{config.name}/org.qemu.guest_agent.0")
-    ET.SubElement(channel, "target", type="virtio", name="org.qemu.guest_agent.0")
-    ET.SubElement(channel, "address", type="pci", domain="0x0000", bus="0x05", slot="0x00", function="0x0")
-    
-    # Virtio channels for file system (9p)
-    for idx in range(len(config.paths)):
-        channel = ET.SubElement(devices, "channel", type="spicevmc")
-        ET.SubElement(channel, "target", type="virtio", name="com.redhat.spice.0")
-        ET.SubElement(channel, "address", type="pci", domain=f"0x0000", bus="0x06", slot=f"0x{idx:02x}", function="0x0")
+    # Channel for QEMU Guest Agent (only for system session)
+    if not user_session:
+        channel = ET.SubElement(devices, "channel", type="unix")
+        # Let libvirt handle the socket path
+        ET.SubElement(channel, "source", mode="bind")
+        ET.SubElement(channel, "target", type="virtio", name="org.qemu.guest_agent.0")
     
     # Filesystem for 9p mounts
     for idx, (host_path, guest_path) in enumerate(config.paths.items()):
@@ -119,36 +104,41 @@ def generate_vm_xml(
         ET.SubElement(fs, "source", dir=host_path)
         ET.SubElement(fs, "target", dir=guest_path)
         ET.SubElement(fs, "alias", name=f"fs{idx}")
-        ET.SubElement(fs, "address", type="pci", domain="0x0000", bus="0x07", slot=f"0x{idx:02x}", function="0x0")
     
-    # Input devices
-    input_dev = ET.SubElement(devices, "input", type="tablet", bus="usb")
-    ET.SubElement(input_dev, "address", type="usb", bus="0", port="1")
+    # Input devices (only for system session)
+    if not user_session:
+        input_dev = ET.SubElement(devices, "input", type="tablet", bus="usb")
+        ET.SubElement(input_dev, "address", type="usb", bus="0", port="1")
+        
+        input_dev = ET.SubElement(devices, "input", type="keyboard", bus="usb")
+        ET.SubElement(input_dev, "address", type="usb", bus="0", port="2")
     
-    input_dev = ET.SubElement(devices, "input", type="keyboard", bus="usb")
-    ET.SubElement(input_dev, "address", type="usb", bus="0", port="2")
-    
-    # Graphics input
+    # Always add PS/2 input
     ET.SubElement(devices, "input", type="mouse", bus="ps2")
     ET.SubElement(devices, "input", type="keyboard", bus="ps2")
     
     # Video
     video = ET.SubElement(devices, "video")
-    model = ET.SubElement(video, "model", type="virtio", heads="1", primary="yes")
-    ET.SubElement(model, "acceleration", accel3d="yes")
-    ET.SubElement(video, "address", type="pci", domain="0x0000", bus="0x00", slot="0x01", function="0x0")
+    if user_session:
+        # Use standard VGA for user session
+        model = ET.SubElement(video, "model", type="vga", heads="1", primary="yes")
+    else:
+        # Use virtio with OpenGL for system session
+        model = ET.SubElement(video, "model", type="virtio", heads="1", primary="yes")
+        ET.SubElement(model, "acceleration", accel3d="yes")
     
-    # Sound
-    _add_sound_device(devices)
+    # Sound (only for system session)
+    if not user_session:
+        _add_sound_device(devices)
     
-    # Memory balloon
-    memballoon = ET.SubElement(devices, "memballoon", model="virtio")
-    ET.SubElement(memballoon, "address", type="pci", domain="0x0000", bus="0x08", slot="0x00", function="0x0")
+    # Memory balloon (only for system session)
+    if not user_session:
+        memballoon = ET.SubElement(devices, "memballoon", model="virtio")
     
-    # RNG device
-    rng = ET.SubElement(devices, "rng", model="virtio")
-    ET.SubElement(rng, "backend", model="random", device="/dev/urandom")
-    ET.SubElement(rng, "address", type="pci", domain="0x0000", bus="0x09", slot="0x00", function="0x0")
+    # RNG device (only for system session)
+    if not user_session:
+        rng = ET.SubElement(devices, "rng", model="virtio")
+        ET.SubElement(rng, "backend", model="random", device="/dev/urandom")
     
     # Resource limits (only for system session)
     if not user_session:
@@ -167,7 +157,6 @@ def _add_network_interface(devices: ET.Element, config: VMConfig, user_session: 
         interface = ET.SubElement(devices, "interface", type="user")
         ET.SubElement(interface, "mac", address=_generate_mac_address())
         ET.SubElement(interface, "model", type="virtio")
-        ET.SubElement(interface, "address", type="pci", domain="0x0000", bus="0x01", slot="0x00", function="0x0")
     elif config.network_mode == "auto":
         if user_session:
             # Use passt for user session if available
@@ -175,21 +164,18 @@ def _add_network_interface(devices: ET.Element, config: VMConfig, user_session: 
             ET.SubElement(interface, "backend", type="passt")
             ET.SubElement(interface, "mac", address=_generate_mac_address())
             ET.SubElement(interface, "model", type="virtio")
-            ET.SubElement(interface, "address", type="pci", domain="0x0000", bus="0x01", slot="0x00", function="0x0")
         else:
             # Use default network for system session
             interface = ET.SubElement(devices, "interface", type="network")
             ET.SubElement(interface, "source", network="default")
             ET.SubElement(interface, "mac", address=_generate_mac_address())
             ET.SubElement(interface, "model", type="virtio")
-            ET.SubElement(interface, "address", type="pci", domain="0x0000", bus="0x01", slot="0x00", function="0x0")
     else:
         # Default network
         interface = ET.SubElement(devices, "interface", type="network")
         ET.SubElement(interface, "source", network="default")
         ET.SubElement(interface, "mac", address=_generate_mac_address())
         ET.SubElement(interface, "model", type="virtio")
-        ET.SubElement(interface, "address", type="pci", domain="0x0000", bus="0x01", slot="0x00", function="0x0")
 
 
 def _add_graphics(devices: ET.Element, config: VMConfig):
@@ -203,7 +189,6 @@ def _add_graphics(devices: ET.Element, config: VMConfig):
     # SPICE channel
     channel = ET.SubElement(devices, "channel", type="spicevmc")
     ET.SubElement(channel, "target", type="virtio", name="com.redhat.spice.0")
-    ET.SubElement(channel, "address", type="pci", domain="0x0000", bus="0x10", slot="0x00", function="0x0")
     
     # VNC graphics (fallback)
     graphics = ET.SubElement(devices, "graphics", type="vnc", port="-1", autoport="yes", listen="0.0.0.0")
@@ -214,10 +199,6 @@ def _add_sound_device(devices: ET.Element):
     """Add sound device configuration."""
     
     sound = ET.SubElement(devices, "sound", model="ich9")
-    ET.SubElement(sound, "address", type="pci", domain="0x0000", bus="0x00", slot="0x1b", function="0x0")
-    
-    # Audio controller
-    controller = ET.SubElement(devices, "controller", type="pci", index="0", model="pcie-root")
     
     # Audio devices
     audio = ET.SubElement(devices, "audio", id="1", type="pulseaudio")
