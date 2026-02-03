@@ -18,6 +18,7 @@ import urllib.request
 import uuid
 import zlib
 import xml.etree.ElementTree as ET
+import signal
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
@@ -1911,11 +1912,11 @@ fi
 
         # Phase 8: Snap packages
         if config.snap_packages:
-            runcmd_lines.append(f"  - echo '[8/10] 📦 Installing snap packages ({len(config.snap_packages)} packages)...'")
+            runcmd_lines.append(f"echo '[8/10] 📦 Installing snap packages ({len(config.snap_packages)} packages)...'")
             # Check space before starting snap installation
-            runcmd_lines.append("  - if [ $(df / --output=avail | tail -n 1) -lt 2097152 ]; then echo '  → ⚠️  WARNING: Low disk space (<2GB) before Snap install'; fi")
+            runcmd_lines.append("if [ $(df / --output=avail | tail -n 1) -lt 2097152 ]; then echo '  → ⚠️  WARNING: Low disk space (<2GB) before Snap install'; fi")
             for i, snap_pkg in enumerate(config.snap_packages, 1):
-                runcmd_lines.append(f"  - echo '  → [{i}/{len(config.snap_packages)}] {snap_pkg}'")
+                runcmd_lines.append(f"echo '  → [{i}/{len(config.snap_packages)}] {snap_pkg}'")
                 # Try classic first, then strict, with retries
                 cmd = (
                     f"for i in 1 2 3; do "
@@ -1924,43 +1925,43 @@ fi
                     f"{{ if [ $i -eq 3 ]; then echo '  → ❌ Failed to install {snap_pkg} after 3 attempts'; else echo '  → ⟳ Retry $i/3...' && sleep 10; fi; }} "
                     f"done"
                 )
-                runcmd_lines.append(f"  - {cmd}")
-            runcmd_lines.append("  - echo '  → ✓ [8/10] Snap packages installed'")
-            runcmd_lines.append("  - df -h / | sed 's/^/  → /'")
+                runcmd_lines.append(cmd)
+            runcmd_lines.append("echo '  → ✓ [8/10] Snap packages installed'")
+            runcmd_lines.append("df -h / | sed 's/^/  → /'")
         
         # Phase 9: Post commands
         if config.post_commands:
-            runcmd_lines.append(f"  - echo '[9/10] ⚙️  Running post-setup commands ({len(config.post_commands)} total)...'")
+            runcmd_lines.append(f"echo '[9/10] ⚙️  Running post-setup commands ({len(config.post_commands)} total)...'")
             for i, cmd in enumerate(config.post_commands, 1):
                 # Truncate long commands for display
                 display_cmd = cmd[:60] + '...' if len(cmd) > 60 else cmd
-                runcmd_lines.append(f"  - echo '  → [{i}/{len(config.post_commands)}] {display_cmd}'")
-                runcmd_lines.append(f"  - {cmd} || echo '  → ❌ Command {i} failed'")
-                runcmd_lines.append(f"  - echo '  → ✓ Command {i} completed'")
-            runcmd_lines.append("  - echo '  → ✓ [9/10] Post-setup commands finished'")
-            runcmd_lines.append("  - echo ''")
+                runcmd_lines.append(f"echo '  → [{i}/{len(config.post_commands)}] {display_cmd}'")
+                runcmd_lines.append(f"{cmd} || echo '  → ❌ Command {i} failed'")
+                runcmd_lines.append(f"echo '  → ✓ Command {i} completed'")
+            runcmd_lines.append("echo '  → ✓ [9/10] Post-setup commands finished'")
+            runcmd_lines.append("echo ''")
         else:
-            runcmd_lines.append("  - echo '[9/10] ⚙️  No post-setup commands'")
-            runcmd_lines.append("  - echo ''")
+            runcmd_lines.append("echo '[9/10] ⚙️  No post-setup commands'")
+            runcmd_lines.append("echo ''")
 
         # Generate health check script
         health_script = self._generate_health_check_script(config)
         # Phase 10: Health checks and finalization
-        runcmd_lines.append("  - echo '[10/10] 🏥 Running health checks and final cleanup...'")
-        runcmd_lines.append("  - echo '  → Vacuuming system logs'")
-        runcmd_lines.append("  - journalctl --vacuum-size=50M >/dev/null 2>&1 || true")
-        runcmd_lines.append("  - echo '  → Checking final disk usage'")
-        runcmd_lines.append("  - df -h / | sed 's/^/  → /'")
+        runcmd_lines.append("echo '[10/10] 🏥 Running health checks and final cleanup...'")
+        runcmd_lines.append("echo '  → Vacuuming system logs'")
+        runcmd_lines.append("journalctl --vacuum-size=50M >/dev/null 2>&1 || true")
+        runcmd_lines.append("echo '  → Checking final disk usage'")
+        runcmd_lines.append("df -h / | sed 's/^/  → /'")
         
         runcmd_lines.append(
-            f"  - echo '{health_script}' | base64 -d > /usr/local/bin/clonebox-health"
+            f"echo '{health_script}' | base64 -d > /usr/local/bin/clonebox-health"
         )
-        runcmd_lines.append("  - chmod +x /usr/local/bin/clonebox-health")
+        runcmd_lines.append("chmod +x /usr/local/bin/clonebox-health")
         runcmd_lines.append(
-            "  - /usr/local/bin/clonebox-health >> /var/log/clonebox-health.log 2>&1 || true"
+            "/usr/local/bin/clonebox-health >> /var/log/clonebox-health.log 2>&1 || true"
         )
-        runcmd_lines.append("  - echo '  → ✓ [10/10] Health checks completed'")
-        runcmd_lines.append("  - echo 'CloneBox VM ready!' > /var/log/clonebox-ready")
+        runcmd_lines.append("echo '  → ✓ [10/10] Health checks completed'")
+        runcmd_lines.append("echo 'CloneBox VM ready!' > /var/log/clonebox-ready")
         
         # Final status
         runcmd_lines.append("  - echo ''")
@@ -2842,45 +2843,23 @@ if __name__ == "__main__":
             cloud_config["bootcmd"] = bootcmd_list
             
         # Add runcmd
-        # runcmd_lines is built in a YAML-like form (e.g. "  - cmd" and "  - |" with indented block).
-        # Convert it back into a proper list of commands for cloud-init.
-        clean_runcmd: list[str] = []
-        i = 0
-        while i < len(runcmd_lines):
-            raw = runcmd_lines[i].rstrip("\n")
-            stripped = raw.strip()
+        # runcmd_lines currently mixes plain shell lines and YAML-ish list items ("- cmd", "  - cmd", and "|").
+        # Running them as individual runcmd entries breaks multi-line shell constructs (if/then/fi).
+        # Normalize to a single bash script executed once.
+        script_lines: list[str] = []
+        for raw in runcmd_lines:
+            s = (raw or "").rstrip("\n")
+            t = s.strip()
+            if not t:
+                continue
+            if t == "|":
+                continue
+            if t.startswith("- "):
+                t = t[2:]
+            script_lines.append(t)
 
-            if stripped.startswith("- "):
-                cmd = stripped[2:]
-
-                # Collapse "- |" blocks into a single multi-line command string.
-                # Emitting a standalone "|" would break runcmd execution.
-                if cmd == "|":
-                    block: list[str] = []
-                    i += 1
-                    while i < len(runcmd_lines):
-                        nxt = runcmd_lines[i].rstrip("\n")
-                        nxt_stripped = nxt.strip()
-                        if nxt_stripped.startswith("- "):
-                            break
-
-                        if nxt.startswith("    "):
-                            block.append(nxt[4:])
-                        else:
-                            block.append(nxt_stripped)
-                        i += 1
-
-                    clean_runcmd.append("\n".join(block))
-                    continue
-
-                clean_runcmd.append(cmd)
-            else:
-                # Shouldn't normally happen, but keep behavior predictable.
-                clean_runcmd.append(stripped)
-
-            i += 1
-
-        cloud_config["runcmd"] = clean_runcmd
+        if script_lines:
+            cloud_config["runcmd"] = [["bash", "-lc", "\n".join(script_lines)]]
 
         # Prevent PyYAML from inserting hard newlines into long shell commands.
         user_data = "#cloud-config\n" + yaml.dump(
@@ -3145,6 +3124,41 @@ ethernets:
         # Stop if running
         if vm.isActive():
             vm.destroy()
+
+        # Best-effort cleanup for orphaned passt helpers.
+        # When passt processes linger, they keep SSH forward ports busy and cause port drift.
+        try:
+            procs = subprocess.run(
+                ["pgrep", "-af", "passt"],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            lines = (procs.stdout or "").splitlines()
+            pids: list[int] = []
+            for line in lines:
+                if vm_name not in line:
+                    continue
+                try:
+                    pid = int(line.strip().split()[0])
+                except Exception:
+                    continue
+                pids.append(pid)
+
+            for pid in pids:
+                try:
+                    os.kill(pid, signal.SIGTERM)
+                except Exception:
+                    pass
+            if pids:
+                time.sleep(0.5)
+            for pid in pids:
+                try:
+                    os.kill(pid, signal.SIGKILL)
+                except Exception:
+                    pass
+        except Exception:
+            pass
 
         # Undefine
         vm.undefine()

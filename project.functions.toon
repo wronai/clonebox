@@ -1,5 +1,5 @@
 project: clonebox
-generated: "2026-02-03T19:26:16.590528"
+generated: "2026-02-03T19:50:37.254992"
 modules[88]{path,lang,items}:
   fix_qga.py,python,1
   tests/test_orchestrator.py,python,19
@@ -859,15 +859,15 @@ function_details:
       SelectiveVMCloner._generate_health_check_script,method,"(config:VMConfig) -> str",1068-1338,false,271,12,Generate a health check script that validates all installed components.
       SelectiveVMCloner._generate_vm_xml,method,"(config:VMConfig=None, root_disk:Path=None, cloudinit_iso:Optional[Path]=None) -> str",1340-1549,false,210,40,Generate libvirt XML for the VM.
       SelectiveVMCloner._yaml_single_quote,method,"(s:str) -> str",1551-1553,false,3,1,Escape a string for single-quoted YAML value.
-      SelectiveVMCloner._create_cloudinit_iso,method,"(vm_dir:Path, config:VMConfig, user_session:bool=False) -> Path",1555-2910,false,1356,96,Create cloud-init ISO with secure credential handling.
-      SelectiveVMCloner.start_vm,method,"(vm_name:str, open_viewer:bool=True, console=None) -> bool",2912-2976,false,65,12,Start a VM and optionally open virt-viewer.
-      SelectiveVMCloner.wait_for_setup,method,"(vm_name:str, timeout_mins:int=15, console=None) -> bool",2978-3038,false,61,11,Wait for the VM to complete setup by monitoring serial.log.
-      SelectiveVMCloner.stop_vm,method,"(vm_name:str, force:bool=False, console=None) -> bool",3040-3093,false,54,10,Stop a VM.
-      SelectiveVMCloner.delete_vm,method,"(vm_name:str, delete_storage:bool=True, console=None, ignore_not_found:bool=False, approved:bool=False) -> bool",3095-3143,false,49,7,Delete a VM and optionally its storage.
-      SelectiveVMCloner.list_vms,method,() -> list,3145-3156,false,12,3,List all VMs.
-      SelectiveVMCloner.close,method,() -> None,3158-3161,false,4,2,Close libvirt connection.
-      SelectiveVMCloner._get_base_image_info,method,"(image_path:str) -> dict",3164-3169,false,6,2,Get base image information - backward compatibility shim.
-      SelectiveVMCloner.get_vm_info,method,"(vm_name:str) -> dict",3171-3184,false,14,4,Get VM information - backward compatibility shim.
+      SelectiveVMCloner._create_cloudinit_iso,method,"(vm_dir:Path, config:VMConfig, user_session:bool=False) -> Path",1555-2929,false,1375,97,Create cloud-init ISO with secure credential handling.
+      SelectiveVMCloner.start_vm,method,"(vm_name:str, open_viewer:bool=True, console=None) -> bool",2931-2995,false,65,12,Start a VM and optionally open virt-viewer.
+      SelectiveVMCloner.wait_for_setup,method,"(vm_name:str, timeout_mins:int=15, console=None) -> bool",2997-3057,false,61,11,Wait for the VM to complete setup by monitoring serial.log.
+      SelectiveVMCloner.stop_vm,method,"(vm_name:str, force:bool=False, console=None) -> bool",3059-3112,false,54,10,Stop a VM.
+      SelectiveVMCloner.delete_vm,method,"(vm_name:str, delete_storage:bool=True, console=None, ignore_not_found:bool=False, approved:bool=False) -> bool",3114-3162,false,49,7,Delete a VM and optionally its storage.
+      SelectiveVMCloner.list_vms,method,() -> list,3164-3175,false,12,3,List all VMs.
+      SelectiveVMCloner.close,method,() -> None,3177-3180,false,4,2,Close libvirt connection.
+      SelectiveVMCloner._get_base_image_info,method,"(image_path:str) -> dict",3183-3188,false,6,2,Get base image information - backward compatibility shim.
+      SelectiveVMCloner.get_vm_info,method,"(vm_name:str) -> dict",3190-3203,false,14,4,Get VM information - backward compatibility shim.
   src/clonebox/rollback.py:
     functions[9]{name,kind,sig,loc,async,lines,cc,does}:
       vm_creation_transaction,function,"(cloner:Any, config:Any, console:Optional[Any]=None) -> None",147-172,false,26,3,Context manager for VM creation with automatic rollback.

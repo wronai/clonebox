@@ -1,3 +1,19 @@
+## [1.1.30] - 2026-02-03
+
+### Summary
+
+feat(None): configuration management system
+
+### Core
+
+- update src/clonebox/cloner.py
+
+### Other
+
+- update project.functions.toon
+- update project.toon
+
+
 ## [1.1.29] - 2026-02-03
 
 ### Summary

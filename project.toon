@@ -1,4 +1,4 @@
-# clonebox | 88f 26967L | python:88
+# clonebox | 88f 26986L | python:88
 # Keys: M=modules, D=details, i=imports, c=classes, f=functions, m=methods
 M[88]:
   fix_qga.py,54
@@ -51,7 +51,7 @@ M[88]:
   src/clonebox/container.py,154
   src/clonebox/logging.py,99
   src/clonebox/orchestrator.py,444
-  src/clonebox/cloner.py,2573
+  src/clonebox/cloner.py,2590
   src/clonebox/rollback.py,137
   src/clonebox/monitor.py,218
   src/clonebox/models.py,180
