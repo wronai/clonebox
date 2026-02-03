@@ -499,6 +499,8 @@ def format_detection_output(output, sys_info):
 
 def cmd_set_password(args):
     """Set password for a VM."""
+    import subprocess
+    
     name = args.name
     user_session = getattr(args, "user", False)
     
@@ -519,16 +521,7 @@ def cmd_set_password(args):
             console.print("[red]❌ Password is required[/]")
             return
     
-    cloner = SelectiveVMCloner(user_session=user_session)
-    try:
-        # Use QEMU Guest Agent to set password if VM is running
-        vm = cloner.conn.lookupByName(name)
-        if not vm.isActive():
-            console.print("[red]❌ VM must be running to set password[/]")
-            return
-        
-        # Execute command to set password
-        # This is a simplified implementation
-        console.print(f"[green]✅ Password set for VM '{name}'[/]")
-    except Exception as e:
-        console.print(f"[red]❌ Failed to set password: {e}[/]")
+    # Call set-vm-password script
+    script_path = Path(__file__).parent.parent.parent / "scripts" / "set-vm-password.sh"
+    cmd = [str(script_path), name, password, "true" if user_session else "false"]
+    subprocess.run(cmd, check=True)
