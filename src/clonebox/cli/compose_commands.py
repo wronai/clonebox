@@ -34,9 +34,8 @@ def cmd_compose_up(args):
     services = args.services if args.services else list(compose_config.get("services", {}).keys())
     
     result = orchestrator.up(
-        compose_file=compose_file,
         services=services,
-        detach=args.detach,
+        parallel=not args.detach,
         console=console,
     )
     
@@ -50,26 +49,20 @@ def cmd_compose_up(args):
         table.add_column("State", style="yellow")
         table.add_column("IP Address", style="blue")
         
-        for service in result.services:
+        for service, state in result.states.items():
             table.add_row(
-                service["name"],
-                service["vm_name"],
-                service["state"],
-                service.get("ip", "-"),
+                service,
+                state.vm_name,
+                state.status,
+                state.ip or "-",
             )
         
         console.print(table)
-        
-        # Show network info
-        if result.networks:
-            console.print("\n[bold]Networks:[/]")
-            for network in result.networks:
-                console.print(f"  • {network['name']}: {network['subnet']}")
     else:
         console.print(f"\n[red]❌ Failed to start compose environment[/]")
         if result.errors:
-            for error in result.errors:
-                console.print(f"  • {error}")
+            for service, error in result.errors.items():
+                console.print(f"  • {service}: {error}")
 
 
 def cmd_compose_down(args):

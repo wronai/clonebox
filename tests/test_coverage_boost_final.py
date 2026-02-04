@@ -220,10 +220,18 @@ def test_cloner_create_vm_branches():
             cloner.create_vm(config)
 
             # 2. VM already exists error
-            mock_conn.lookupByName.side_effect = None
+            mock_conn.reset_mock()
             mock_vm = Mock()
             mock_vm.name.return_value = "test-vm"
             mock_conn.lookupByName.return_value = mock_vm
+            
+            # Add side effect to track calls
+            def track_lookup(name):
+                print(f"lookupByName called with: {name}")
+                return mock_vm
+            
+            mock_conn.lookupByName.side_effect = track_lookup
+            
             with pytest.raises(ValueError, match="already exists"):
                 cloner.create_vm(config, replace=False)
 
@@ -349,10 +357,10 @@ def test_cloner_cloudinit_generation():
                 "pathlib.Path.write_text"
             ), patch(
                 "pathlib.Path.chmod"
-            ), patch("shutil.copy2"), patch("pathlib.Path.mkdir"):
+            ), patch("shutil.copy2"):
                 # Create the ISO file that genisoimage would create
                 iso_tmp_dir = Path(tmpdir) / "tmp"
-                iso_tmp_dir.mkdir()
+                iso_tmp_dir.mkdir(parents=True)
                 iso_file = iso_tmp_dir / "cloud-init.iso"
                 iso_file.touch()
                 

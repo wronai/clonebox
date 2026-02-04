@@ -123,10 +123,14 @@ class SelectiveVMCloner:
                 self.delete_vm(config.name, delete_storage=False, approved=approved)
             else:
                 try:
-                    self.conn.lookupByName(config.name)
+                    existing_vm = self.conn.lookupByName(config.name)
+                    # If we get here, VM exists
                     raise ValueError(f"VM '{config.name}' already exists")
-                except Exception:
-                    pass
+                except Exception as e:
+                    # Check if it's the "VM not found" exception
+                    if "no domain" not in str(e).lower() and "not found" not in str(e).lower():
+                        # Re-raise if it's not a "not found" exception
+                        raise
             
             # Validate configuration against policies
             if not approved and self.policy_engine is not None:
@@ -539,8 +543,8 @@ class SelectiveVMCloner:
             key_pair = SSHKeyPair.generate()
             config.ssh_public_key = key_pair.public_key
         
-        # Generate cloud-init config
-        cloud_config = generate_cloud_init_config(
+        # Generate cloud-init config (returns tuple: user_data, meta_data, network_config)
+        user_data, meta_data, network_config = generate_cloud_init_config(
             config=config,
             user_session=self.user_session,
         )
@@ -549,22 +553,28 @@ class SelectiveVMCloner:
         with tempfile.TemporaryDirectory() as tmpdir:
             # Write user-data
             user_data_path = Path(tmpdir) / "user-data"
-            user_data_path.write_text(cloud_config)
+            user_data_path.write_text(user_data)
             
             # Write meta-data
             meta_data_path = Path(tmpdir) / "meta-data"
-            meta_data_path.write_text(f"instance-id: {config.name}\nlocal-hostname: {config.name}\n")
+            meta_data_path.write_text(meta_data)
             
-            # Create ISO
+            # Write network-config if provided (for user session with passt)
+            iso_files = [str(user_data_path), str(meta_data_path)]
+            if network_config:
+                network_config_path = Path(tmpdir) / "network-config"
+                network_config_path.write_text(network_config)
+                iso_files.append(str(network_config_path))
+            
+            # Create ISO with long filename support for cloud-init
             iso_path = Path(tmpdir) / "cloud-init.iso"
             cmd = [
                 "mkisofs",
                 "-o", str(iso_path),
                 "-V", "cidata",
                 "-J", "-r",
-                str(user_data_path),
-                str(meta_data_path),
-            ]
+                "-iso-level", "4",  # Support long filenames
+            ] + iso_files
             
             subprocess.run(cmd, check=True)
             
@@ -698,8 +708,8 @@ class SelectiveVMCloner:
         """Create cloud-init ISO image for VM."""
         from clonebox.cloud_init import generate_cloud_init_config
         
-        # Generate cloud-init config
-        user_data = generate_cloud_init_config(config, user_session=user_session)
+        # Generate cloud-init config (returns tuple: user_data, meta_data, network_config)
+        user_data, meta_data, network_config = generate_cloud_init_config(config, user_session=user_session)
         
         # Create ISO in temp directory
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -707,19 +717,26 @@ class SelectiveVMCloner:
             user_data_path.write_text(user_data)
             
             meta_data_path = Path(tmpdir) / "meta-data"
-            meta_data_path.write_text(f"instance-id: {config.name}\nlocal-hostname: {config.name}\n")
+            meta_data_path.write_text(meta_data)
+            
+            # Write network-config if provided (for user session with passt)
+            iso_files = [str(user_data_path), str(meta_data_path)]
+            if network_config:
+                network_config_path = Path(tmpdir) / "network-config"
+                network_config_path.write_text(network_config)
+                iso_files.append(str(network_config_path))
             
             iso_path = Path(tmpdir) / "cloud-init.iso"
             
-            # Use genisoimage or mkisofs
+            # Use genisoimage or mkisofs with long filename support
+            mkisofs_cmd = "genisoimage" if shutil.which("genisoimage") else "mkisofs"
             cmd = [
-                "genisoimage" if shutil.which("genisoimage") else "mkisofs",
+                mkisofs_cmd,
                 "-o", str(iso_path),
                 "-V", "cidata",
                 "-J", "-r",
-                str(user_data_path),
-                str(meta_data_path),
-            ]
+                "-iso-level", "4",  # Support long filenames for network-config
+            ] + iso_files
             
             subprocess.run(cmd, check=True, capture_output=True)
             

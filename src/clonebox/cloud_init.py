@@ -15,8 +15,12 @@ def generate_cloud_init_config(
     autostart_apps: List[Dict] = None,
     user_session: bool = False,
     bootcmd_extra: List = None,
-) -> str:
-    """Generate cloud-init configuration for VM."""
+) -> Tuple[str, str, str]:
+    """Generate cloud-init configuration for VM.
+    
+    Returns:
+        Tuple of (user_data, meta_data, network_config)
+    """
     
     autostart_apps = autostart_apps or []
     bootcmd_extra = bootcmd_extra or []
@@ -234,6 +238,11 @@ done
         "output": {"all": "| tee -a /var/log/cloud-init-output.log"},
     }
     
+    # Generate network-config for user session (passt networking)
+    network_config = None
+    if user_session:
+        network_config = generate_network_config()
+    
     # Add user session network setup if needed
     if user_session:
         net_setup_cmd = (
@@ -264,7 +273,31 @@ done
     cloud_config_yaml = yaml.dump(cloud_config, default_flow_style=False)
     
     # Add cloud-init header
-    return "#cloud-config\n" + cloud_config_yaml
+    user_data = "#cloud-config\n" + cloud_config_yaml
+    
+    # Meta-data
+    meta_data = f"instance-id: {config.name}\nlocal-hostname: {config.name}\n"
+    
+    return user_data, meta_data, network_config
+
+
+def generate_network_config() -> str:
+    """Generate network-config for cloud-init NoCloud datasource.
+    
+    Uses DHCPv4 for passt user-mode networking.
+    """
+    network_config = {
+        "version": 2,
+        "ethernets": {
+            "eth0": {
+                "match": {"name": "en*"},
+                "dhcp4": True,
+                "dhcp6": False,
+                "optional": True,
+            }
+        }
+    }
+    return yaml.dump(network_config, default_flow_style=False)
 
 
 # Snap interfaces configuration

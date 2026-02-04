@@ -173,22 +173,26 @@ class TestComposeCommands:
 
         cmd_compose_logs(args)
 
-    @patch("clonebox.cli.Orchestrator")
+    @patch("clonebox.cli.compose_commands.Orchestrator")
     def test_cmd_compose_up_with_file(self, mock_orch_cls, tmp_path):
         """Test compose up with valid file."""
         from clonebox.cli import cmd_compose_up
 
         compose_file = tmp_path / "clonebox-compose.yaml"
-        compose_file.write_text("version: '1'\nvms: {}")
+        compose_file.write_text("version: '1'\nservices: {}")
 
         mock_orch = MagicMock()
         mock_orch.up.return_value = MagicMock(success=True, failed_vms=[])
         mock_orch_cls.from_file.return_value = mock_orch
+        
+        # Make up accept any kwargs
+        mock_orch.up.configure_mock(**{'return_value': MagicMock(success=True, failed_vms=[])})
 
         args = argparse.Namespace(
             file=str(compose_file),
             user=False,
             services=[],
+            detach=False,
         )
 
         cmd_compose_up(args)
