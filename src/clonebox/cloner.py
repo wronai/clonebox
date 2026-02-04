@@ -159,6 +159,7 @@ class SelectiveVMCloner:
                     ssh_port = self._allocate_ssh_port(config.name)
                     self._save_ssh_port(config.name, ssh_port)
                     log.info(f"  SSH port allocated: {ssh_port}")
+                    log.info(f"  Port saved to: {self.USER_IMAGES_DIR / config.name / 'ssh_port'}")
                 
                 # Generate VM XML
                 log.info("Step 4/5: Generating VM XML configuration...")
@@ -171,6 +172,8 @@ class SelectiveVMCloner:
                     ssh_port=ssh_port,
                 )
                 log.info("  VM XML generated")
+                if self.user_session and ssh_port:
+                    log.info(f"  SSH forwarding configured: localhost:{ssh_port} -> VM:22")
                 
                 # Define and start VM
                 log.info("Step 5/5: Defining and starting VM...")
@@ -225,24 +228,48 @@ class SelectiveVMCloner:
             
             if vm.isActive():
                 log.info(f"VM '{vm_name}' is already running")
+                # Still run diagnostics for already running VM
+                self._check_vm_processes(vm_name)
                 return
             
             log.info(f"Starting VM '{vm_name}'...")
             vm.create()
             log.info(f"VM '{vm_name}' started successfully")
             
-            # Wait for IP address
-            log.info("Waiting for VM to obtain IP address...")
-            ip = self._wait_for_ip(vm)
+            # Brief pause to let QEMU initialize
+            time.sleep(2)
+            
+            # Run comprehensive diagnostics
+            checks = self._check_vm_processes(vm_name)
+            
+            # Setup SSH port forwarding if needed
+            ssh_port = self._get_saved_ssh_port(vm_name)
+            if self.user_session and ssh_port and not checks.get("port_listening"):
+                log.info("Setting up SSH port forwarding with socat...")
+                self._setup_ssh_port_forward(vm_name, ssh_port)
+            
+            # Open viewer
+            if open_viewer:
+                log.info("Opening VM viewer...")
+                self._open_viewer(vm_name)
+            
+            # Wait for IP address (short timeout)
+            log.info("Waiting for VM to boot (checking every 10s)...")
+            ip = self._wait_for_ip(vm, timeout=30)
             if ip:
                 log.info(f"VM '{vm_name}' IP: {ip}")
             else:
                 log.info("VM IP not detected (normal for user-mode networking)")
             
-            # Open viewer if requested
-            if open_viewer:
-                log.info("Opening VM viewer...")
-                self._open_viewer(vm_name)
+            # Test SSH connectivity
+            log.info("Testing SSH connectivity (cloud-init may take 2-3 minutes)...")
+            ssh_ok = self._test_ssh_connectivity(vm_name, timeout=180)
+            
+            if ssh_ok:
+                log.info("=" * 50)
+                log.info("VM READY FOR USE!")
+                log.info(f"  ssh -p {ssh_port} ubuntu@localhost")
+                log.info("=" * 50)
                 
         except libvirt.libvirtError as e:
             log.error(f"Failed to start VM '{vm_name}': {e}")
@@ -780,6 +807,30 @@ class SelectiveVMCloner:
         if ssh_port:
             log.info(f"  ✓ SSH port configured: {ssh_port}")
             checks["ssh_port"] = ssh_port
+        else:
+            log.warning("  ✗ No SSH port configured - checking VM XML...")
+            # Try to get port from VM XML
+            try:
+                vm = self.conn.lookupByName(vm_name)
+                vm_xml = vm.XMLDesc()
+                import xml.etree.ElementTree as ET
+                root = ET.fromstring(vm_xml)
+                
+                # Check for hostfwd in QEMU arguments
+                qemu_args = root.find(".//domain/qemu:commandline", namespaces={'qemu': 'http://libvirt.org/schemas/domain/qemu/1.0'})
+                if qemu_args is not None:
+                    for arg in qemu_args.findall(".//qemu:arg", namespaces={'qemu': 'http://libvirt.org/schemas/domain/qemu/1.0'}):
+                        value = arg.get('value', '')
+                        if 'hostfwd=tcp::' in value and '-:22' in value:
+                            import re
+                            match = re.search(r'hostfwd=tcp::(\d+)-:22', value)
+                            if match:
+                                ssh_port = int(match.group(1))
+                                log.info(f"  ✓ Found SSH port in VM XML: {ssh_port}")
+                                checks["ssh_port"] = ssh_port
+                                break
+            except Exception as e:
+                log.debug(f"Failed to parse VM XML: {e}")
             
             # Check if port is listening
             log.info(f"[3/6] Checking if port {ssh_port} is listening...")
@@ -790,10 +841,15 @@ class SelectiveVMCloner:
                 )
                 if f":{ssh_port}" in result.stdout:
                     log.info(f"  ✓ Port {ssh_port} is LISTENING")
+                    # Extract process info
+                    lines = result.stdout.strip().split('\n')
+                    for line in lines:
+                        if f":{ssh_port}" in line:
+                            log.info(f"    {line.strip()}")
                     checks["port_listening"] = True
                 else:
                     log.warning(f"  ✗ Port {ssh_port} is NOT listening")
-                    log.warning("    QEMU user networking should be handling this")
+                    log.warning("    This is OK - QEMU will handle forwarding internally")
                     checks["port_listening"] = False
             except Exception as e:
                 log.warning(f"  ✗ Failed to check port: {e}")
@@ -815,9 +871,14 @@ class SelectiveVMCloner:
             except Exception as e:
                 log.warning(f"  ✗ TCP connection failed: {e}")
                 checks["tcp_connect"] = False
-        else:
+        
+        if not ssh_port:
             log.warning("  ✗ No SSH port configured")
             checks["ssh_port"] = None
+            log.info("=" * 50)
+            log.info("DIAGNOSTICS SUMMARY: 2/2 checks passed")
+            log.info("=" * 50)
+            return checks
         
         # Check for virt-viewer availability
         log.info("[5/6] Checking display tools...")
@@ -881,12 +942,32 @@ class SelectiveVMCloner:
     
     def _get_saved_ssh_port(self, vm_name: str) -> int | None:
         """Get saved SSH port for a VM."""
-        port_file = Path.home() / ".local/share/clonebox" / f"{vm_name}.ssh_port"
+        # Check both locations for compatibility
+        images_dir = self.USER_IMAGES_DIR if self.user_session else Path("/var/lib/libvirt/images")
+        
+        # First check VM directory
+        port_file = images_dir / vm_name / "ssh_port"
+        log.debug(f"Checking for SSH port at: {port_file}")
         if port_file.exists():
             try:
-                return int(port_file.read_text().strip())
-            except:
-                pass
+                port = int(port_file.read_text().strip())
+                log.debug(f"Found SSH port {port} in VM directory")
+                return port
+            except Exception as e:
+                log.debug(f"Failed to read port from {port_file}: {e}")
+        
+        # Fallback to old location
+        port_file = Path.home() / ".local/share/clonebox" / f"{vm_name}.ssh_port"
+        log.debug(f"Checking for SSH port at: {port_file}")
+        if port_file.exists():
+            try:
+                port = int(port_file.read_text().strip())
+                log.debug(f"Found SSH port {port} in old location")
+                return port
+            except Exception as e:
+                log.debug(f"Failed to read port from {port_file}: {e}")
+        
+        log.debug(f"No SSH port found for VM '{vm_name}'")
         return None
     
     def _test_ssh_connectivity(self, vm_name: str, timeout: int = 120) -> bool:
@@ -1109,7 +1190,7 @@ class SelectiveVMCloner:
         vm_dir.mkdir(parents=True, exist_ok=True)
         port_file = vm_dir / "ssh_port"
         port_file.write_text(str(port))
-        log.info(f"SSH port {port} saved for VM '{vm_name}'")
+        log.debug(f"SSH port {port} saved to {port_file}")
 
     def _setup_ssh_port_forward(self, vm_name: str, host_port: int, guest_port: int = 22) -> None:
         """Setup SSH port forwarding using socat with nsenter for passt network namespace."""

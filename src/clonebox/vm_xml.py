@@ -93,12 +93,11 @@ def generate_vm_xml(
     if config.gui:
         _add_graphics(devices, config)
     
-    # Channel for QEMU Guest Agent (only for system session)
-    if not user_session:
-        channel = ET.SubElement(devices, "channel", type="unix")
-        # Let libvirt handle the socket path
-        ET.SubElement(channel, "source", mode="bind")
-        ET.SubElement(channel, "target", type="virtio", name="org.qemu.guest_agent.0")
+    # Channel for QEMU Guest Agent
+    channel = ET.SubElement(devices, "channel", type="unix")
+    # Let libvirt handle the socket path
+    ET.SubElement(channel, "source", mode="bind")
+    ET.SubElement(channel, "target", type="virtio", name="org.qemu.guest_agent.0")
     
     # Filesystem for 9p mounts
     for idx, (host_path, guest_path) in enumerate(config.paths.items()):
