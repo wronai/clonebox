@@ -97,6 +97,64 @@ class ContainerCloner:
 
         return tag
 
+    def create_container(
+        self,
+        workspace_path: Path,
+        name: str,
+        image: str = "ubuntu:22.04",
+        profile: Optional[str] = None,
+        mounts: Optional[List[str]] = None,
+        ports: Optional[List[str]] = None,
+        packages: Optional[List[str]] = None,
+        detach: bool = False,
+        console=None,
+    ) -> str:
+        """Create and start a container."""
+        from clonebox.models import ContainerConfig
+        
+        config = ContainerConfig(
+            name=name,
+            image=image,
+            workspace=str(workspace_path),
+            packages=packages or [],
+            mounts=self._parse_mounts(mounts or []),
+            ports=ports or [],
+        )
+        
+        self.up(config, detach=detach, remove=False)
+        return name
+
+    def attach_container(self, container_id: str) -> None:
+        """Attach to a running container."""
+        subprocess.run([self.engine, "attach", container_id])
+
+    def stop_container(self, container_id: str, console=None) -> None:
+        """Stop a container."""
+        self.stop(container_id)
+
+    def list_containers(self, all: bool = True) -> List[Dict[str, Any]]:
+        """List containers."""
+        containers = self.ps(all=all)
+        for c in containers:
+            c["id"] = c.get("name", "")
+            c["workspace"] = ""
+        return containers
+
+    def remove_container(self, container_id: str, console=None) -> None:
+        """Remove a container."""
+        self.rm(container_id, force=True)
+
+    def _parse_mounts(self, mounts: List[str]) -> Dict[str, str]:
+        """Parse mount strings into dict."""
+        result = {}
+        for mount in mounts:
+            parts = mount.split(":")
+            if len(parts) == 2:
+                result[parts[0]] = parts[1]
+            else:
+                result[mount] = mount
+        return result
+
     def up(self, config: ContainerConfig, detach: bool = False, remove: bool = True) -> None:
         engine = self._resolve_engine(config.engine if config.engine != "auto" else self.engine)
 

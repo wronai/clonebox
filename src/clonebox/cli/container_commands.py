@@ -38,8 +38,14 @@ def cmd_container_up(args):
 
 def cmd_container_ps(args):
     """List running containers."""
-    cloner = ContainerCloner(engine=args.engine)
-    containers = cloner.list_containers()
+    import json
+    
+    cloner = ContainerCloner(engine=getattr(args, "engine", "auto"))
+    containers = cloner.list_containers(all=getattr(args, "all", False))
+    
+    if getattr(args, "json", False):
+        print(json.dumps(containers, indent=2, default=str))
+        return
     
     if not containers:
         console.print("[dim]No containers running[/]")
@@ -55,11 +61,11 @@ def cmd_container_ps(args):
     
     for container in containers:
         table.add_row(
-            container["id"][:12],
+            container["id"][:12] if len(container["id"]) > 12 else container["id"],
             container["name"],
             container["image"],
             container["status"],
-            container["workspace"],
+            container.get("workspace", ""),
         )
     
     console.print(table)
@@ -67,18 +73,18 @@ def cmd_container_ps(args):
 
 def cmd_container_stop(args):
     """Stop a running container."""
-    cloner = ContainerCloner(engine=args.engine)
+    cloner = ContainerCloner(engine=getattr(args, "engine", "auto"))
     cloner.stop_container(args.name, console=console)
 
 
 def cmd_container_rm(args):
     """Remove a container."""
-    cloner = ContainerCloner(engine=args.engine)
+    cloner = ContainerCloner(engine=getattr(args, "engine", "auto"))
     cloner.remove_container(args.name, console=console)
 
 
 def cmd_container_down(args):
     """Stop and remove container."""
-    cloner = ContainerCloner(engine=args.engine)
+    cloner = ContainerCloner(engine=getattr(args, "engine", "auto"))
     cloner.stop_container(args.name, console=console)
     cloner.remove_container(args.name, console=console)

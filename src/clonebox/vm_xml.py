@@ -154,6 +154,10 @@ def generate_vm_xml(
     if not user_session:
         _add_resource_limits(domain, config)
     
+    # For user session with SSH port, we rely on the interface defined in _add_network_interface
+    # which handles port forwarding via the <forward> element or qemu args properly
+    # Note: qemu:commandline approach was removed due to PCI slot conflicts with 9p mounts and VGA
+    
     # Generate XML string
     ET.indent(domain, space="  ")
     return ET.tostring(domain, encoding="unicode")
@@ -193,15 +197,16 @@ def _add_network_interface(devices: ET.Element, config: VMConfig, user_session: 
 def _add_qemu_port_forward(interface: ET.Element, host_port: int, guest_port: int):
     """Add port forwarding configuration for qemu user networking interface.
     
-    Note: For qemu user networking, port forwarding is handled via the 
-    <backend> element with slirp options. However, libvirt's support for
-    this varies. This function adds a placeholder that may work with
-    newer libvirt versions.
+    Uses libvirt's <forward> element to configure port forwarding for user mode networking.
     """
-    # For now, we rely on the port being saved to ssh_port file
-    # and the user can connect via the VM's internal IP (10.0.2.15)
-    # A more robust solution would use socat or similar for port forwarding
-    pass
+    # Add port forwarding using the <forward> element
+    # Mode 'hostfwd' forwards from host to guest
+    forward = ET.SubElement(interface, "forward", mode="hostfwd")
+    ET.SubElement(forward, "address", type="ipv4")
+    # Host side - listen on localhost
+    ET.SubElement(forward, "host", port=str(host_port))
+    # Guest side - forward to guest's SSH port
+    ET.SubElement(forward, "guest", port=str(guest_port))
 
 
 def _add_graphics(devices: ET.Element, config: VMConfig):

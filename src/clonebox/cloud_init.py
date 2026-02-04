@@ -25,14 +25,19 @@ def generate_cloud_init_config(
     autostart_apps = autostart_apps or []
     bootcmd_extra = bootcmd_extra or []
     
-    # Generate runcmd for setup
+    # Generate runcmd for setup with detailed progress logging
     runcmd_lines = [
-        "echo '[clonebox] Starting VM setup...' > /dev/ttyS0",
-        "apt-get update",
-        "apt-get install -y qemu-guest-agent cloud-initramfs-growroot",
-        "systemctl enable qemu-guest-agent",
-        "systemctl start qemu-guest-agent",
-        "echo '[clonebox] Core packages installed' > /dev/ttyS0",
+        "echo '[clonebox] =========================================' > /dev/ttyS0",
+        "echo '[clonebox] Starting VM setup (runcmd phase)...' > /dev/ttyS0",
+        "echo '[clonebox] Step 1/10: Updating package lists...' > /dev/ttyS0",
+        "apt-get update 2>&1 | tee -a /var/log/cloud-init-output.log || echo '[clonebox] WARNING: apt-get update failed' > /dev/ttyS0",
+        "echo '[clonebox] Step 2/10: Installing qemu-guest-agent...' > /dev/ttyS0",
+        "apt-get install -y qemu-guest-agent cloud-initramfs-growroot 2>&1 | tee -a /var/log/cloud-init-output.log || echo '[clonebox] WARNING: Package installation failed' > /dev/ttyS0",
+        "echo '[clonebox] Step 3/10: Enabling qemu-guest-agent...' > /dev/ttyS0",
+        "systemctl enable qemu-guest-agent 2>&1 | tee -a /var/log/cloud-init-output.log || echo '[clonebox] WARNING: Failed to enable qemu-guest-agent' > /dev/ttyS0",
+        "echo '[clonebox] Step 4/10: Starting qemu-guest-agent...' > /dev/ttyS0",
+        "systemctl start qemu-guest-agent 2>&1 | tee -a /var/log/cloud-init-output.log || echo '[clonebox] WARNING: Failed to start qemu-guest-agent' > /dev/ttyS0",
+        "echo '[clonebox] Core packages installed successfully' > /dev/ttyS0",
     ]
     
     # Install packages

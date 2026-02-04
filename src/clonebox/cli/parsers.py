@@ -226,6 +226,8 @@ def main():
         default=argparse.SUPPRESS,
         help="Container engine: auto (default), podman, docker",
     )
+    container_ps.add_argument("--json", action="store_true", help="Output JSON")
+    container_ps.add_argument("-a", "--all", action="store_true", help="Show all containers")
     container_ps.set_defaults(func=cmd_container_ps)
 
     container_stop = container_sub.add_parser("stop", help="Stop container")
@@ -373,6 +375,7 @@ def main():
         help="Component to detect",
     )
     detect_parser.add_argument("--json", action="store_true", help="Output JSON")
+    detect_parser.add_argument("--yaml", action="store_true", help="Output YAML")
     detect_parser.add_argument("--output", help="Save results to file")
     detect_parser.add_argument("--verbose", "-v", action="store_true", help="Verbose output")
     detect_parser.set_defaults(func=cmd_detect)

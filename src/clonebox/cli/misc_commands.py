@@ -126,6 +126,9 @@ def cmd_detect(args):
     # Format and display output
     if args.json:
         console.print(json.dumps(sys_info, indent=2, default=str))
+    elif getattr(args, "yaml", False):
+        import yaml
+        console.print(yaml.dump(sys_info, default_flow_style=False, allow_unicode=True))
     else:
         format_detection_output(sys_info, console)
     
@@ -135,6 +138,10 @@ def cmd_detect(args):
         if args.json:
             with open(output_path, "w") as f:
                 json.dump(sys_info, f, indent=2, default=str)
+        elif getattr(args, "yaml", False):
+            with open(output_path, "w") as f:
+                import yaml
+                yaml.dump(sys_info, f, default_flow_style=False, allow_unicode=True)
         else:
             with open(output_path, "w") as f:
                 import yaml

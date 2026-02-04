@@ -142,18 +142,25 @@ class SelectiveVMCloner:
             # Create transaction for rollback
             with vm_creation_transaction(self, config, console) as ctx:
                 # Create base disk
+                log.info("Step 1/5: Creating VM disk...")
                 disk_path = self._create_vm_disk(config)
+                log.info(f"  Disk created: {disk_path}")
                 
                 # Generate cloud-init ISO
+                log.info("Step 2/5: Generating cloud-init ISO...")
                 cloud_init_path = self._generate_cloud_init(config)
+                log.info(f"  Cloud-init ISO created: {cloud_init_path}")
                 
                 # Allocate SSH port for user session
                 ssh_port = None
                 if self.user_session:
+                    log.info("Step 3/5: Allocating SSH port...")
                     ssh_port = self._allocate_ssh_port(config.name)
                     self._save_ssh_port(config.name, ssh_port)
+                    log.info(f"  SSH port allocated: {ssh_port}")
                 
                 # Generate VM XML
+                log.info("Step 4/5: Generating VM XML configuration...")
                 vm_xml = generate_vm_xml(
                     config=config,
                     vm_uuid=vm_uuid,
@@ -162,16 +169,21 @@ class SelectiveVMCloner:
                     user_session=self.user_session,
                     ssh_port=ssh_port,
                 )
+                log.info("  VM XML generated")
                 
                 # Define and start VM
+                log.info("Step 5/5: Defining and starting VM...")
                 vm = self.conn.defineXML(vm_xml)
+                log.info(f"  VM defined: {config.name}")
                 
                 if start:
+                    log.info("  Starting VM...")
                     vm.create()
-                    log.info(f"VM '{config.name}' started")
+                    log.info(f"VM '{config.name}' started successfully")
                     
                     # Setup SSH port forwarding if in user session
                     if self.user_session and ssh_port:
+                        log.info("Setting up SSH port forwarding...")
                         self._setup_ssh_port_forward(config.name, ssh_port)
                 
                 # Setup networking
@@ -179,32 +191,42 @@ class SelectiveVMCloner:
                 
                 # Wait for IP address
                 if start:
+                    log.info("Waiting for VM to obtain IP address (this may take 30-60 seconds)...")
                     ip = self._wait_for_ip(vm)
                     if ip:
                         log.info(f"VM '{config.name}' IP: {ip}")
+                    else:
+                        log.info("VM IP not detected (normal for user-mode networking)")
                 
+                log.info(f"VM '{config.name}' creation completed successfully!")
                 return vm_uuid
 
     def start_vm(self, vm_name: str, open_viewer: bool = False, console: Any = None) -> None:
         """Start an existing VM."""
         
         try:
+            log.info(f"Looking up VM '{vm_name}'...")
             vm = self.conn.lookupByName(vm_name)
             
             if vm.isActive():
                 log.info(f"VM '{vm_name}' is already running")
                 return
             
+            log.info(f"Starting VM '{vm_name}'...")
             vm.create()
-            log.info(f"VM '{vm_name}' started")
+            log.info(f"VM '{vm_name}' started successfully")
             
             # Wait for IP address
+            log.info("Waiting for VM to obtain IP address...")
             ip = self._wait_for_ip(vm)
             if ip:
                 log.info(f"VM '{vm_name}' IP: {ip}")
+            else:
+                log.info("VM IP not detected (normal for user-mode networking)")
             
             # Open viewer if requested
             if open_viewer:
+                log.info("Opening VM viewer...")
                 self._open_viewer(vm_name)
                 
         except libvirt.libvirtError as e:
@@ -614,13 +636,33 @@ class SelectiveVMCloner:
 
     def _wait_for_ip(self, vm, timeout: int = 60) -> Optional[str]:
         """Wait for VM to get an IP address."""
+        log.info(f"Waiting for VM IP address (timeout: {timeout}s)...")
         
-        for _ in range(timeout):
-            ip = self._get_vm_ip(vm)
-            if ip:
-                return ip
+        start_time = time.time()
+        last_log_time = start_time
+        attempt = 0
+        
+        while time.time() - start_time < timeout:
+            attempt += 1
+            elapsed = int(time.time() - start_time)
+            
+            # Log progress every 10 seconds
+            if time.time() - last_log_time >= 10:
+                log.info(f"  ... still waiting for IP ({elapsed}s elapsed, {attempt} attempts)")
+                last_log_time = time.time()
+            
+            try:
+                ip = self._get_vm_ip(vm)
+                if ip:
+                    log.info(f"VM IP detected: {ip} (after {elapsed}s)")
+                    return ip
+            except Exception as e:
+                log.debug(f"IP detection attempt {attempt} failed: {e}")
+            
             time.sleep(1)
         
+        log.warning(f"Could not detect VM IP after {timeout}s - continuing without IP")
+        log.warning("This is normal for user-mode networking - SSH port forwarding should still work")
         return None
 
     def _get_vm_ip(self, vm) -> Optional[str]:
