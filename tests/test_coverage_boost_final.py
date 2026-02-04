@@ -190,7 +190,9 @@ def test_cloner_create_vm_branches():
         with patch.object(cloner, "get_images_dir", return_value=Path("/tmp")), patch.object(
             cloner, "_ensure_default_base_image", return_value=Path("/tmp/base.qcow2")
         ), patch.object(
-            cloner, "_create_cloudinit_iso", return_value=Path("/tmp/init.iso")
+            cloner, "_get_default_base_image", return_value="/tmp/base.qcow2"
+        ), patch.object(
+            cloner, "_generate_cloud_init", return_value="/tmp/init.iso"
         ), patch.object(
             cloner, "resolve_network_mode", return_value="user"
         ), patch.object(
@@ -201,7 +203,16 @@ def test_cloner_create_vm_branches():
             "pathlib.Path.mkdir"
         ), patch(
             "pathlib.Path.exists", return_value=True
-        ):
+        ), patch(
+            "os.path.exists", return_value=True
+        ), patch(
+            "clonebox.secrets.SSHKeyPair.generate"
+        ) as mock_ssh_gen:
+            # Mock SSH key pair
+            mock_key_pair = Mock()
+            mock_key_pair.private_key = "private key"
+            mock_key_pair.public_key = "public key"
+            mock_ssh_gen.return_value = mock_key_pair
 
             # 1. Successful creation
             mock_conn.lookupByName.side_effect = Exception("Not found")
@@ -213,7 +224,7 @@ def test_cloner_create_vm_branches():
             mock_vm = Mock()
             mock_vm.name.return_value = "test-vm"
             mock_conn.lookupByName.return_value = mock_vm
-            with pytest.raises(RuntimeError, match="already exists"):
+            with pytest.raises(ValueError, match="already exists"):
                 cloner.create_vm(config, replace=False)
 
             # 3. Replace existing VM
@@ -338,7 +349,13 @@ def test_cloner_cloudinit_generation():
                 "pathlib.Path.write_text"
             ), patch(
                 "pathlib.Path.chmod"
-            ):
+            ), patch("shutil.copy2"), patch("pathlib.Path.mkdir"):
+                # Create the ISO file that genisoimage would create
+                iso_tmp_dir = Path(tmpdir) / "tmp"
+                iso_tmp_dir.mkdir()
+                iso_file = iso_tmp_dir / "cloud-init.iso"
+                iso_file.touch()
+                
                 mock_run.return_value = Mock(returncode=0)
                 mock_read.side_effect = ["private key", "public key"]
                 iso_path = cloner._create_cloudinit_iso(vm_dir, config, user_session=False)
@@ -356,9 +373,16 @@ def test_cloner_delete_vm_branches():
 
         mock_vm = Mock()
         mock_vm.isActive.return_value = True
+        mock_vm.XMLDesc.return_value = b'''<domain>
+            <devices>
+                <disk type='file' device='disk'>
+                    <source file='/tmp/test-vm.qcow2'/>
+                </disk>
+            </devices>
+        </domain>'''
         mock_conn.lookupByName.return_value = mock_vm
 
-        with patch.object(cloner, "get_images_dir", return_value=Path("/tmp")):
+        with patch.object(cloner, "get_images_dir", return_value=Path("/tmp")), patch("os.path.exists", return_value=True), patch("os.remove"):
             cloner.delete_vm("test-vm", delete_storage=True)
             assert mock_vm.destroy.called
             assert mock_vm.undefine.called

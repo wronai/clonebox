@@ -14,6 +14,9 @@ from clonebox.cli.utils import console
 
 def cmd_plugin_list(args):
     """List available plugins."""
+    from rich.table import Table
+    from rich.panel import Panel
+    
     plugin_manager = get_plugin_manager()
     
     if args.verbose:
@@ -25,9 +28,6 @@ def cmd_plugin_list(args):
             return
         
         for plugin in plugins:
-            from rich.panel import Panel
-            from rich.table import Table
-            
             # Plugin info table
             table = Table(show_header=False)
             table.add_column("Property", style="cyan")
@@ -74,7 +74,7 @@ def cmd_plugin_enable(args):
     plugin_manager = get_plugin_manager()
     
     try:
-        plugin_manager.enable_plugin(args.name)
+        plugin_manager.enable(args.name)
         console.print(f"[green]✅ Plugin '{args.name}' enabled[/]")
     except Exception as e:
         console.print(f"[red]❌ Failed to enable plugin: {e}[/]")
@@ -85,7 +85,7 @@ def cmd_plugin_disable(args):
     plugin_manager = get_plugin_manager()
     
     try:
-        plugin_manager.disable_plugin(args.name)
+        plugin_manager.disable(args.name)
         console.print(f"[green]✅ Plugin '{args.name}' disabled[/]")
     except Exception as e:
         console.print(f"[red]❌ Failed to disable plugin: {e}[/]")

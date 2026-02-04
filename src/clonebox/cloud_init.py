@@ -237,7 +237,7 @@ done
     # Add user session network setup if needed
     if user_session:
         net_setup_cmd = (
-            "NIC=$(ip -o link show | grep -E 'enp|eth' | grep -v 'lo' | head -1 | awk -F': ' '{print $2}' | tr -d ' '); "
+            "NIC=$(ip -o link show | grep -E 'enp|ens|eth' | grep -v 'lo' | head -1 | awk -F': ' '{print $2}' | tr -d ' '); "
             "if [ -n \"$NIC\" ]; then "
             "  echo '[clonebox] Found NIC: $NIC' > /dev/ttyS0; "
             "  ip addr show $NIC | grep -q 'inet ' || ( "

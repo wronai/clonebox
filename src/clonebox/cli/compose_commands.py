@@ -28,7 +28,7 @@ def cmd_compose_up(args):
     console.print(f"[cyan]Starting compose environment: {compose_file.name}[/]")
     
     # Create orchestrator
-    orchestrator = Orchestrator()
+    orchestrator = Orchestrator.from_file(compose_file)
     
     # Start services
     services = args.services if args.services else list(compose_config.get("services", {}).keys())

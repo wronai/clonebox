@@ -117,6 +117,15 @@ def generate_vm_xml(
     ET.SubElement(devices, "input", type="mouse", bus="ps2")
     ET.SubElement(devices, "input", type="keyboard", bus="ps2")
     
+    # Serial console for cloud-init logs and debugging
+    serial = ET.SubElement(devices, "serial", type="pty")
+    ET.SubElement(serial, "source", path="/dev/ttyS0")
+    ET.SubElement(serial, "target", type="isa-serial", port="0")
+    ET.SubElement(serial, "log", file=f"/home/tom/.local/share/libvirt/images/{config.name}/serial.log", append="on")
+    
+    console = ET.SubElement(devices, "console", type="pty")
+    ET.SubElement(console, "target", type="serial", port="0")
+    
     # Video
     video = ET.SubElement(devices, "video")
     if user_session:

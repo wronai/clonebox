@@ -1,7 +1,7 @@
 """Tests for new CLI commands (audit, compose, plugin, remote, logs, set-password)."""
 import argparse
 from pathlib import Path
-from unittest.mock import MagicMock, patch, PropertyMock
+from unittest.mock import MagicMock, patch, PropertyMock, ANY
 import json
 
 import pytest
@@ -10,7 +10,7 @@ import pytest
 class TestAuditCommands:
     """Test audit CLI commands."""
 
-    @patch("clonebox.cli.AuditQuery")
+    @patch("clonebox.cli.policy_audit_commands.AuditQuery")
     def test_cmd_audit_list(self, mock_query_cls):
         """Test audit list command."""
         from clonebox.cli import cmd_audit_list
@@ -28,7 +28,7 @@ class TestAuditCommands:
         cmd_audit_list(args)
         mock_query.query.assert_called_once()
 
-    @patch("clonebox.cli.AuditQuery")
+    @patch("clonebox.cli.policy_audit_commands.AuditQuery")
     def test_cmd_audit_list_with_events(self, mock_query_cls):
         """Test audit list with events."""
         from clonebox.cli import cmd_audit_list
@@ -54,21 +54,22 @@ class TestAuditCommands:
 
         cmd_audit_list(args)
 
-    @patch("clonebox.cli.AuditQuery")
+    @patch("clonebox.cli.policy_audit_commands.AuditQuery")
     def test_cmd_audit_failures(self, mock_query_cls):
         """Test audit failures command."""
         from clonebox.cli import cmd_audit_failures
+        from clonebox.audit import AuditOutcome
 
         mock_query = MagicMock()
-        mock_query.get_failures.return_value = []
+        mock_query.query.return_value = []
         mock_query_cls.return_value = mock_query
 
         args = argparse.Namespace(limit=20)
 
         cmd_audit_failures(args)
-        mock_query.get_failures.assert_called_once_with(limit=20)
+        mock_query.query.assert_called_once_with(outcome=AuditOutcome.FAILURE, limit=20)
 
-    @patch("clonebox.cli.AuditQuery")
+    @patch("clonebox.cli.policy_audit_commands.AuditQuery")
     def test_cmd_audit_search(self, mock_query_cls):
         """Test audit search command."""
         from clonebox.cli import cmd_audit_search
@@ -87,7 +88,7 @@ class TestAuditCommands:
 
         cmd_audit_search(args)
 
-    @patch("clonebox.cli.AuditQuery")
+    @patch("clonebox.cli.policy_audit_commands.AuditQuery")
     def test_cmd_audit_export_json(self, mock_query_cls):
         """Test audit export to JSON."""
         from clonebox.cli import cmd_audit_export
@@ -197,7 +198,7 @@ class TestComposeCommands:
 class TestPluginCommands:
     """Test plugin CLI commands."""
 
-    @patch("clonebox.cli.get_plugin_manager")
+    @patch("clonebox.cli.plugin_commands.get_plugin_manager")
     def test_cmd_plugin_list_empty(self, mock_get_manager):
         """Test plugin list with no plugins."""
         from clonebox.cli import cmd_plugin_list
@@ -206,11 +207,11 @@ class TestPluginCommands:
         mock_manager.list_plugins.return_value = []
         mock_get_manager.return_value = mock_manager
 
-        args = argparse.Namespace()
+        args = argparse.Namespace(verbose=False)
 
         cmd_plugin_list(args)
 
-    @patch("clonebox.cli.get_plugin_manager")
+    @patch("clonebox.cli.plugin_commands.get_plugin_manager")
     def test_cmd_plugin_list_with_plugins(self, mock_get_manager):
         """Test plugin list with plugins."""
         from clonebox.cli import cmd_plugin_list
@@ -221,11 +222,11 @@ class TestPluginCommands:
         ]
         mock_get_manager.return_value = mock_manager
 
-        args = argparse.Namespace()
+        args = argparse.Namespace(verbose=False)
 
         cmd_plugin_list(args)
 
-    @patch("clonebox.cli.get_plugin_manager")
+    @patch("clonebox.cli.plugin_commands.get_plugin_manager")
     def test_cmd_plugin_enable(self, mock_get_manager):
         """Test plugin enable command."""
         from clonebox.cli import cmd_plugin_enable
@@ -238,7 +239,7 @@ class TestPluginCommands:
         cmd_plugin_enable(args)
         mock_manager.enable.assert_called_once_with("test-plugin")
 
-    @patch("clonebox.cli.get_plugin_manager")
+    @patch("clonebox.cli.plugin_commands.get_plugin_manager")
     def test_cmd_plugin_disable(self, mock_get_manager):
         """Test plugin disable command."""
         from clonebox.cli import cmd_plugin_disable
@@ -251,26 +252,27 @@ class TestPluginCommands:
         cmd_plugin_disable(args)
         mock_manager.disable.assert_called_once_with("test-plugin")
 
-    @patch("clonebox.cli.get_plugin_manager")
-    def test_cmd_plugin_discover(self, mock_get_manager):
+    @patch("clonebox.cli.plugin_commands.get_plugin_manager")
+    @patch("pathlib.Path.exists", return_value=True)
+    def test_cmd_plugin_discover(self, mock_exists, mock_get_manager):
         """Test plugin discover command."""
         from clonebox.cli import cmd_plugin_discover
 
         mock_manager = MagicMock()
-        mock_manager.discover.return_value = ["plugin1", "plugin2"]
+        mock_manager.discover_plugins.return_value = ["plugin1", "plugin2"]
         mock_manager.plugin_dirs = [Path("/test")]
         mock_get_manager.return_value = mock_manager
 
-        args = argparse.Namespace()
+        args = argparse.Namespace(paths=None, verbose=False)
 
         cmd_plugin_discover(args)
-        mock_manager.discover.assert_called_once()
+        mock_manager.discover_plugins.assert_called()
 
 
 class TestRemoteCommands:
     """Test remote management CLI commands."""
 
-    @patch("clonebox.cli.RemoteCloner")
+    @patch("clonebox.cli.remote_commands.RemoteCloner")
     def test_cmd_remote_list(self, mock_remote_cls):
         """Test remote list command."""
         from clonebox.cli import cmd_remote_list
@@ -280,12 +282,12 @@ class TestRemoteCommands:
         mock_remote.list_vms.return_value = [{"name": "vm1", "state": "running"}]
         mock_remote_cls.return_value = mock_remote
 
-        args = argparse.Namespace(host="user@server", user=False)
+        args = argparse.Namespace(host="user@server", user=False, json=False)
 
         cmd_remote_list(args)
         mock_remote.list_vms.assert_called_once()
 
-    @patch("clonebox.cli.RemoteCloner")
+    @patch("clonebox.cli.remote_commands.RemoteCloner")
     def test_cmd_remote_list_not_installed(self, mock_remote_cls):
         """Test remote list when clonebox not installed."""
         from clonebox.cli import cmd_remote_list
@@ -294,17 +296,26 @@ class TestRemoteCommands:
         mock_remote.is_clonebox_installed.return_value = False
         mock_remote_cls.return_value = mock_remote
 
-        args = argparse.Namespace(host="user@server", user=False)
+        args = argparse.Namespace(host="user@server", user=False, json=False)
 
         cmd_remote_list(args)
 
-    @patch("clonebox.cli.RemoteCloner")
+    @patch("clonebox.cli.remote_commands.RemoteCloner")
     def test_cmd_remote_status(self, mock_remote_cls):
         """Test remote status command."""
         from clonebox.cli import cmd_remote_status
 
         mock_remote = MagicMock()
-        mock_remote.get_status.return_value = {"state": "running"}
+        mock_remote.get_vm_status.return_value = {
+            "name": "test-vm",
+            "state": "running",
+            "uuid": "1234",
+            "memory": 2048,
+            "vcpus": 2,
+            "disk_size": 20,
+            "ip": "192.168.1.100",
+            "uptime": "2h 30m"
+        }
         mock_remote_cls.return_value = mock_remote
 
         args = argparse.Namespace(
@@ -312,12 +323,13 @@ class TestRemoteCommands:
             vm_name="test-vm",
             user=False,
             json=False,
+            logs=False,
         )
 
         cmd_remote_status(args)
-        mock_remote.get_status.assert_called_once()
+        mock_remote.get_vm_status.assert_called_once()
 
-    @patch("clonebox.cli.RemoteCloner")
+    @patch("clonebox.cli.remote_commands.RemoteCloner")
     def test_cmd_remote_start(self, mock_remote_cls):
         """Test remote start command."""
         from clonebox.cli import cmd_remote_start
@@ -329,12 +341,13 @@ class TestRemoteCommands:
             host="user@server",
             vm_name="test-vm",
             user=False,
+            viewer=False,
         )
 
         cmd_remote_start(args)
-        mock_remote.start_vm.assert_called_once_with("test-vm", user_session=False)
+        mock_remote.start_vm.assert_called_once_with("test-vm", open_viewer=False, console=ANY)
 
-    @patch("clonebox.cli.RemoteCloner")
+    @patch("clonebox.cli.remote_commands.RemoteCloner")
     def test_cmd_remote_stop(self, mock_remote_cls):
         """Test remote stop command."""
         from clonebox.cli import cmd_remote_stop
@@ -350,9 +363,9 @@ class TestRemoteCommands:
         )
 
         cmd_remote_stop(args)
-        mock_remote.stop_vm.assert_called_once()
+        mock_remote.stop_vm.assert_called_once_with("test-vm", force=False, console=ANY)
 
-    @patch("clonebox.cli.RemoteCloner")
+    @patch("clonebox.cli.remote_commands.RemoteCloner")
     def test_cmd_remote_exec(self, mock_remote_cls):
         """Test remote exec command."""
         from clonebox.cli import cmd_remote_exec
@@ -370,15 +383,15 @@ class TestRemoteCommands:
         )
 
         cmd_remote_exec(args)
-        mock_remote.exec_in_vm.assert_called_once()
+        mock_remote.exec_in_vm.assert_called_once_with("test-vm", ["echo", "hello"], timeout=30)
 
-    @patch("clonebox.cli.RemoteCloner")
+    @patch("clonebox.cli.remote_commands.RemoteCloner")
     def test_cmd_remote_health(self, mock_remote_cls):
         """Test remote health command."""
         from clonebox.cli import cmd_remote_health
 
         mock_remote = MagicMock()
-        mock_remote.health_check.return_value = {"success": True, "output": "OK"}
+        mock_remote.health_check.return_value = {"passed": True, "output": "OK"}
         mock_remote_cls.return_value = mock_remote
 
         args = argparse.Namespace(
@@ -390,14 +403,14 @@ class TestRemoteCommands:
         cmd_remote_health(args)
         mock_remote.health_check.assert_called_once()
 
-    @patch("clonebox.cli.RemoteCloner")
+    @patch("clonebox.cli.remote_commands.RemoteCloner")
     def test_cmd_remote_connection_error(self, mock_remote_cls):
         """Test remote command with connection error."""
         from clonebox.cli import cmd_remote_list
 
         mock_remote_cls.side_effect = ConnectionError("Cannot connect")
 
-        args = argparse.Namespace(host="user@server", user=False)
+        args = argparse.Namespace(host="user@server", user=False, json=False)
 
         # Should not raise, just print error
         cmd_remote_list(args)

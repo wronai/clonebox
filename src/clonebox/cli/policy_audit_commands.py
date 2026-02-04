@@ -145,13 +145,13 @@ def cmd_audit_list(args):
     table.add_column("Details", style="dim")
     
     for entry in entries:
-        timestamp = entry["timestamp"].strftime("%Y-%m-%d %H:%M:%S")
-        event = entry["event_type"].value
-        user = entry.get("user", "-")
-        vm = entry.get("vm_name", "-")
-        outcome = entry["outcome"].value
-        outcome_style = "green" if entry["outcome"] == AuditOutcome.SUCCESS else "red"
-        details = entry.get("details", "")[:50]
+        timestamp = entry.timestamp.strftime("%Y-%m-%d %H:%M:%S")
+        event = entry.event_type.value
+        user = entry.user
+        vm = entry.target_name if entry.target_type == "vm" else "-"
+        outcome = entry.outcome.value
+        outcome_style = "green" if entry.outcome == AuditOutcome.SUCCESS else "red"
+        details = str(entry.details)[:50]
         
         table.add_row(
             timestamp,
@@ -183,30 +183,30 @@ def cmd_audit_show(args):
     table.add_column("Property", style="cyan")
     table.add_column("Value", style="green")
     
-    table.add_row("ID", entry["id"])
-    table.add_row("Timestamp", entry["timestamp"].strftime("%Y-%m-%d %H:%M:%S"))
-    table.add_row("Event Type", entry["event_type"].value)
-    table.add_row("User", entry.get("user", "-"))
-    table.add_row("VM Name", entry.get("vm_name", "-"))
-    table.add_row("Outcome", entry["outcome"].value)
+    table.add_row("ID", entry.event_id)
+    table.add_row("Timestamp", entry.timestamp.strftime("%Y-%m-%d %H:%M:%S"))
+    table.add_row("Event Type", entry.event_type.value)
+    table.add_row("User", entry.user)
+    table.add_row("VM Name", entry.target_name if entry.target_type == "vm" else "-")
+    table.add_row("Outcome", entry.outcome.value)
     
-    if entry.get("duration"):
-        table.add_row("Duration", f"{entry['duration']:.2f}s")
+    if entry.details.get("duration"):
+        table.add_row("Duration", f"{entry.details['duration']:.2f}s")
     
-    console.print(Panel(table, title=f"Audit Entry: {entry['id']}"))
+    console.print(Panel(table, title=f"Audit Entry: {entry.event_id}"))
     
     # Show details
-    if entry.get("details"):
+    if entry.details:
         console.print("\n[bold]Details:[/]")
         if getattr(args, 'json', False):
-            console.print(json.dumps(entry["details"], indent=2))
+            console.print(json.dumps(entry.details, indent=2))
         else:
-            console.print(entry["details"])
+            console.print(entry.details)
     
     # Show errors if any
-    if entry.get("error"):
+    if entry.error_message:
         console.print("\n[bold red]Error:[/]")
-        console.print(entry["error"])
+        console.print(entry.error_message)
 
 
 def cmd_audit_failures(args):
@@ -236,11 +236,11 @@ def cmd_audit_failures(args):
     table.add_column("Error", style="red")
     
     for entry in entries:
-        timestamp = entry["timestamp"].strftime("%Y-%m-%d %H:%M:%S")
-        event = entry["event_type"].value
-        user = entry.get("user", "-")
-        vm = entry.get("vm_name", "-")
-        error = entry.get("error", "Unknown error")[:50]
+        timestamp = entry.timestamp.strftime("%Y-%m-%d %H:%M:%S")
+        event = entry.event_type.value
+        user = entry.user
+        vm = entry.target_name if entry.target_type == "vm" else "-"
+        error = (entry.error_message or "Unknown error")[:50]
         
         table.add_row(timestamp, event, user, vm, error)
     
@@ -278,7 +278,8 @@ def cmd_audit_search(args):
         return
     
     # Display results
-    table = Table(title=f"Audit Search Results: '{args.query}'")
+    search_term = getattr(args, 'query', '')
+    table = Table(title=f"Audit Search Results: '{search_term}'")
     table.add_column("Timestamp", style="cyan")
     table.add_column("Event", style="green")
     table.add_column("User", style="yellow")
@@ -286,11 +287,11 @@ def cmd_audit_search(args):
     table.add_column("Match", style="yellow")
     
     for entry in entries:
-        timestamp = entry["timestamp"].strftime("%Y-%m-%d %H:%M:%S")
-        event = entry["event_type"].value
-        user = entry.get("user", "-")
-        vm = entry.get("vm_name", "-")
-        match = entry.get("match", "")[:50]
+        timestamp = entry.timestamp.strftime("%Y-%m-%d %H:%M:%S")
+        event = entry.event_type.value
+        user = entry.user
+        vm = entry.target_name if entry.target_type == "vm" else "-"
+        match = ""  # Could implement highlighting of matched content
         
         table.add_row(timestamp, event, user, vm, match)
     
@@ -320,11 +321,11 @@ def cmd_audit_export(args):
     entries = query.query(**query_kwargs)
     
     # Write to file
-    output_path = Path(args.output)
+    output_path = Path(args.output) if args.output else Path(f"audit_export.{args.format}")
     
     if args.format == "json":
         with open(output_path, "w") as f:
-            json.dump(entries, f, indent=2, default=str)
+            json.dump([e.to_dict() for e in entries], f, indent=2, default=str)
     else:  # csv
         import csv
         
@@ -334,12 +335,12 @@ def cmd_audit_export(args):
             
             for entry in entries:
                 writer.writerow([
-                    entry["timestamp"].isoformat(),
-                    entry["event_type"].value,
-                    entry.get("user", ""),
-                    entry.get("vm_name", ""),
-                    entry["outcome"].value,
-                    entry.get("details", ""),
+                    entry.timestamp.isoformat(),
+                    entry.event_type.value,
+                    entry.user,
+                    entry.target_name if entry.target_type == "vm" else "",
+                    entry.outcome.value,
+                    str(entry.details),
                 ])
     
     console.print(f"[green]✅ Audit log exported to: {output_path}[/]")

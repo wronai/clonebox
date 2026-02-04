@@ -699,7 +699,7 @@ class SelectiveVMCloner:
         from clonebox.cloud_init import generate_cloud_init_config
         
         # Generate cloud-init config
-        user_data = generate_cloud_init_config(config)
+        user_data = generate_cloud_init_config(config, user_session=user_session)
         
         # Create ISO in temp directory
         with tempfile.TemporaryDirectory() as tmpdir:

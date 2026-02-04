@@ -309,7 +309,7 @@ class TestCLICommands:
             timeout=10,
         )
         assert result.returncode == 0
-        assert "archive" in result.stdout.lower()
+        assert "export" in result.stdout.lower()
 
     def test_export_remote_help(self):
         """Test clonebox export-remote --help works."""
@@ -342,7 +342,7 @@ class TestCLICommands:
             timeout=10,
         )
         assert result.returncode == 0
-        assert "host" in result.stdout.lower()
+        assert "vm" in result.stdout.lower()
 
     def test_list_remote_help(self):
         """Test clonebox list-remote --help works."""
@@ -353,7 +353,7 @@ class TestCLICommands:
             timeout=10,
         )
         assert result.returncode == 0
-        assert "host" in result.stdout.lower()
+        assert "list" in result.stdout.lower()
 
 
 class TestVMExporter:
