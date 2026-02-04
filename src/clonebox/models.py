@@ -45,7 +45,7 @@ class VMConfig:
     )  # Auto-start GUI apps after login (desktop autostart)
     web_services: list = field(default_factory=list)  # Web services to start (uvicorn, etc.)
     resources: dict = field(default_factory=dict)  # Resource limits (cpu, memory, disk, network)
-    auth_method: str = "ssh_key"  # ssh_key | one_time_password | password
+    auth_method: str = "password"  # ssh_key | one_time_password | password
     ssh_public_key: Optional[str] = None
     shutdown_after_setup: bool = False
 

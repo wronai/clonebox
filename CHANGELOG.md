@@ -1,3 +1,28 @@
+## [1.1.34] - 2026-02-04
+
+### Summary
+
+refactor(docs): configuration management system
+
+### Core
+
+- update src/clonebox/cloner.py
+- update src/clonebox/cloud_init.py
+- update src/clonebox/models.py
+- update src/clonebox/vm_xml.py
+
+### Docs
+
+- docs: update README
+- docs: update QUICK_REFERENCE.md
+
+### Other
+
+- update project.functions.toon
+- update project.toon
+- scripts: update diagnose-vm.sh
+
+
 ## [1.1.33] - 2026-02-03
 
 ### Summary

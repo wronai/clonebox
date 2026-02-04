@@ -34,7 +34,7 @@ def generate_cloud_init_config(
         "echo '[clonebox] Step 2/10: Installing qemu-guest-agent...' > /dev/ttyS0",
         "apt-get install -y qemu-guest-agent cloud-initramfs-growroot 2>&1 | tee -a /var/log/cloud-init-output.log || echo '[clonebox] WARNING: Package installation failed' > /dev/ttyS0",
         "echo '[clonebox] Step 3/10: Enabling qemu-guest-agent...' > /dev/ttyS0",
-        "systemctl enable qemu-guest-agent 2>&1 | tee -a /var/log/cloud-init-output.log || echo '[clonebox] WARNING: Failed to enable qemu-guest-agent' > /dev/ttyS0",
+        "systemctl enable qemu-guest-agent 2>&1 | tee -a /var/log/cloud-init-output.log || echo '[clonebox] WARNING: Failed to enable qemu-guest-agent' > /dev/ttyS0 || true",
         "echo '[clonebox] Step 4/10: Starting qemu-guest-agent...' > /dev/ttyS0",
         "systemctl start qemu-guest-agent 2>&1 | tee -a /var/log/cloud-init-output.log || echo '[clonebox] WARNING: Failed to start qemu-guest-agent' > /dev/ttyS0",
         "echo '[clonebox] Core packages installed successfully' > /dev/ttyS0",
@@ -238,7 +238,7 @@ done
         "runcmd": runcmd_lines,
         "bootcmd": [
             ["sh", "-c", "echo '[clonebox] bootcmd - starting configuration' > /dev/ttyS0 || true"],
-            ["systemctl", "enable", "--now", "serial-getty@ttyS0.service"],
+            ["systemctl", "enable", "serial-getty@ttyS0.service"],
         ],
         "output": {"all": "| tee -a /var/log/cloud-init-output.log"},
     }

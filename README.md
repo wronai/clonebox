@@ -219,6 +219,9 @@ newgrp libvirt
 
 # Install genisoimage for cloud-init
 sudo apt install genisoimage
+
+# Install nsenter and socat for SSH port forwarding (user session mode)
+sudo apt install util-linux socat
 ```
 
 #### Install CloneBox

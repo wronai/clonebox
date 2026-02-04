@@ -91,6 +91,31 @@ ssh ubuntu@<IP_VM>
 
 # SSH with key (default)
 ssh -i ~/.local/share/libvirt/images/clone-clonebox/ssh_key ubuntu@<IP_VM>
+
+# SSH via port forwarding (user session mode)
+# CloneBox automatically sets up port forwarding from localhost:<port> to VM:22
+ssh -p $(cat ~/.local/share/libvirt/images/clone-clonebox/ssh_port) ubuntu@localhost
+```
+
+### User Session SSH Port Forwarding
+
+In `--user` mode, CloneBox uses `passt` for networking and sets up SSH port forwarding:
+
+- **Requirements**: `nsenter` (from util-linux) and `socat` must be installed
+- **Port allocation**: Free localhost port allocated automatically (22000-22999)
+- **Port persistence**: Saved to `~/.local/share/libvirt/images/<vm_name>/ssh_port`
+- **Forwarding method**: Uses `nsenter` to enter passt network namespace, then `socat` to forward
+
+```bash
+# Check allocated SSH port
+cat ~/.local/share/libvirt/images/clone-clonebox/ssh_port
+# Example output: 22008
+
+# SSH to VM via forwarded port
+ssh -p 22008 ubuntu@localhost
+
+# If nsenter/socat missing, install:
+sudo apt-get install util-linux socat
 ```
 
 ## 🔧 Repair Commands
@@ -184,7 +209,43 @@ sudo mount /mnt/project0
 
 ## 🛠️ Troubleshooting
 
+### VM Creation Progress & Logging
+
+CloneBox now provides detailed step-by-step logging during VM creation:
+
+```bash
+# Create VM with detailed progress output
+clonebox clone . --user --run
+
+# Output shows:
+# Step 1/5: Creating VM disk...
+# Step 2/5: Generating cloud-init ISO...
+# Step 3/5: Allocating SSH port...
+# Step 4/5: Generating VM XML configuration...
+# Step 5/5: Defining and starting VM...
+# Waiting for VM to obtain IP address (this may take 30-60 seconds)...
+```
+
+### Cloud-init Progress Tracking
+
+Cloud-init execution is logged step-by-step to serial console:
+
+```bash
+# Monitor cloud-init progress in real-time
+tail -f ~/.local/share/libvirt/images/<vm_name>/serial.log
+
+# Typical progress output:
+# [clonebox] =========================================
+# [clonebox] Starting VM setup (runcmd phase)...
+# [clonebox] Step 1/10: Updating package lists...
+# [clonebox] Step 2/10: Installing qemu-guest-agent...
+# [clonebox] Step 3/10: Enabling qemu-guest-agent...
+# [clonebox] Step 4/10: Starting qemu-guest-agent...
+# [clonebox] Core packages installed successfully
+```
+
 ### Common Issues
+
 ```bash
 # VM not responding
 clonebox stop . --user
@@ -201,6 +262,15 @@ clonebox repair . --user --perms
 
 # Audio not working
 clonebox repair . --user --audio
+
+# SSH port forwarding not working (user session)
+# Check if nsenter and socat are installed:
+which nsenter socat
+# Install if missing:
+sudo apt-get install util-linux socat
+
+# Check allocated SSH port
+cat ~/.local/share/libvirt/images/<vm_name>/ssh_port
 ```
 
 ### VM Access

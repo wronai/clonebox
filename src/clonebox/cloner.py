@@ -120,7 +120,8 @@ class SelectiveVMCloner:
         ):
             # Check if VM already exists
             if replace:
-                self.delete_vm(config.name, delete_storage=False, approved=approved)
+                log.info(f"Replacing existing VM '{config.name}' (deleting old storage)...")
+                self.delete_vm(config.name, delete_storage=True, approved=approved)
             else:
                 try:
                     existing_vm = self.conn.lookupByName(config.name)
@@ -181,22 +182,36 @@ class SelectiveVMCloner:
                     vm.create()
                     log.info(f"VM '{config.name}' started successfully")
                     
-                    # Setup SSH port forwarding if in user session
-                    if self.user_session and ssh_port:
-                        log.info("Setting up SSH port forwarding...")
+                    # Brief pause to let QEMU initialize
+                    time.sleep(2)
+                    
+                    # Run comprehensive diagnostics
+                    checks = self._check_vm_processes(config.name)
+                    
+                    # Setup SSH port forwarding if in user session (if not using QEMU user networking)
+                    if self.user_session and ssh_port and not checks.get("port_listening"):
+                        log.info("Setting up SSH port forwarding with socat...")
                         self._setup_ssh_port_forward(config.name, ssh_port)
+                    
+                    # Open VM viewer window
+                    log.info("Opening VM viewer window...")
+                    self._open_viewer(config.name)
                 
                 # Setup networking
                 self._setup_vm_networking(vm, config)
                 
-                # Wait for IP address
+                # Wait for IP address (shorter timeout since we have diagnostics)
                 if start:
-                    log.info("Waiting for VM to obtain IP address (this may take 30-60 seconds)...")
-                    ip = self._wait_for_ip(vm)
+                    log.info("Waiting for VM to boot (checking every 10s)...")
+                    ip = self._wait_for_ip(vm, timeout=30)
                     if ip:
                         log.info(f"VM '{config.name}' IP: {ip}")
                     else:
                         log.info("VM IP not detected (normal for user-mode networking)")
+                    
+                    # Test SSH connectivity
+                    log.info("Testing SSH connectivity (cloud-init may take 2-3 minutes)...")
+                    ssh_ok = self._test_ssh_connectivity(config.name, timeout=180)
                 
                 log.info(f"VM '{config.name}' creation completed successfully!")
                 return vm_uuid
@@ -578,10 +593,23 @@ class SelectiveVMCloner:
     def _generate_cloud_init(self, config: VMConfig) -> str:
         """Generate cloud-init ISO image."""
         
-        # Generate SSH key if not provided
+        # Read host SSH key only if auth_method is ssh_key
         if not config.ssh_public_key and config.auth_method == "ssh_key":
-            key_pair = SSHKeyPair.generate()
-            config.ssh_public_key = key_pair.public_key
+            # Try to read host's SSH public key
+            ssh_key_paths = [
+                Path.home() / ".ssh" / "id_ed25519.pub",
+                Path.home() / ".ssh" / "id_rsa.pub",
+            ]
+            for key_path in ssh_key_paths:
+                if key_path.exists():
+                    config.ssh_public_key = key_path.read_text().strip()
+                    log.info(f"Using host SSH key: {key_path}")
+                    break
+            else:
+                # Fallback: generate new key if no host key found
+                log.warning("No host SSH key found. Generating new key pair.")
+                key_pair = SSHKeyPair.generate()
+                config.ssh_public_key = key_pair.public_key
         
         # Generate cloud-init config (returns tuple: user_data, meta_data, network_config)
         user_data, meta_data, network_config = generate_cloud_init_config(
@@ -702,11 +730,244 @@ class SelectiveVMCloner:
         
         return None
 
+    def _check_vm_processes(self, vm_name: str) -> dict:
+        """Check that all required VM processes are running."""
+        import shutil
+        import socket
+        
+        log.info("=" * 50)
+        log.info("VM DIAGNOSTICS")
+        log.info("=" * 50)
+        
+        checks = {}
+        
+        # Check QEMU process
+        log.info("[1/6] Checking QEMU process...")
+        try:
+            result = subprocess.run(
+                ["pgrep", "-af", f"qemu.*guest={vm_name}"],
+                capture_output=True, text=True
+            )
+            if result.returncode == 0 and result.stdout.strip():
+                lines = result.stdout.strip().split('\n')
+                qemu_pid = lines[0].split()[0]
+                log.info(f"  ✓ QEMU running (PID: {qemu_pid})")
+                
+                # Get QEMU memory usage
+                try:
+                    mem_result = subprocess.run(
+                        ["ps", "-o", "rss=", "-p", qemu_pid],
+                        capture_output=True, text=True
+                    )
+                    if mem_result.returncode == 0:
+                        mem_kb = int(mem_result.stdout.strip())
+                        mem_mb = mem_kb / 1024
+                        log.info(f"  ✓ QEMU memory: {mem_mb:.0f} MB")
+                except:
+                    pass
+                checks["qemu"] = True
+            else:
+                log.error(f"  ✗ QEMU process NOT FOUND for VM '{vm_name}'")
+                log.error("    This means the VM failed to start!")
+                checks["qemu"] = False
+        except Exception as e:
+            log.error(f"  ✗ Failed to check QEMU: {e}")
+            checks["qemu"] = False
+        
+        # Check SSH port from saved config
+        log.info("[2/6] Checking SSH port configuration...")
+        ssh_port = self._get_saved_ssh_port(vm_name)
+        if ssh_port:
+            log.info(f"  ✓ SSH port configured: {ssh_port}")
+            checks["ssh_port"] = ssh_port
+            
+            # Check if port is listening
+            log.info(f"[3/6] Checking if port {ssh_port} is listening...")
+            try:
+                result = subprocess.run(
+                    ["ss", "-tlnp", f"sport = :{ssh_port}"],
+                    capture_output=True, text=True
+                )
+                if f":{ssh_port}" in result.stdout:
+                    log.info(f"  ✓ Port {ssh_port} is LISTENING")
+                    checks["port_listening"] = True
+                else:
+                    log.warning(f"  ✗ Port {ssh_port} is NOT listening")
+                    log.warning("    QEMU user networking should be handling this")
+                    checks["port_listening"] = False
+            except Exception as e:
+                log.warning(f"  ✗ Failed to check port: {e}")
+                checks["port_listening"] = False
+            
+            # Test TCP connection
+            log.info(f"[4/6] Testing TCP connection to port {ssh_port}...")
+            try:
+                sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                sock.settimeout(2)
+                result = sock.connect_ex(('127.0.0.1', ssh_port))
+                sock.close()
+                if result == 0:
+                    log.info(f"  ✓ TCP connection to port {ssh_port} SUCCESSFUL")
+                    checks["tcp_connect"] = True
+                else:
+                    log.warning(f"  ✗ TCP connection to port {ssh_port} FAILED (error: {result})")
+                    checks["tcp_connect"] = False
+            except Exception as e:
+                log.warning(f"  ✗ TCP connection failed: {e}")
+                checks["tcp_connect"] = False
+        else:
+            log.warning("  ✗ No SSH port configured")
+            checks["ssh_port"] = None
+        
+        # Check for virt-viewer availability
+        log.info("[5/6] Checking display tools...")
+        if shutil.which("virt-viewer"):
+            log.info("  ✓ virt-viewer available")
+            checks["virt_viewer"] = True
+        else:
+            log.warning("  ✗ virt-viewer not installed")
+            log.warning("    Install: sudo apt-get install virt-viewer")
+            checks["virt_viewer"] = False
+        
+        # Check VM display ports
+        try:
+            vm = self.conn.lookupByName(vm_name)
+            vm_xml = vm.XMLDesc()
+            import xml.etree.ElementTree as ET
+            root = ET.fromstring(vm_xml)
+            
+            # Check SPICE
+            spice = root.find(".//graphics[@type='spice']")
+            if spice is not None:
+                spice_port = spice.get('port', 'auto')
+                log.info(f"  ✓ SPICE display on port {spice_port}")
+                checks["spice_port"] = spice_port
+            
+            # Check VNC
+            vnc = root.find(".//graphics[@type='vnc']")
+            if vnc is not None:
+                vnc_port = vnc.get('port', 'auto')
+                log.info(f"  ✓ VNC display on port {vnc_port}")
+                checks["vnc_port"] = vnc_port
+        except Exception as e:
+            log.debug(f"Failed to get display ports: {e}")
+        
+        # Check socat availability
+        log.info("[6/6] Checking networking tools...")
+        if shutil.which("socat"):
+            log.info("  ✓ socat available")
+            checks["socat"] = True
+        else:
+            log.warning("  ✗ socat not installed")
+            log.warning("    Install: sudo apt-get install socat")
+            checks["socat"] = False
+        
+        # Summary
+        log.info("=" * 50)
+        passed = sum(1 for k, v in checks.items() if v is True)
+        total = sum(1 for k, v in checks.items() if isinstance(v, bool))
+        log.info(f"DIAGNOSTICS SUMMARY: {passed}/{total} checks passed")
+        
+        if checks.get("ssh_port"):
+            log.info(f"SSH ACCESS: ssh -p {checks['ssh_port']} ubuntu@localhost")
+        if checks.get("vnc_port"):
+            log.info(f"VNC ACCESS: vncviewer localhost:{checks['vnc_port']}")
+        if checks.get("spice_port"):
+            log.info(f"SPICE ACCESS: remote-viewer spice://localhost:{checks['spice_port']}")
+        
+        log.info("=" * 50)
+        
+        return checks
+    
+    def _get_saved_ssh_port(self, vm_name: str) -> int | None:
+        """Get saved SSH port for a VM."""
+        port_file = Path.home() / ".local/share/clonebox" / f"{vm_name}.ssh_port"
+        if port_file.exists():
+            try:
+                return int(port_file.read_text().strip())
+            except:
+                pass
+        return None
+    
+    def _test_ssh_connectivity(self, vm_name: str, timeout: int = 120) -> bool:
+        """Test SSH connectivity to VM."""
+        ssh_port = self._get_saved_ssh_port(vm_name)
+        if not ssh_port:
+            log.warning("No SSH port configured for VM")
+            return False
+        
+        log.info(f"Testing SSH connectivity on port {ssh_port}...")
+        log.info(f"  (waiting up to {timeout}s for cloud-init to complete)")
+        
+        start_time = time.time()
+        attempt = 0
+        
+        while time.time() - start_time < timeout:
+            attempt += 1
+            try:
+                result = subprocess.run(
+                    [
+                        "ssh", "-o", "StrictHostKeyChecking=no",
+                        "-o", "UserKnownHostsFile=/dev/null",
+                        "-o", "ConnectTimeout=5",
+                        "-o", "BatchMode=yes",
+                        "-p", str(ssh_port),
+                        "ubuntu@localhost",
+                        "echo 'SSH_OK'"
+                    ],
+                    capture_output=True, text=True, timeout=10
+                )
+                if "SSH_OK" in result.stdout:
+                    elapsed = time.time() - start_time
+                    log.info(f"  ✓ SSH connection successful after {elapsed:.1f}s ({attempt} attempts)")
+                    return True
+            except subprocess.TimeoutExpired:
+                pass
+            except Exception as e:
+                log.debug(f"SSH attempt {attempt} failed: {e}")
+            
+            if attempt % 10 == 0:
+                elapsed = time.time() - start_time
+                log.info(f"  ... still waiting for SSH ({elapsed:.0f}s elapsed, {attempt} attempts)")
+            
+            time.sleep(3)
+        
+        log.warning(f"  ✗ SSH connection not available after {timeout}s")
+        log.warning("    Cloud-init may still be running. Try manually:")
+        log.warning(f"    ssh -p {ssh_port} ubuntu@localhost")
+        return False
+
     def _open_viewer(self, vm_name: str) -> None:
         """Open SPICE/VNC viewer for VM."""
+        import shutil
         
-        cmd = ["virt-viewer", "--connect", self.conn_uri, vm_name]
-        subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        if not shutil.which("virt-viewer"):
+            log.warning("virt-viewer not installed - cannot open VM window")
+            log.warning("Install with: sudo apt-get install virt-viewer")
+            log.warning(f"Alternative: virsh --connect {self.conn_uri} console {vm_name}")
+            return
+        
+        try:
+            cmd = ["virt-viewer", "--connect", self.conn_uri, vm_name]
+            log.info(f"Launching: {' '.join(cmd)}")
+            process = subprocess.Popen(
+                cmd,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                start_new_session=True
+            )
+            # Wait briefly to check if it started
+            import time
+            time.sleep(0.5)
+            if process.poll() is not None:
+                # Process exited immediately - check error
+                _, stderr = process.communicate()
+                if stderr:
+                    log.warning(f"virt-viewer failed: {stderr.decode().strip()}")
+            else:
+                log.info(f"VM viewer window opened for '{vm_name}'")
+        except Exception as e:
+            log.warning(f"Failed to open VM viewer: {e}")
 
     def _get_state_string(self, state: int) -> str:
         """Convert libvirt state to string."""
@@ -728,6 +989,7 @@ class SelectiveVMCloner:
         
         # Check common locations
         paths = [
+            str(Path.home() / ".local/share/libvirt/base-images/ubuntu-22.04.qcow2"),
             "/var/lib/libvirt/base-images/ubuntu-22.04.qcow2",
             "/var/lib/libvirt/images/ubuntu-22.04.qcow2",
             "/usr/share/clonebox/images/ubuntu-22.04.qcow2",
@@ -850,16 +1112,40 @@ class SelectiveVMCloner:
         log.info(f"SSH port {port} saved for VM '{vm_name}'")
 
     def _setup_ssh_port_forward(self, vm_name: str, host_port: int, guest_port: int = 22) -> None:
-        """Setup SSH port forwarding using socat."""
+        """Setup SSH port forwarding using socat with nsenter for passt network namespace."""
         import subprocess
         import time
         
         # Wait a bit for VM to start
-        time.sleep(2)
+        time.sleep(3)
         
-        # Start socat to forward local port to VM's SSH port
-        # VM has static IP 10.0.2.15 in user networking mode
+        # Find passt PID for this VM
+        try:
+            pgrep_result = subprocess.run(
+                ["pgrep", "-f", f"passt.*{vm_name}"],
+                capture_output=True,
+                text=True
+            )
+            if pgrep_result.returncode != 0 or not pgrep_result.stdout.strip():
+                log.warning(f"passt process not found for VM '{vm_name}'")
+                # Fallback to direct socat (for slirp mode)
+                self._start_socat_direct(host_port, guest_port)
+                return
+            
+            passt_pid = pgrep_result.stdout.strip().split('\n')[0].strip()
+            log.debug(f"Found passt PID: {passt_pid} for VM '{vm_name}'")
+        except Exception as e:
+            log.warning(f"Failed to find passt PID: {e}")
+            self._start_socat_direct(host_port, guest_port)
+            return
+        
+        # Use nsenter to enter passt network namespace and run socat
+        # This allows connecting to 10.0.2.15 which is isolated by passt
         socat_cmd = [
+            "nsenter",
+            "--target", passt_pid,
+            "--net",
+            "--",
             "socat",
             f"TCP-LISTEN:{host_port},fork,reuseaddr",
             f"TCP:10.0.2.15:{guest_port}"
@@ -873,10 +1159,37 @@ class SelectiveVMCloner:
                 stderr=subprocess.DEVNULL,
                 start_new_session=True
             )
+            log.info(f"SSH port forwarding started: localhost:{host_port} -> 10.0.2.15:{guest_port} (via passt ns)")
+        except FileNotFoundError as e:
+            if "nsenter" in str(e):
+                log.warning("nsenter not found. SSH port forwarding not available.")
+                log.warning("Install util-linux: sudo apt-get install util-linux")
+            else:
+                log.warning("socat not found. SSH port forwarding not available.")
+                log.warning("Install socat: sudo apt-get install socat")
+        except Exception as e:
+            log.warning(f"Failed to setup SSH port forwarding: {e}")
+
+    def _start_socat_direct(self, host_port: int, guest_port: int) -> None:
+        """Start socat directly (for slirp mode where VM IP is reachable from host)."""
+        import subprocess
+        
+        socat_cmd = [
+            "socat",
+            f"TCP-LISTEN:{host_port},fork,reuseaddr",
+            f"TCP:10.0.2.15:{guest_port}"
+        ]
+        
+        try:
+            subprocess.Popen(
+                socat_cmd,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                start_new_session=True
+            )
             log.info(f"SSH port forwarding started: localhost:{host_port} -> 10.0.2.15:{guest_port}")
         except FileNotFoundError:
             log.warning("socat not found. SSH port forwarding not available.")
-            log.warning("Install socat: sudo apt-get install socat")
         except Exception as e:
             log.warning(f"Failed to setup SSH port forwarding: {e}")
 

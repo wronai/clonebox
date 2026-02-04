@@ -85,8 +85,9 @@ def generate_vm_xml(
         ET.SubElement(disk, "target", dev="sda", bus="sata")
         ET.SubElement(disk, "readonly")
     
-    # Network interface
-    _add_network_interface(devices, config, user_session, ssh_port)
+    # Network interface (skip if using qemu:commandline with hostfwd)
+    if not (user_session and ssh_port):
+        _add_network_interface(devices, config, user_session, ssh_port)
     
     # Graphics (if GUI enabled)
     if config.gui:
@@ -154,9 +155,20 @@ def generate_vm_xml(
     if not user_session:
         _add_resource_limits(domain, config)
     
-    # For user session with SSH port, we rely on the interface defined in _add_network_interface
-    # which handles port forwarding via the <forward> element or qemu args properly
-    # Note: qemu:commandline approach was removed due to PCI slot conflicts with 9p mounts and VGA
+    # Add qemu:commandline for SSH port forwarding via hostfwd (user session only)
+    # This allows connecting to VM's SSH from host without needing passt
+    if user_session and ssh_port:
+        # Register qemu namespace
+        ET.register_namespace('qemu', 'http://libvirt.org/schemas/domain/qemu/1.0')
+        
+        # Add qemu:commandline with hostfwd
+        cmdline = ET.SubElement(domain, '{http://libvirt.org/schemas/domain/qemu/1.0}commandline')
+        ET.SubElement(cmdline, '{http://libvirt.org/schemas/domain/qemu/1.0}arg', value='-netdev')
+        ET.SubElement(cmdline, '{http://libvirt.org/schemas/domain/qemu/1.0}arg', 
+                     value=f'user,id=hostnet0,hostfwd=tcp::{ssh_port}-:22')
+        ET.SubElement(cmdline, '{http://libvirt.org/schemas/domain/qemu/1.0}arg', value='-device')
+        ET.SubElement(cmdline, '{http://libvirt.org/schemas/domain/qemu/1.0}arg', 
+                     value='virtio-net-pci,netdev=hostnet0,addr=0x11')
     
     # Generate XML string
     ET.indent(domain, space="  ")
