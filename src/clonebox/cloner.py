@@ -147,6 +147,12 @@ class SelectiveVMCloner:
                 # Generate cloud-init ISO
                 cloud_init_path = self._generate_cloud_init(config)
                 
+                # Allocate SSH port for user session
+                ssh_port = None
+                if self.user_session:
+                    ssh_port = self._allocate_ssh_port(config.name)
+                    self._save_ssh_port(config.name, ssh_port)
+                
                 # Generate VM XML
                 vm_xml = generate_vm_xml(
                     config=config,
@@ -154,6 +160,7 @@ class SelectiveVMCloner:
                     disk_path=disk_path,
                     cdrom_path=cloud_init_path,
                     user_session=self.user_session,
+                    ssh_port=ssh_port,
                 )
                 
                 # Define and start VM
@@ -288,12 +295,19 @@ class SelectiveVMCloner:
 
     def _generate_vm_xml(self, config: VMConfig, disk_path: Path, cloud_init_path: Optional[Path]) -> str:
         """Generate VM XML configuration."""
+        # Allocate SSH port for user session
+        ssh_port = None
+        if self.user_session:
+            ssh_port = self._allocate_ssh_port(config.name)
+            self._save_ssh_port(config.name, ssh_port)
+        
         return generate_vm_xml(
             config=config,
             vm_uuid=str(uuid.uuid4()),
             disk_path=str(disk_path),
             cdrom_path=str(cloud_init_path) if cloud_init_path else None,
-            user_session=self.user_session
+            user_session=self.user_session,
+            ssh_port=ssh_port
         )
 
     def get_images_dir(self) -> Path:
@@ -759,6 +773,35 @@ class SelectiveVMCloner:
             7: "suspended",
         }
         return states.get(state_code, "unknown")
+
+    def _allocate_ssh_port(self, vm_name: str) -> int:
+        """Allocate a free localhost port for SSH forwarding."""
+        import socket
+        import random
+        
+        # Try to find a free port in range 22000-22999
+        for _ in range(100):
+            port = random.randint(22000, 22999)
+            try:
+                with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+                    s.bind(('127.0.0.1', port))
+                    return port
+            except OSError:
+                continue
+        
+        # Fallback: let OS assign a port
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+            s.bind(('127.0.0.1', 0))
+            return s.getsockname()[1]
+
+    def _save_ssh_port(self, vm_name: str, port: int) -> None:
+        """Save SSH port to file for later retrieval."""
+        images_dir = self.USER_IMAGES_DIR if self.user_session else Path("/var/lib/libvirt/images")
+        vm_dir = images_dir / vm_name
+        vm_dir.mkdir(parents=True, exist_ok=True)
+        port_file = vm_dir / "ssh_port"
+        port_file.write_text(str(port))
+        log.info(f"SSH port {port} saved for VM '{vm_name}'")
 
     def __del__(self):
         """Cleanup libvirt connection."""

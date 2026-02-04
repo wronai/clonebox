@@ -284,16 +284,16 @@ done
 def generate_network_config() -> str:
     """Generate network-config for cloud-init NoCloud datasource.
     
-    Uses DHCPv4 for passt user-mode networking.
+    Uses static IP configuration for passt user-mode networking.
     """
     network_config = {
         "version": 2,
         "ethernets": {
             "eth0": {
                 "match": {"name": "en*"},
-                "dhcp4": True,
-                "dhcp6": False,
-                "optional": True,
+                "addresses": ["10.0.2.15/24"],
+                "routes": [{"to": "default", "via": "10.0.2.2"}],
+                "nameservers": {"addresses": ["10.0.2.3"]},
             }
         }
     }

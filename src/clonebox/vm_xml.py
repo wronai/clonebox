@@ -16,6 +16,7 @@ def generate_vm_xml(
     disk_path: str,
     cdrom_path: Optional[str] = None,
     user_session: bool = False,
+    ssh_port: int = None,
 ) -> str:
     """Generate libvirt XML configuration for VM."""
     from pathlib import Path
@@ -85,7 +86,7 @@ def generate_vm_xml(
         ET.SubElement(disk, "readonly")
     
     # Network interface
-    _add_network_interface(devices, config, user_session)
+    _add_network_interface(devices, config, user_session, ssh_port)
     
     # Graphics (if GUI enabled)
     if config.gui:
@@ -158,7 +159,7 @@ def generate_vm_xml(
     return ET.tostring(domain, encoding="unicode")
 
 
-def _add_network_interface(devices: ET.Element, config: VMConfig, user_session: bool):
+def _add_network_interface(devices: ET.Element, config: VMConfig, user_session: bool, ssh_port: int = None):
     """Add network interface configuration."""
     
     if config.network_mode == "user":
@@ -173,6 +174,9 @@ def _add_network_interface(devices: ET.Element, config: VMConfig, user_session: 
             ET.SubElement(interface, "backend", type="passt")
             ET.SubElement(interface, "mac", address=_generate_mac_address())
             ET.SubElement(interface, "model", type="virtio")
+            # Add SSH port forwarding if port specified
+            if ssh_port:
+                _add_passt_port_forward(interface, ssh_port, 22)
         else:
             # Use default network for system session
             interface = ET.SubElement(devices, "interface", type="network")
@@ -185,6 +189,14 @@ def _add_network_interface(devices: ET.Element, config: VMConfig, user_session: 
         ET.SubElement(interface, "source", network="default")
         ET.SubElement(interface, "mac", address=_generate_mac_address())
         ET.SubElement(interface, "model", type="virtio")
+
+
+def _add_passt_port_forward(interface: ET.Element, host_port: int, guest_port: int):
+    """Add port forwarding configuration for passt interface."""
+    forward = ET.SubElement(interface, "forward", type="hostport")
+    ET.SubElement(forward, "address", type="ipv4")
+    ET.SubElement(forward, "port", start=str(host_port), end=str(host_port))
+    ET.SubElement(forward, "guest", port=str(guest_port))
 
 
 def _add_graphics(devices: ET.Element, config: VMConfig):

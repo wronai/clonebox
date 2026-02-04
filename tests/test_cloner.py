@@ -321,9 +321,9 @@ class TestVMXMLGeneration:
 class TestVMCreation:
     """Test VM creation (with mocked libvirt)."""
 
+    @patch("clonebox.cloner.os.path.exists")
     @patch("clonebox.cloner.subprocess.run")
     @patch("clonebox.cloner.libvirt")
-    @patch("clonebox.cloner.os.path.exists")
     def test_create_vm_permission_error(self, mock_libvirt, mock_run, mock_exists):
         mock_conn = MagicMock()
         mock_conn.lookupByName.side_effect = Exception("not found")
