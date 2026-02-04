@@ -284,37 +284,58 @@ def cmd_delete(args):
 
 
 def cmd_list(args):
-    """List VMs."""
-    user_session = getattr(args, "user", False)
-    cloner = SelectiveVMCloner(user_session=user_session)
-    vms = cloner.list_vms()
+    """List VMs from both user and system sessions."""
+    all_vms = []
     
-    if args.json:
+    # Get VMs from user session
+    try:
+        user_cloner = SelectiveVMCloner(user_session=True)
+        user_vms = user_cloner.list_vms()
+        for vm in user_vms:
+            vm["session"] = "user"
+        all_vms.extend(user_vms)
+    except Exception:
+        pass
+    
+    # Get VMs from system session
+    try:
+        system_cloner = SelectiveVMCloner(user_session=False)
+        system_vms = system_cloner.list_vms()
+        for vm in system_vms:
+            vm["session"] = "system"
+        all_vms.extend(system_vms)
+    except Exception:
+        pass
+    
+    if getattr(args, "json", False):
         import json
-        console.print(json.dumps(vms, indent=2))
-    else:
-        if not vms:
-            console.print("[dim]No VMs found[/]")
-            return
-        
-        table = Table(title="Virtual Machines")
-        table.add_column("Name", style="cyan")
-        table.add_column("State", style="green")
-        table.add_column("IP", style="yellow")
-        table.add_column("Memory", style="blue")
-        table.add_column("vCPUs", style="magenta")
-        
-        for vm in vms:
-            state_style = "green" if vm["state"] == "running" else "red"
-            table.add_row(
-                vm["name"],
-                f"[{state_style}]{vm['state']}[/{state_style}]",
-                vm.get("ip", "-"),
-                f"{vm.get('memory', 0)} MB",
-                str(vm.get('vcpus', 0))
-            )
-        
-        console.print(table)
+        console.print(json.dumps(all_vms, indent=2))
+        return
+    
+    if not all_vms:
+        console.print("[dim]No VMs found[/]")
+        return
+    
+    table = Table(title="Virtual Machines")
+    table.add_column("Name", style="cyan")
+    table.add_column("State", style="green")
+    table.add_column("Session", style="yellow")
+    table.add_column("IP", style="blue")
+    table.add_column("Memory", style="magenta")
+    table.add_column("vCPUs", style="dim")
+    
+    for vm in all_vms:
+        state_style = "green" if vm["state"] == "running" else "red"
+        table.add_row(
+            vm["name"],
+            f"[{state_style}]{vm['state']}[/{state_style}]",
+            vm.get("session", "-"),
+            vm.get("ip", "-"),
+            f"{vm.get('memory', 0)} MB",
+            str(vm.get("vcpus", 0)),
+        )
+    
+    console.print(table)
 
 
 def cmd_detect(args) -> None:

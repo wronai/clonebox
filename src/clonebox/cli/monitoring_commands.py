@@ -135,12 +135,12 @@ def cmd_health(args):
     ]
     
     # Add custom probe if specified
-    if args.probe:
+    if getattr(args, 'probe', None):
         probes.append(ProbeConfig(
             name="custom",
             type=ProbeType.AGENT,
             config={"command": args.probe},
-            timeout=args.timeout or 10,
+            timeout=getattr(args, 'timeout', None) or 10,
             retries=1,
         ))
     
@@ -335,7 +335,7 @@ def cmd_logs(args):
     """Show VM logs."""
     vm_name = args.name
     user_session = getattr(args, "user", False)
-    follow = args.follow
+    all_logs = getattr(args, "all", False)
     
     # Resolve VM name from config if needed
     if not vm_name or vm_name == ".":
@@ -347,40 +347,8 @@ def cmd_logs(args):
             console.print("[red]❌ No VM name specified[/]")
             return
     
-    # Get VM console logs
+    # Call clonebox-logs script
     import subprocess
-    cmd = ["virsh", "--connect", "qemu:///session" if user_session else "qemu:///system"]
-    
-    if follow:
-        cmd.extend(["console", "--safe", vm_name])
-        console.print(f"[cyan]Following console logs for '{vm_name}'. Press Ctrl+C to stop.[/]")
-        try:
-            subprocess.run(cmd)
-        except KeyboardInterrupt:
-            console.print("\n[yellow]Stopped following logs[/]")
-    else:
-        cmd.extend(["domxml", vm_name])
-        result = subprocess.run(cmd, capture_output=True, text=True)
-        
-        # Extract console information
-        import xml.etree.ElementTree as ET
-        root = ET.fromstring(result.stdout)
-        console_devices = root.findall(".//devices/console[@type='pty']")
-        
-        if console_devices:
-            source = console_devices[0].find("source")
-            if source is not None:
-                path = source.get("path")
-                console.print(f"[dim]Console device: {path}[/]")
-                
-                # Try to read recent logs
-                try:
-                    with open(path, 'r') as f:
-                        lines = f.readlines()
-                        # Show last 100 lines
-                        for line in lines[-100:]:
-                            console.print(line.rstrip())
-                except Exception as e:
-                    console.print(f"[red]❌ Failed to read console logs: {e}[/]")
-        else:
-            console.print("[yellow]No console device found[/]")
+    script_path = Path(__file__).parent.parent.parent / "scripts" / "clonebox-logs.sh"
+    cmd = [str(script_path), vm_name, "true" if user_session else "false", "true" if all_logs else "false"]
+    subprocess.run(cmd, check=True)

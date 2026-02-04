@@ -98,39 +98,38 @@ def cmd_audit_list(args):
     """List audit log entries."""
     audit_logger = get_audit_logger()
     
-    # Build query
-    query = AuditQuery()
+    # Build query parameters
+    query_kwargs = {}
     
-    if args.event_type:
+    if getattr(args, 'event_type', None):
         try:
-            event_type = AuditEventType(args.event_type)
-            query.event_type(event_type)
+            query_kwargs['event_type'] = AuditEventType(args.event_type)
         except ValueError:
             console.print(f"[red]❌ Invalid event type: {args.event_type}[/]")
             return
     
     if getattr(args, 'outcome', None):
         try:
-            outcome = AuditOutcome(args.outcome)
-            query.outcome(outcome)
+            query_kwargs['outcome'] = AuditOutcome(args.outcome)
         except ValueError:
             console.print(f"[red]❌ Invalid outcome: {args.outcome}[/]")
             return
     
     if getattr(args, 'user', None):
-        query.user(args.user)
+        query_kwargs['user'] = args.user
     
     if getattr(args, 'vm_name', None):
-        query.vm_name(args.vm_name)
+        query_kwargs['target_name'] = args.vm_name
     
     if getattr(args, 'since', None):
-        query.since(datetime.fromisoformat(args.since))
+        query_kwargs['start_time'] = datetime.fromisoformat(args.since)
     
     if getattr(args, 'limit', None):
-        query.limit(args.limit)
+        query_kwargs['limit'] = args.limit
     
     # Execute query
-    entries = audit_logger.query(query)
+    query = AuditQuery()
+    entries = query.query(**query_kwargs)
     
     if not entries:
         console.print("[dim]No audit entries found[/]")
@@ -199,7 +198,7 @@ def cmd_audit_show(args):
     # Show details
     if entry.get("details"):
         console.print("\n[bold]Details:[/]")
-        if args.json:
+        if getattr(args, 'json', False):
             console.print(json.dumps(entry["details"], indent=2))
         else:
             console.print(entry["details"])
@@ -212,16 +211,17 @@ def cmd_audit_show(args):
 
 def cmd_audit_failures(args):
     """Show recent audit failures."""
-    audit_logger = get_audit_logger()
-    
     query = AuditQuery()
-    query.outcome(AuditOutcome.FAILURE)
-    query.limit(args.limit or 20)
     
-    if args.since:
-        query.since(datetime.fromisoformat(args.since))
+    query_kwargs = {
+        'outcome': AuditOutcome.FAILURE,
+        'limit': getattr(args, 'limit', None) or 20
+    }
     
-    entries = audit_logger.query(query)
+    if getattr(args, 'since', None):
+        query_kwargs['start_time'] = datetime.fromisoformat(args.since)
+    
+    entries = query.query(**query_kwargs)
     
     if not entries:
         console.print("[dim]No audit failures found[/]")
@@ -249,13 +249,29 @@ def cmd_audit_failures(args):
 
 def cmd_audit_search(args):
     """Search audit log."""
-    audit_logger = get_audit_logger()
+    # Build query parameters
+    query_kwargs = {'limit': getattr(args, 'limit', None) or 50}
     
-    entries = audit_logger.search(
-        query=args.query,
-        event_type=args.event_type,
-        limit=args.limit or 50,
-    )
+    if getattr(args, 'event_type', None):
+        try:
+            query_kwargs['event_type'] = AuditEventType(args.event_type)
+        except ValueError:
+            console.print(f"[red]❌ Invalid event type: {args.event_type}[/]")
+            return
+    
+    # Execute query and filter by search term
+    query = AuditQuery()
+    all_entries = query.query(**query_kwargs)
+    
+    # Filter by search query if provided
+    search_term = getattr(args, 'query', '').lower()
+    if search_term:
+        entries = [
+            e for e in all_entries 
+            if search_term in str(e.to_dict()).lower()
+        ]
+    else:
+        entries = all_entries
     
     if not entries:
         console.print("[dim]No matching audit entries found[/]")
@@ -283,27 +299,25 @@ def cmd_audit_search(args):
 
 def cmd_audit_export(args):
     """Export audit log to file."""
-    audit_logger = get_audit_logger()
+    # Build query parameters
+    query_kwargs = {}
     
-    # Build query
-    query = AuditQuery()
+    if getattr(args, 'since', None):
+        query_kwargs['start_time'] = datetime.fromisoformat(args.since)
     
-    if args.since:
-        query.since(datetime.fromisoformat(args.since))
+    if getattr(args, 'until', None):
+        query_kwargs['end_time'] = datetime.fromisoformat(args.until)
     
-    if args.until:
-        query.until(datetime.fromisoformat(args.until))
-    
-    if args.event_type:
+    if getattr(args, 'event_type', None):
         try:
-            event_type = AuditEventType(args.event_type)
-            query.event_type(event_type)
+            query_kwargs['event_type'] = AuditEventType(args.event_type)
         except ValueError:
             console.print(f"[red]❌ Invalid event type: {args.event_type}[/]")
             return
     
-    # Export entries
-    entries = audit_logger.export(query)
+    # Execute query
+    query = AuditQuery()
+    entries = query.query(**query_kwargs)
     
     # Write to file
     output_path = Path(args.output)

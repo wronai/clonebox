@@ -226,16 +226,6 @@ done
             }
         ],
         "ssh_pwauth": config.auth_method in ["password", "one_time_password"],
-        "chpasswd": {
-            "expire": False,
-            "users": [
-                {
-                    "name": config.username,
-                    "password": config.password,
-                    "type": "text",
-                }
-            ] if config.auth_method == "password" else []
-        },
         "runcmd": runcmd_lines,
         "bootcmd": [
             ["sh", "-c", "echo '[clonebox] bootcmd - starting configuration' > /dev/ttyS0 || true"],
