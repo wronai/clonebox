@@ -169,6 +169,10 @@ class SelectiveVMCloner:
                 if start:
                     vm.create()
                     log.info(f"VM '{config.name}' started")
+                    
+                    # Setup SSH port forwarding if in user session
+                    if self.user_session and ssh_port:
+                        self._setup_ssh_port_forward(config.name, ssh_port)
                 
                 # Setup networking
                 self._setup_vm_networking(vm, config)
@@ -802,6 +806,37 @@ class SelectiveVMCloner:
         port_file = vm_dir / "ssh_port"
         port_file.write_text(str(port))
         log.info(f"SSH port {port} saved for VM '{vm_name}'")
+
+    def _setup_ssh_port_forward(self, vm_name: str, host_port: int, guest_port: int = 22) -> None:
+        """Setup SSH port forwarding using socat."""
+        import subprocess
+        import time
+        
+        # Wait a bit for VM to start
+        time.sleep(2)
+        
+        # Start socat to forward local port to VM's SSH port
+        # VM has static IP 10.0.2.15 in user networking mode
+        socat_cmd = [
+            "socat",
+            f"TCP-LISTEN:{host_port},fork,reuseaddr",
+            f"TCP:10.0.2.15:{guest_port}"
+        ]
+        
+        try:
+            # Start socat in background
+            subprocess.Popen(
+                socat_cmd,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                start_new_session=True
+            )
+            log.info(f"SSH port forwarding started: localhost:{host_port} -> 10.0.2.15:{guest_port}")
+        except FileNotFoundError:
+            log.warning("socat not found. SSH port forwarding not available.")
+            log.warning("Install socat: sudo apt-get install socat")
+        except Exception as e:
+            log.warning(f"Failed to setup SSH port forwarding: {e}")
 
     def __del__(self):
         """Cleanup libvirt connection."""

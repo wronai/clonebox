@@ -167,10 +167,15 @@ def test_cloner_additional_branches():
             p = str(path_obj)
             if ".clonebox-policy.yml" in p:
                 return False
+            # Return True for base image
+            if "ubuntu-22.04.qcow2" in p:
+                return True
             # Return True for other checks to proceed (like base image cache check)
             return True
 
         with patch("pathlib.Path.exists", side_effect=mock_exists_path), patch(
+            "os.path.exists", side_effect=mock_exists_path
+        ), patch(
             "tempfile.NamedTemporaryFile"
         ) as mock_temp, patch("urllib.request.urlretrieve"), patch("pathlib.Path.replace"):
             mock_temp.return_value.__enter__.return_value.name = "tmpfile"
