@@ -1,3 +1,26 @@
+## [1.1.39] - 2026-02-05
+
+### Summary
+
+feat(docs): configuration management system
+
+### Core
+
+- update src/clonebox/browser_profiles.py
+- update src/clonebox/cli/misc_commands.py
+- update src/clonebox/cloner.py
+- update src/clonebox/cloud_init.py
+- update src/clonebox/models.py
+
+### Docs
+
+- docs: update README
+
+### Other
+
+- scripts: update diagnose-vm.sh
+
+
 ## [1.1.38] - 2026-02-05
 
 ### Summary
