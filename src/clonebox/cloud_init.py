@@ -271,10 +271,10 @@ done
         "users": [
             {
                 "name": config.username,
+                "groups": "sudo,adm,video,render",
                 "sudo": "ALL=(ALL) NOPASSWD:ALL",
                 "ssh_authorized_keys": [config.ssh_public_key] if config.ssh_public_key else [],
                 "lock_passwd": False,
-                "passwd": config.password if config.gui or config.auth_method == "password" else "$6$rounds=4096",
             }
         ],
         "ssh_pwauth": True if config.gui else config.auth_method in ["password", "one_time_password"],
@@ -285,6 +285,12 @@ done
         ],
         "output": {"all": "| tee -a /var/log/cloud-init-output.log"},
     }
+
+    if config.gui or config.auth_method in ["password", "one_time_password"]:
+        cloud_config["chpasswd"] = {
+            "expire": False,
+            "list": f"{config.username}:{config.password}",
+        }
     
     # Generate network-config for user session (passt networking)
     network_config = None

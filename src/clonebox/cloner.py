@@ -43,6 +43,11 @@ from clonebox.audit import get_audit_logger, AuditEventType, AuditOutcome
 from clonebox.models import VMConfig
 from clonebox.cloud_init import generate_cloud_init_config
 from clonebox.vm_xml import generate_vm_xml
+from clonebox.browser_profiles import (
+    detect_browser_profiles,
+    stage_browser_profiles,
+    copy_profiles_to_vm_via_ssh,
+)
 
 log = get_logger(__name__)
 
@@ -247,6 +252,35 @@ class SelectiveVMCloner:
                             # Re-check SSH after potential reboot
                             log.info("Re-checking SSH after potential reboot...")
                             self._test_ssh_connectivity(config.name, timeout=60)
+                        
+                        # Copy browser profiles if requested
+                        if config.browser_profiles and ssh_ok:
+                            log.info("=" * 50)
+                            log.info("Copying browser profiles to VM...")
+                            log.info(f"  Profiles requested: {', '.join(config.browser_profiles)}")
+                            log.info("=" * 50)
+                            
+                            vm_dir = self.USER_IMAGES_DIR / config.name
+                            ssh_port = self._get_saved_ssh_port(config.name)
+                            ssh_key = vm_dir / "ssh_key"
+                            
+                            # Stage profiles on host
+                            staged = stage_browser_profiles(
+                                config.browser_profiles,
+                                vm_dir,
+                                skip_cache=True,  # Don't copy cache to save space/time
+                            )
+                            
+                            if staged:
+                                # Copy to VM via SSH
+                                copy_profiles_to_vm_via_ssh(
+                                    staged,
+                                    ssh_port,
+                                    ssh_key,
+                                    config.username,
+                                )
+                            else:
+                                log.warning("No browser profiles found to copy")
                     
                     # Final status message
                     if ssh_ok and cloud_init_ok:

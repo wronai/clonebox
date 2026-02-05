@@ -256,6 +256,8 @@ clonebox start <name>        # Uruchom VM
 clonebox stop <name>         # Zatrzymaj VM
 clonebox delete <name>       # Usuń VM
 clonebox set-password <name> --password <pass>  # Ustaw hasło użytkownika VM
+clonebox set-password ubuntu --password ubuntu
+clonebox set-password clone-clonebox --username ubuntu --password ubuntu --user
 ```
 
 ## Development and Testing

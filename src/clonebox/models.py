@@ -48,6 +48,7 @@ class VMConfig:
     auth_method: str = "password"  # ssh_key | one_time_password | password
     ssh_public_key: Optional[str] = None
     shutdown_after_setup: bool = False
+    browser_profiles: list = field(default_factory=list)  # Browser profiles to copy: chrome, chromium, firefox, edge
 
     def to_dict(self) -> dict:
         """Convert to dictionary representation."""

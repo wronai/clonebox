@@ -394,6 +394,12 @@ def main():
         action="store_true",
         help="Approve policy-gated operation",
     )
+    clone_parser.add_argument(
+        "--browser-profiles",
+        nargs="+",
+        choices=["chrome", "chromium", "firefox", "edge", "brave", "opera", "all"],
+        help="Copy browser profiles from host to VM (chrome, chromium, firefox, edge, brave, opera, or 'all')",
+    )
     clone_parser.set_defaults(func=cmd_clone)
 
     # Detect command

@@ -87,6 +87,13 @@ def cmd_clone(args):
     if getattr(args, "run", False):
         console.print("[cyan]🚀 Creating VM from config...[/]")
         config = load_clonebox_config(config_file)
+        
+        # Add browser profiles if specified
+        browser_profiles = getattr(args, "browser_profiles", None)
+        if browser_profiles:
+            console.print(f"[cyan]📂 Browser profiles to copy: {', '.join(browser_profiles)}[/]")
+            config["browser_profiles"] = browser_profiles
+        
         from clonebox.cli.utils import create_vm_from_config
         vm_uuid = create_vm_from_config(
             config, start=True, user_session=user_session, replace=getattr(args, "replace", False), approved=getattr(args, "approve", False)
@@ -727,3 +734,195 @@ def cmd_status(args):
     console.print(
         f"    [cyan]virsh --connect {conn_uri} domifaddr {vm_name}[/]  # IP addresses"
     )
+
+
+def cmd_watch(args):
+    """Watch VM status in real-time."""
+    import subprocess
+    import time
+
+    name = args.name
+    user_session = getattr(args, "user", False)
+    conn_uri = "qemu:///session" if user_session else "qemu:///system"
+
+    try:
+        vm_name, _ = _resolve_vm_name_and_config_file(name)
+    except FileNotFoundError as e:
+        console.print(f"[red]❌ {e}[/]")
+        return
+
+    console.print(f"[bold cyan]👁️ Watching VM: {vm_name}[/]")
+    console.print("[dim]Press Ctrl+C to stop[/]\n")
+
+    try:
+        while True:
+            result = subprocess.run(
+                ["virsh", "--connect", conn_uri, "dominfo", vm_name],
+                capture_output=True,
+                text=True,
+                timeout=5,
+            )
+            if result.returncode == 0:
+                state = "unknown"
+                cpu_time = ""
+                for line in result.stdout.split('\n'):
+                    if 'State:' in line:
+                        state = line.split(':')[1].strip()
+                    if 'CPU time:' in line:
+                        cpu_time = line.split(':')[1].strip()
+
+                status_color = "green" if state == "running" else "yellow" if state == "paused" else "red"
+                console.print(f"\r[{status_color}]{state:12}[white] | CPU: {cpu_time}[/]", end="")
+            else:
+                console.print(f"\r[red]VM not found[/]", end="")
+            time.sleep(2)
+    except KeyboardInterrupt:
+        console.print("\n\n[dim]Stopped watching[/]")
+    except Exception as e:
+        console.print(f"\n[red]❌ Error: {e}[/]")
+
+
+def cmd_logs(args):
+    """Show VM logs (serial log or console output)."""
+    import subprocess
+
+    name = args.name
+    user_session = getattr(args, "user", False)
+    show_all = getattr(args, "all", False)
+    conn_uri = "qemu:///session" if user_session else "qemu:///system"
+
+    try:
+        vm_name, _ = _resolve_vm_name_and_config_file(name)
+    except FileNotFoundError as e:
+        console.print(f"[red]❌ {e}[/]")
+        return
+
+    # Try serial log first
+    vm_dir = Path.home() / ".local/share/libvirt/images" / vm_name
+    serial_log = vm_dir / "serial.log"
+
+    console.print(f"[bold cyan]📜 Logs for VM: {vm_name}[/]\n")
+
+    if serial_log.exists() and serial_log.stat().st_size > 0:
+        console.print("[dim]Reading serial log...[/]\n")
+        if show_all:
+            subprocess.run(["cat", str(serial_log)])
+        else:
+            subprocess.run(["tail", "-50", str(serial_log)])
+    else:
+        console.print("[yellow]Serial log not available, using console...[/]")
+        console.print("[dim]Press Ctrl+] to exit console[/]\n")
+        try:
+            subprocess.run(
+                ["virsh", "--connect", conn_uri, "console", vm_name],
+                timeout=30 if not show_all else None,
+            )
+        except subprocess.TimeoutExpired:
+            console.print("\n[dim]Log view timeout[/]")
+
+
+def cmd_repair(args):
+    """Attempt to repair common VM issues."""
+    import subprocess
+
+    name = args.name
+    user_session = getattr(args, "user", False)
+    conn_uri = "qemu:///session" if user_session else "qemu:///system"
+
+    try:
+        vm_name, config_file = _resolve_vm_name_and_config_file(name)
+    except FileNotFoundError as e:
+        console.print(f"[red]❌ {e}[/]")
+        return
+
+    console.print(f"[bold cyan]🔧 Repairing VM: {vm_name}[/]\n")
+
+    repairs_made = []
+
+    # Repair 1: Check if VM exists
+    result = subprocess.run(
+        ["virsh", "--connect", conn_uri, "dominfo", vm_name],
+        capture_output=True,
+        text=True,
+    )
+
+    if result.returncode != 0:
+        console.print("[yellow]VM not found. Attempting to redefine from config...[/]")
+        if config_file and config_file.exists():
+            # Try to redefine VM
+            console.print("[dim]Looking for VM XML...[/]")
+            repairs_made.append("VM was missing - manual recreation needed")
+        else:
+            console.print("[red]❌ Cannot repair: no config file found[/]")
+            return
+    else:
+        # Repair 2: Check if running
+        state = "unknown"
+        for line in result.stdout.split('\n'):
+            if 'State:' in line:
+                state = line.split(':')[1].strip()
+
+        if state != "running":
+            console.print(f"[yellow]VM is {state}, attempting to start...[/]")
+            subprocess.run(
+                ["virsh", "--connect", conn_uri, "start", vm_name],
+                capture_output=True,
+            )
+            repairs_made.append(f"Started VM (was {state})")
+
+    # Repair 3: Check SSH port forwarding
+    vm_dir = Path.home() / ".local/share/libvirt/images" / vm_name
+    ssh_port_file = vm_dir / "ssh_port"
+
+    if ssh_port_file.exists():
+        ssh_port = ssh_port_file.read_text().strip()
+        result = subprocess.run(
+            ["ss", "-tlnp"],
+            capture_output=True,
+            text=True,
+        )
+        if f":{ssh_port}" not in result.stdout:
+            console.print(f"[yellow]SSH port {ssh_port} not listening[/]")
+            repairs_made.append(f"SSH port {ssh_port} not listening - may need VM restart")
+
+    # Repair 4: Check GDM/GUI
+    if ssh_port_file.exists():
+        ssh_port = ssh_port_file.read_text().strip()
+        ssh_key = vm_dir / "ssh_key"
+
+        console.print("[dim]Checking GUI status via SSH...[/]")
+        result = subprocess.run(
+            [
+                "ssh", "-o", "ConnectTimeout=3", "-o", "StrictHostKeyChecking=no",
+                "-o", "BatchMode=yes", "-p", ssh_port,
+                "-i", str(ssh_key), "ubuntu@127.0.0.1",
+                "systemctl is-active gdm3 gdm 2>/dev/null | head -1"
+            ],
+            capture_output=True,
+            text=True,
+        )
+
+        if "active" not in result.stdout:
+            console.print("[yellow]Display Manager not running, attempting to start...[/]")
+            subprocess.run(
+                [
+                    "ssh", "-o", "ConnectTimeout=3", "-o", "StrictHostKeyChecking=no",
+                    "-o", "BatchMode=yes", "-p", ssh_port,
+                    "-i", str(ssh_key), "ubuntu@127.0.0.1",
+                    "sudo systemctl start gdm3 2>/dev/null || sudo systemctl start gdm"
+                ],
+                capture_output=True,
+            )
+            repairs_made.append("Started Display Manager (GDM)")
+        else:
+            console.print("[green]✅ Display Manager is running[/]")
+
+    # Summary
+    console.print(f"\n[bold]🔧 Repair Summary:[/]")
+    if repairs_made:
+        for repair in repairs_made:
+            console.print(f"  [green]✓[/] {repair}")
+    else:
+        console.print("  [dim]No repairs needed - VM looks healthy![/]")
+
+    console.print(f"\n[dim]Run 'clonebox status {vm_name}' to verify[/]")

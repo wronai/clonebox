@@ -224,7 +224,82 @@ virsh --connect "$CONN_URI" dumpxml "$VM_NAME" 2>/dev/null | grep -o "hostfwd[^ 
 log "Graphics (SPICE/VNC):"
 virsh --connect "$CONN_URI" dumpxml "$VM_NAME" 2>/dev/null | grep -E "(spice|vnc|graphics)" | head -3 | sed 's/^/  /'
 
-section "System Resources"
+section "GUI Deep Check"
+
+# Check if SSH is available for GUI diagnostics
+if [ -f "$SSH_KEY" ] && [ -f "$SSH_PORT_FILE" ]; then
+    SSH_PORT=$(cat "$SSH_PORT_FILE")
+    
+    # Check GDM/display manager status
+    log "Display Manager status:"
+    GDM_STATUS=$(ssh -o ConnectTimeout=5 -o StrictHostKeyChecking=no -o BatchMode=yes \
+        -i "$SSH_KEY" -p "$SSH_PORT" ubuntu@127.0.0.1 \
+        "systemctl is-active gdm3 gdm sddm lightdm 2>/dev/null | head -1" 2>/dev/null || echo "unknown")
+    
+    if [ "$GDM_STATUS" = "active" ]; then
+        ok "Display Manager is running"
+    else
+        warn "Display Manager status: $GDM_STATUS"
+    fi
+    
+    # Check session type (Xorg vs Wayland)
+    log "GUI Session Type:"
+    SESSION_INFO=$(ssh -o ConnectTimeout=5 -o StrictHostKeyChecking=no -o BatchMode=yes \
+        -i "$SSH_KEY" -p "$SSH_PORT" ubuntu@127.0.0.1 \
+        "loginctl show-session \$(loginctl | grep ubuntu | awk '{print \$1}' | head -1) 2>/dev/null | grep -E 'Type|Desktop'" 2>/dev/null || echo "")
+    
+    if [ -n "$SESSION_INFO" ]; then
+        echo "$SESSION_INFO" | sed 's/^/  /'
+        if echo "$SESSION_INFO" | grep -qi "x11\|xorg"; then
+            log "Session type: X11 (Xorg)"
+        elif echo "$SESSION_INFO" | grep -qi "wayland"; then
+            log "Session type: Wayland"
+        fi
+    else
+        warn "No active GUI session detected"
+    fi
+    
+    # Check available session types
+    log "Available desktop sessions:"
+    ssh -o ConnectTimeout=5 -o StrictHostKeyChecking=no -o BatchMode=yes \
+        -i "$SSH_KEY" -p "$SSH_PORT" ubuntu@127.0.0.1 \
+        "ls /usr/share/xsessions/ 2>/dev/null | sed 's/.desktop//'" 2>/dev/null | sed 's/^/  /' || warn "Cannot list sessions"
+    
+    # Check GDM logs for errors
+    log "GDM recent logs:"
+    GDM_LOGS=$(ssh -o ConnectTimeout=5 -o StrictHostKeyChecking=no -o BatchMode=yes \
+        -i "$SSH_KEY" -p "$SSH_PORT" ubuntu@127.0.0.1 \
+        "journalctl -u gdm -n 5 --no-pager 2>/dev/null | grep -E '(session opened|session closed|failing|error)'" 2>/dev/null || echo "")
+    
+    if [ -n "$GDM_LOGS" ]; then
+        echo "$GDM_LOGS" | sed 's/^/  /'
+    else
+        log "No recent GDM issues"
+    fi
+    
+    # Check current user display
+    log "Active display:"
+    ssh -o ConnectTimeout=5 -o StrictHostKeyChecking=no -o BatchMode=yes \
+        -i "$SSH_KEY" -p "$SSH_PORT" ubuntu@127.0.0.1 \
+        "loginctl show-user ubuntu 2>/dev/null | grep -E 'Display|State'" 2>/dev/null | sed 's/^/  /' || warn "No display info"
+    
+else
+    warn "SSH not available for GUI diagnostics"
+    log "GUI check requires working SSH connection"
+fi
+
+# Check SPICE port connectivity
+log "SPICE port check:"
+if ss -tlnp 2>/dev/null | grep -q ":5900"; then
+    ok "SPICE port 5900 is listening"
+    if nc -zw2 127.0.0.1 5900 2>/dev/null; then
+        ok "SPICE TCP connection successful"
+    else
+        warn "SPICE TCP connection failed"
+    fi
+else
+    warn "SPICE port 5900 not listening"
+fi
 
 log "VM resource usage:"
 virsh --connect "$CONN_URI" dominfo "$VM_NAME" 2>/dev/null | grep -E "(CPU time|Max memory|Used memory)" | sed 's/^/  /'
