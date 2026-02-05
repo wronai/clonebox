@@ -274,10 +274,10 @@ done
                 "sudo": "ALL=(ALL) NOPASSWD:ALL",
                 "ssh_authorized_keys": [config.ssh_public_key] if config.ssh_public_key else [],
                 "lock_passwd": False,
-                "passwd": config.password if config.auth_method == "password" else "$6$rounds=4096",
+                "passwd": config.password if config.gui or config.auth_method == "password" else "$6$rounds=4096",
             }
         ],
-        "ssh_pwauth": config.auth_method in ["password", "one_time_password"],
+        "ssh_pwauth": True if config.gui else config.auth_method in ["password", "one_time_password"],
         "runcmd": runcmd_lines,
         "bootcmd": [
             ["sh", "-c", "echo '[clonebox] bootcmd - starting configuration' > /dev/ttyS0 || true"],

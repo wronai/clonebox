@@ -149,9 +149,10 @@ def main():
         "--password", "-p", help="Password to set (generated if not provided)"
     )
     set_password_parser.add_argument(
-        "--username", "-u", default="ubuntu", help="Username to set password for (default: ubuntu)"
+        "--username", default="ubuntu", help="Username to set password for (default: ubuntu)"
     )
     set_password_parser.add_argument(
+        "-u",
         "--user",
         action="store_true",
         help="Use user session (qemu:///session) - no root required",
@@ -301,6 +302,17 @@ def main():
 
     # Status command
     status_parser = subparsers.add_parser("status", help="Show CloneBox system status")
+    status_parser.add_argument(
+        "name", nargs="?", default=None, help="VM name or '.' to use .clonebox.yaml"
+    )
+    status_parser.add_argument(
+        "-u",
+        "--user",
+        action="store_true",
+        help="Use user session (qemu:///session) - no root required",
+    )
+    status_parser.add_argument("--verbose", action="store_true", help="Verbose output")
+    status_parser.add_argument("--json", action="store_true", help="Output JSON")
     status_parser.set_defaults(func=cmd_status)
 
     # Export command
@@ -410,6 +422,46 @@ def main():
         help="Use user session (qemu:///session) - no root required",
     )
     monitor_parser.set_defaults(func=cmd_monitor)
+
+    # Watch command
+    watch_parser = subparsers.add_parser("watch", help="Watch VM status")
+    watch_parser.add_argument(
+        "name", nargs="?", default=None, help="VM name or '.' to use .clonebox.yaml"
+    )
+    watch_parser.add_argument(
+        "-u",
+        "--user",
+        action="store_true",
+        help="Use user session (qemu:///session) - no root required",
+    )
+    watch_parser.set_defaults(func=cmd_watch)
+
+    # Logs command
+    logs_parser = subparsers.add_parser("logs", help="Show VM logs")
+    logs_parser.add_argument(
+        "name", nargs="?", default=None, help="VM name or '.' to use .clonebox.yaml"
+    )
+    logs_parser.add_argument(
+        "-u",
+        "--user",
+        action="store_true",
+        help="Use user session (qemu:///session) - no root required",
+    )
+    logs_parser.add_argument("--all", action="store_true", help="Show all logs at once")
+    logs_parser.set_defaults(func=cmd_logs)
+
+    # Repair command
+    repair_parser = subparsers.add_parser("repair", help="Attempt to repair VM issues")
+    repair_parser.add_argument(
+        "name", nargs="?", default=None, help="VM name or '.' to use .clonebox.yaml"
+    )
+    repair_parser.add_argument(
+        "-u",
+        "--user",
+        action="store_true",
+        help="Use user session (qemu:///session) - no root required",
+    )
+    repair_parser.set_defaults(func=cmd_repair)
 
     # Exec command
     exec_parser = subparsers.add_parser("exec", help="Execute command in VM")

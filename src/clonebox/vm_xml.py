@@ -129,13 +129,8 @@ def generate_vm_xml(
     
     # Video
     video = ET.SubElement(devices, "video")
-    if user_session:
-        # Use standard VGA for user session
-        model = ET.SubElement(video, "model", type="vga", heads="1", primary="yes")
-    else:
-        # Use virtio with OpenGL for system session
-        model = ET.SubElement(video, "model", type="virtio", heads="1", primary="yes")
-        ET.SubElement(model, "acceleration", accel3d="yes")
+    # Use virtio video for both session types - better GUI support
+    model = ET.SubElement(video, "model", type="virtio", heads="1", primary="yes")
     
     # Sound (only for system session)
     if not user_session:

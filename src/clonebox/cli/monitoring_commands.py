@@ -349,6 +349,6 @@ def cmd_logs(args):
     
     # Call clonebox-logs script
     import subprocess
-    script_path = Path(__file__).parent.parent.parent / "scripts" / "clonebox-logs.sh"
+    script_path = Path(__file__).parent.parent.parent.parent / "scripts" / "clonebox-logs.sh"
     cmd = [str(script_path), vm_name, "true" if user_session else "false", "true" if all_logs else "false"]
     subprocess.run(cmd, check=True)

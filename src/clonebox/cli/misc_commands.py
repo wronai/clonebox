@@ -464,6 +464,7 @@ def cmd_set_password(args):
     
     vm_name = args.name
     user_session = getattr(args, "user", False)
+    username = getattr(args, "username", "ubuntu")
     
     # Resolve VM name from config if needed
     if not vm_name or vm_name == ".":
@@ -485,7 +486,13 @@ def cmd_set_password(args):
     
     # Call set-vm-password script
     script_path = Path(__file__).parent.parent.parent.parent / "scripts" / "set-vm-password.sh"
-    cmd = [str(script_path), vm_name, password, "true" if user_session else "false"]
+    cmd = [
+        str(script_path),
+        vm_name,
+        password,
+        "true" if user_session else "false",
+        username,
+    ]
     subprocess.run(cmd, check=True)
 
 
@@ -697,7 +704,13 @@ def cmd_status(args):
         console.print(f"[red]❌ {e}[/]")
         return
 
-    run_vm_diagnostics(vm_name, conn_uri, config_file, verbose=False, json_output=False)
+    run_vm_diagnostics(
+        vm_name,
+        conn_uri,
+        config_file,
+        verbose=getattr(args, "verbose", False),
+        json_output=getattr(args, "json", False),
+    )
 
     # Show useful commands
     console.print("\n[bold]📋 Useful commands:[/]")
