@@ -484,7 +484,7 @@ def cmd_set_password(args):
         console.print(f"[cyan]Generated password: {password}[/]")
     
     # Call set-vm-password script
-    script_path = Path(__file__).parent.parent.parent / "scripts" / "set-vm-password.sh"
+    script_path = Path(__file__).parent.parent.parent.parent / "scripts" / "set-vm-password.sh"
     cmd = [str(script_path), vm_name, password, "true" if user_session else "false"]
     subprocess.run(cmd, check=True)
 

@@ -255,6 +255,7 @@ clonebox create --config ... # Utwórz VM z JSON config
 clonebox start <name>        # Uruchom VM
 clonebox stop <name>         # Zatrzymaj VM
 clonebox delete <name>       # Usuń VM
+clonebox set-password <name> --password <pass>  # Ustaw hasło użytkownika VM
 ```
 
 ## Development and Testing

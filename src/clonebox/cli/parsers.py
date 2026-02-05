@@ -140,6 +140,24 @@ def main():
     )
     restart_parser.set_defaults(func=cmd_restart)
 
+    # Set-password command
+    set_password_parser = subparsers.add_parser("set-password", help="Set VM user password")
+    set_password_parser.add_argument(
+        "name", nargs="?", default=None, help="VM name or '.' to use .clonebox.yaml"
+    )
+    set_password_parser.add_argument(
+        "--password", "-p", help="Password to set (generated if not provided)"
+    )
+    set_password_parser.add_argument(
+        "--username", "-u", default="ubuntu", help="Username to set password for (default: ubuntu)"
+    )
+    set_password_parser.add_argument(
+        "--user",
+        action="store_true",
+        help="Use user session (qemu:///session) - no root required",
+    )
+    set_password_parser.set_defaults(func=cmd_set_password)
+
     # Delete command
     delete_parser = subparsers.add_parser("delete", help="Delete a VM")
     delete_parser.add_argument(

@@ -257,8 +257,22 @@ class SelectiveVMCloner:
                         log.warning(f"VM '{config.name}' created - SSH not yet available")
                 return vm_uuid
 
-    def start_vm(self, vm_name: str, open_viewer: bool = False, console: Any = None) -> None:
+    def start_vm(self, vm_name: str, open_viewer: bool = False, console: Any = None, config: VMConfig = None) -> None:
         """Start an existing VM."""
+        
+        # Try to load config from YAML if not provided
+        if config is None:
+            try:
+                import yaml
+                config_file = Path(".clonebox.yaml")
+                if config_file.exists():
+                    with open(config_file) as f:
+                        config_data = yaml.safe_load(f)
+                        if config_data and "vm" in config_data:
+                            config = VMConfig(**config_data["vm"])
+                            log.debug(f"Loaded config from .clonebox.yaml for VM '{vm_name}'")
+            except Exception as e:
+                log.debug(f"Could not load config from YAML: {e}")
         
         try:
             log.info(f"Looking up VM '{vm_name}'...")
@@ -324,10 +338,10 @@ class SelectiveVMCloner:
                         if gui_mode:
                             log.info("GUI mode detected - using extended timeout for desktop installation")
                         
-                        cloud_init_ok = self._wait_for_cloud_init(vm_name, ssh_port, timeout=cloud_init_timeout, gui_mode=gui_mode)
+                        cloud_init_ok = self._wait_for_cloud_init(vm_name, ssh_port, timeout=cloud_init_timeout, gui_mode=gui_mode, config=config)
                     except Exception as e:
                         log.debug(f"Failed to detect GUI mode: {e}")
-                        cloud_init_ok = self._wait_for_cloud_init(vm_name, ssh_port, timeout=cloud_init_timeout, gui_mode=False)
+                        cloud_init_ok = self._wait_for_cloud_init(vm_name, ssh_port, timeout=cloud_init_timeout, gui_mode=False, config=config)
             
             if ssh_ok and cloud_init_ok:
                 log.info("=" * 50)
@@ -1428,6 +1442,12 @@ class SelectiveVMCloner:
     def _verify_gui_ready(self, vm_name: str, ssh_port: int, config: VMConfig, timeout: int = 300) -> bool:
         """Verify that GUI desktop and applications are fully ready."""
         log.info("Verifying GUI desktop environment is ready...")
+        
+        # Handle None config
+        if config is None:
+            log.warning("  No config provided - skipping detailed application verification")
+            config = VMConfig(name=vm_name)  # Create minimal config
+        
         log.info(f"  Configuration to verify: {len(config.packages)} packages, {len(config.snap_packages)} snaps, {len(config.services)} services")
         
         start_time = time.time()
