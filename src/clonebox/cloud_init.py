@@ -70,21 +70,30 @@ def generate_cloud_init_config(
     if config.snap_packages:
         runcmd_lines.extend([
             "echo '[clonebox] Installing snap packages...' > /dev/ttyS0",
-            "apt-get install -y snapd 2>&1 | tee -a /var/log/cloud-init-output.log",
+            "echo '[clonebox] Installing snapd...' > /dev/ttyS0",
+            "apt-get install -y snapd 2>&1 | tee -a /var/log/cloud-init-output.log | while read line; do echo \"[clonebox] [apt] $line\" > /dev/ttyS0; done || echo '[clonebox] WARNING: snapd installation failed' > /dev/ttyS0",
+            "systemctl enable snapd 2>/dev/null || true",
+            "systemctl start snapd 2>/dev/null || true",
+            # Wait for snapd to be ready
+            "echo '[clonebox] Waiting for snapd to be ready...' > /dev/ttyS0",
+            "for i in 1 2 3 4 5; do snap wait system seed.loaded 2>/dev/null && break || sleep 5; done",
         ])
         
         for idx, snap in enumerate(config.snap_packages):
             runcmd_lines.append(f"echo '[clonebox] [{idx+1}/{len(config.snap_packages)}] Installing snap: {snap}...' > /dev/ttyS0")
             if snap in SNAP_INTERFACES:
+                # Install with --classic if needed
+                classic_snaps = ["code", "pycharm-community", "intellij-idea-community", "clion", "goland", "rubymine", "webstorm", "phpstorm", "datagrip"]
+                classic_flag = "--classic" if snap in classic_snaps else ""
                 runcmd_lines.extend([
-                    f"snap install {snap} 2>&1 | tee -a /var/log/cloud-init-output.log",
+                    f"echo '[clonebox] Installing {snap} with interfaces...' > /dev/ttyS0",
+                    f"snap install {snap} {classic_flag} 2>&1 | tee -a /var/log/cloud-init-output.log | while read line; do echo \"[clonebox] [snap-{snap}] $line\" > /dev/ttyS0; done || echo '[clonebox] WARNING: Failed to install {snap}' > /dev/ttyS0",
                 ])
                 for iface in SNAP_INTERFACES[snap]:
-                    runcmd_lines.append(f"snap connect {snap}:{iface}")
+                    runcmd_lines.append(f"snap connect {snap}:{iface} 2>&1 | tee -a /var/log/cloud-init-output.log || echo '[clonebox] WARNING: Failed to connect {snap}:{iface}' > /dev/ttyS0")
             else:
                 # Regular snap
-                runcmd_lines.append(f"snap install {snap} 2>&1 | tee -a /var/log/cloud-init-output.log")
-                runcmd_lines.append(f"snap install {snap}")
+                runcmd_lines.append(f"snap install {snap} 2>&1 | tee -a /var/log/cloud-init-output.log | while read line; do echo \"[clonebox] [snap-{snap}] $line\" > /dev/ttyS0; done || echo '[clonebox] WARNING: Failed to install {snap}' > /dev/ttyS0")
     
     # Create mount points with error handling
     if config.paths:
@@ -110,13 +119,14 @@ def generate_cloud_init_config(
             runcmd_lines.append(f"mkdir -p {guest_path}")
             # Note: Actual copying happens via virt-customize
     
-    # Setup services
+    # Setup services with verification
     if config.services:
         runcmd_lines.extend([
             "echo '[clonebox] Enabling services...' > /dev/ttyS0",
         ])
         for service in config.services:
-            runcmd_lines.append(f"systemctl enable {service}")
+            # Check if service file exists before enabling
+            runcmd_lines.append(f"if systemctl list-unit-files {service}.service 2>/dev/null | grep -q {service}; then systemctl enable {service} 2>&1 | tee -a /var/log/cloud-init-output.log && echo '[clonebox] [OK] Enabled {service}' > /dev/ttyS0 || echo '[clonebox] [WARN] Failed to enable {service}' > /dev/ttyS0; else echo '[clonebox] [SKIP] {service} not found' > /dev/ttyS0; fi")
     
     # Setup autostart applications
     if autostart_apps and config.autostart_apps:
