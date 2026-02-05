@@ -215,14 +215,26 @@ class SelectiveVMCloner:
                     # Test SSH connectivity
                     log.info("Testing SSH connectivity (cloud-init may take 2-3 minutes)...")
                     ssh_ok = self._test_ssh_connectivity(config.name, timeout=180)
+                    cloud_init_ok = False
                     
                     # Wait for cloud-init to complete (especially important for GUI mode)
                     if ssh_ok:
                         ssh_port = self._get_saved_ssh_port(config.name)
                         if ssh_port:
-                            # Longer timeout for GUI mode (20 min) vs normal mode (10 min)
-                            cloud_init_timeout = 1200 if config.gui else 600
-                            self._wait_for_cloud_init(config.name, ssh_port, timeout=cloud_init_timeout, gui_mode=config.gui, config=config)
+                            # Extended timeout for all setups - cloud-init can take time
+                            cloud_init_timeout = 1200  # 20 minutes max
+                            log.info(f"Config: gui={config.gui}, packages={len(config.packages)}, snaps={len(config.snap_packages)}")
+                            cloud_init_ok = self._wait_for_cloud_init(config.name, ssh_port, timeout=cloud_init_timeout, gui_mode=config.gui, config=config)
+                            
+                            if not cloud_init_ok:
+                                log.warning("=" * 60)
+                                log.warning("VM STARTED BUT SETUP INCOMPLETE")
+                                log.warning("Cloud-init did not finish - GUI/apps may not be ready")
+                                log.warning("Check status: ssh -p {} ubuntu@localhost 'cloud-init status'".format(ssh_port))
+                                log.warning("=" * 60)
+                        else:
+                            log.warning("No SSH port found - skipping cloud-init wait")
+                            cloud_init_ok = False
                         
                         # If GUI mode and cloud-init done, wait for reboot and check GUI
                         if config.gui:
@@ -235,8 +247,14 @@ class SelectiveVMCloner:
                             # Re-check SSH after potential reboot
                             log.info("Re-checking SSH after potential reboot...")
                             self._test_ssh_connectivity(config.name, timeout=60)
-                
-                log.info(f"VM '{config.name}' creation completed successfully!")
+                    
+                    # Final status message
+                    if ssh_ok and cloud_init_ok:
+                        log.info(f"VM '{config.name}' created successfully - READY FOR USE!")
+                    elif ssh_ok:
+                        log.info(f"VM '{config.name}' created - SSH accessible but setup may be incomplete")
+                    else:
+                        log.warning(f"VM '{config.name}' created - SSH not yet available")
                 return vm_uuid
 
     def start_vm(self, vm_name: str, open_viewer: bool = False, console: Any = None) -> None:
@@ -286,15 +304,17 @@ class SelectiveVMCloner:
             ssh_ok = self._test_ssh_connectivity(vm_name, timeout=180)
             
             # Wait for cloud-init to complete if this is a fresh boot
+            cloud_init_ok = False
             if ssh_ok:
                 log.info("Checking cloud-init status...")
                 ssh_port = self._get_saved_ssh_port(vm_name)
                 if ssh_port:
-                    # Check if this VM has GUI enabled by checking VM XML
+                    # Always use extended timeout - cloud-init can take time
+                    cloud_init_timeout = 1200  # 20 minutes
                     try:
+                        # Check if this VM has GUI enabled by checking VM XML
                         vm = self.conn.lookupByName(vm_name)
                         vm_xml = vm.XMLDesc()
-                        import xml.etree.ElementTree as ET
                         root = ET.fromstring(vm_xml)
                         
                         # Look for graphics (SPICE/VNC) which indicates GUI mode
@@ -303,17 +323,22 @@ class SelectiveVMCloner:
                         
                         if gui_mode:
                             log.info("GUI mode detected - using extended timeout for desktop installation")
-                            self._wait_for_cloud_init(vm_name, ssh_port, timeout=1200, gui_mode=True)
-                        else:
-                            self._wait_for_cloud_init(vm_name, ssh_port, timeout=300, gui_mode=False)
+                        
+                        cloud_init_ok = self._wait_for_cloud_init(vm_name, ssh_port, timeout=cloud_init_timeout, gui_mode=gui_mode)
                     except Exception as e:
                         log.debug(f"Failed to detect GUI mode: {e}")
-                        self._wait_for_cloud_init(vm_name, ssh_port, timeout=300, gui_mode=False)
+                        cloud_init_ok = self._wait_for_cloud_init(vm_name, ssh_port, timeout=cloud_init_timeout, gui_mode=False)
             
-            if ssh_ok:
+            if ssh_ok and cloud_init_ok:
                 log.info("=" * 50)
                 log.info("VM READY FOR USE!")
                 log.info(f"  ssh -p {ssh_port} ubuntu@localhost")
+                log.info("=" * 50)
+            elif ssh_ok:
+                log.info("=" * 50)
+                log.info("VM RUNNING (SSH accessible)")
+                log.info(f"  ssh -p {ssh_port} ubuntu@localhost")
+                log.info("  Warning: Setup may still be in progress")
                 log.info("=" * 50)
                 
         except libvirt.libvirtError as e:
