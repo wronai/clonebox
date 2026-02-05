@@ -1123,6 +1123,11 @@ class SelectiveVMCloner:
                 vnc_port = vnc.get('port', 'auto')
                 log.info(f"  ✓ VNC display on port {vnc_port}")
                 checks["vnc_port"] = vnc_port
+                # Even on timeout, try to report what was installed
+                try:
+                    self._verify_deployment_completion(vm_name, ssh_port, config)
+                except Exception as e:
+                    log.debug(f"Could not get final application status: {e}")
         except Exception as e:
             log.debug(f"Failed to get display ports: {e}")
         
@@ -1423,6 +1428,7 @@ class SelectiveVMCloner:
     def _verify_gui_ready(self, vm_name: str, ssh_port: int, config: VMConfig, timeout: int = 300) -> bool:
         """Verify that GUI desktop and applications are fully ready."""
         log.info("Verifying GUI desktop environment is ready...")
+        log.info(f"  Configuration to verify: {len(config.packages)} packages, {len(config.snap_packages)} snaps, {len(config.services)} services")
         
         start_time = time.time()
         check_interval = 20
@@ -1474,29 +1480,34 @@ class SelectiveVMCloner:
                 else:
                     status_details.append("Desktop:pending")
                 
-                # Check 3: Snap packages installed (if any)
+                # Check 3: Snap packages installed (detailed check)
+                snap_status = []
                 if config and config.snap_packages:
-                    snap_result = subprocess.run(
-                        [
-                            "ssh", "-o", "StrictHostKeyChecking=no",
-                            "-o", "UserKnownHostsFile=/dev/null",
-                            "-o", "ConnectTimeout=5",
-                            "-o", "BatchMode=yes",
-                            "-p", str(ssh_port),
-                            "ubuntu@localhost",
-                            f"snap list 2>/dev/null | grep -E '({'|'.join(config.snap_packages[:3])})' | wc -l"
-                        ],
-                        capture_output=True, text=True, timeout=10
-                    )
-                    try:
-                        snaps_found = int(snap_result.stdout.strip())
-                        if snaps_found >= min(len(config.snap_packages), 3):
-                            checks_passed += 1
-                            status_details.append(f"Snaps:{snaps_found}/{len(config.snap_packages)}")
+                    for snap in config.snap_packages:
+                        snap_check = subprocess.run(
+                            [
+                                "ssh", "-o", "StrictHostKeyChecking=no",
+                                "-o", "UserKnownHostsFile=/dev/null",
+                                "-o", "ConnectTimeout=3",
+                                "-o", "BatchMode=yes",
+                                "-p", str(ssh_port),
+                                "ubuntu@localhost",
+                                f"snap list 2>/dev/null | grep -q '^{snap} ' && echo 'installed' || echo 'missing'"
+                            ],
+                            capture_output=True, text=True, timeout=5
+                        )
+                        if "installed" in snap_check.stdout.lower():
+                            snap_status.append(f"{snap}:✓")
                         else:
-                            status_details.append(f"Snaps:{snaps_found}/{len(config.snap_packages)} pending")
-                    except ValueError:
-                        status_details.append("Snaps:checking")
+                            snap_status.append(f"{snap}:✗")
+                    
+                    snaps_installed = sum(1 for s in snap_status if ":✓" in s)
+                    snaps_total = len(config.snap_packages)
+                    if snaps_installed == snaps_total:
+                        checks_passed += 1
+                        status_details.append(f"Snaps:{snaps_installed}/{snaps_total}")
+                    else:
+                        status_details.append(f"Snaps:{snaps_installed}/{snaps_total}")
                 else:
                     checks_passed += 1  # No snaps to check
                     status_details.append("Snaps:none")
@@ -1525,18 +1536,13 @@ class SelectiveVMCloner:
                 status_str = " | ".join(status_details)
                 log.info(f"  [{elapsed:.0f}s] GUI checks: {checks_passed}/{total_checks} | {status_str}")
                 
-                # If all checks passed, we're ready
+                # If all checks passed, do detailed verification and report
                 if checks_passed == total_checks:
                     log.info(f"  ✓ GUI desktop fully ready after {elapsed:.0f}s!")
                     
-                    # Final summary of what's installed
-                    log.info("=" * 60)
-                    log.info("GUI VM READY FOR USE!")
-                    log.info(f"  SSH: ssh -p {ssh_port} ubuntu@localhost")
-                    log.info(f"  SPICE: remote-viewer spice://localhost:5900")
-                    if config and config.snap_packages:
-                        log.info(f"  Apps: {', '.join(config.snap_packages[:5])}{'...' if len(config.snap_packages) > 5 else ''}")
-                    log.info("=" * 60)
+                    # Detailed application verification
+                    self._verify_deployment_completion(vm_name, ssh_port, config)
+                    
                     return True
                 
             except subprocess.TimeoutExpired:
@@ -1549,6 +1555,234 @@ class SelectiveVMCloner:
         log.warning(f"  ⚠ GUI verification incomplete after {timeout}s")
         log.warning("  VM may need more time or manual intervention")
         return False
+
+    def _verify_deployment_completion(self, vm_name: str, ssh_port: int, config: VMConfig) -> None:
+        """Comprehensive verification of all deployed components."""
+        log.info("  " + "=" * 58)
+        log.info("  DEPLOYMENT VERIFICATION REPORT")
+        log.info("  " + "=" * 58)
+        
+        try:
+            # 1. Verify packages from YAML
+            log.info("  📦 Package Verification:")
+            if config and config.packages:
+                installed_count = 0
+                for pkg in config.packages[:10]:  # Check first 10 packages
+                    result = subprocess.run(
+                        [
+                            "ssh", "-o", "StrictHostKeyChecking=no",
+                            "-o", "UserKnownHostsFile=/dev/null",
+                            "-o", "ConnectTimeout=5",
+                            "-o", "BatchMode=yes",
+                            "-p", str(ssh_port),
+                            "ubuntu@localhost",
+                            f"dpkg -l {pkg} 2>/dev/null | grep -q '^ii' && echo 'OK' || echo 'MISSING'"
+                        ],
+                        capture_output=True, text=True, timeout=10
+                    )
+                    if "OK" in result.stdout:
+                        installed_count += 1
+                    else:
+                        log.warning(f"    ❌ Package {pkg} not found")
+                
+                log.info(f"    ✓ {installed_count}/{len(config.packages)} packages installed")
+            else:
+                log.info("    ℹ No packages specified in config")
+            
+            # 2. Verify snap packages
+            log.info("  🧩 Snap Package Verification:")
+            if config and config.snap_packages:
+                snap_result = subprocess.run(
+                    [
+                        "ssh", "-o", "StrictHostKeyChecking=no",
+                        "-o", "UserKnownHostsFile=/dev/null",
+                        "-o", "ConnectTimeout=5",
+                        "-o", "BatchMode=yes",
+                        "-p", str(ssh_port),
+                        "ubuntu@localhost",
+                        "snap list 2>/dev/null | tail -n +2 | awk '{print $1}'"
+                    ],
+                    capture_output=True, text=True, timeout=10
+                )
+                installed_snaps = set(snap_result.stdout.strip().split('\n')) if snap_result.stdout.strip() else set()
+                missing_snaps = []
+                for snap in config.snap_packages:
+                    if snap not in installed_snaps:
+                        missing_snaps.append(snap)
+                
+                if missing_snaps:
+                    log.warning(f"    ❌ Missing snaps: {', '.join(missing_snaps)}")
+                else:
+                    log.info(f"    ✓ All {len(config.snap_packages)} snap packages installed")
+            else:
+                log.info("    ℹ No snap packages specified")
+            
+            # 3. Verify services
+            log.info("  ⚙️ Service Verification:")
+            if config and config.services:
+                active_services = 0
+                for service in config.services[:10]:  # Check first 10 services
+                    result = subprocess.run(
+                        [
+                            "ssh", "-o", "StrictHostKeyChecking=no",
+                            "-o", "UserKnownHostsFile=/dev/null",
+                            "-o", "ConnectTimeout=5",
+                            "-o", "BatchMode=yes",
+                            "-p", str(ssh_port),
+                            "ubuntu@localhost",
+                            f"systemctl is-active {service} 2>/dev/null || echo 'inactive'"
+                        ],
+                        capture_output=True, text=True, timeout=10
+                    )
+                    if "active" in result.stdout:
+                        active_services += 1
+                    else:
+                        log.warning(f"    ❌ Service {service} not active")
+                
+                log.info(f"    ✓ {active_services}/{len(config.services)} services active")
+            else:
+                log.info("    ℹ No services specified")
+            
+            # 4. Verify paths/mounts
+            log.info("  📁 Path/Mount Verification:")
+            if config and config.paths:
+                mounted_paths = 0
+                for host_path, vm_path in config.paths.items():
+                    result = subprocess.run(
+                        [
+                            "ssh", "-o", "StrictHostKeyChecking=no",
+                            "-o", "UserKnownHostsFile=/dev/null",
+                            "-o", "ConnectTimeout=5",
+                            "-o", "BatchMode=yes",
+                            "-p", str(ssh_port),
+                            "ubuntu@localhost",
+                            f"test -d {vm_path} && echo 'EXISTS' || echo 'MISSING'"
+                        ],
+                        capture_output=True, text=True, timeout=10
+                    )
+                    if "EXISTS" in result.stdout:
+                        mounted_paths += 1
+                    else:
+                        log.warning(f"    ❌ Path {vm_path} not found")
+                
+                log.info(f"    ✓ {mounted_paths}/{len(config.paths)} paths mounted")
+            else:
+                log.info("    ℹ No paths specified")
+            
+            # 5. Verify app data paths
+            log.info("  💾 App Data Verification:")
+            if config and config.app_data_paths:
+                synced_paths = 0
+                for host_path, vm_path in config.app_data_paths.items():
+                    result = subprocess.run(
+                        [
+                            "ssh", "-o", "StrictHostKeyChecking=no",
+                            "-o", "UserKnownHostsFile=/dev/null",
+                            "-o", "ConnectTimeout=5",
+                            "-o", "BatchMode=yes",
+                            "-p", str(ssh_port),
+                            "ubuntu@localhost",
+                            f"test -d {vm_path} && echo 'EXISTS' || echo 'MISSING'"
+                        ],
+                        capture_output=True, text=True, timeout=10
+                    )
+                    if "EXISTS" in result.stdout:
+                        synced_paths += 1
+                    else:
+                        log.warning(f"    ❌ App data {vm_path} not found")
+                
+                log.info(f"    ✓ {synced_paths}/{len(config.app_data_paths)} app data paths synced")
+            else:
+                log.info("    ℹ No app data paths specified")
+            
+            # 6. Verify post-commands execution
+            log.info("  🔧 Post-Command Verification:")
+            if config and config.post_commands:
+                # Check for markers or results of post-commands
+                result = subprocess.run(
+                    [
+                        "ssh", "-o", "StrictHostKeyChecking=no",
+                        "-o", "UserKnownHostsFile=/dev/null",
+                        "-o", "ConnectTimeout=5",
+                        "-o", "BatchMode=yes",
+                        "-p", str(ssh_port),
+                        "ubuntu@localhost",
+                        "test -f /tmp/clonebox-post-commands-done && echo 'DONE' || echo 'UNKNOWN'"
+                    ],
+                    capture_output=True, text=True, timeout=10
+                )
+                if "DONE" in result.stdout:
+                    log.info(f"    ✓ {len(config.post_commands)} post-commands executed")
+                else:
+                    log.warning(f"    ⚠ Post-command status unknown (no marker found)")
+            else:
+                log.info("    ℹ No post-commands specified")
+            
+            # 7. System summary
+            log.info("  📊 System Summary:")
+            # Disk usage
+            disk_result = subprocess.run(
+                [
+                    "ssh", "-o", "StrictHostKeyChecking=no",
+                    "-o", "UserKnownHostsFile=/dev/null",
+                    "-o", "ConnectTimeout=5",
+                    "-o", "BatchMode=yes",
+                    "-p", str(ssh_port),
+                    "ubuntu@localhost",
+                    "df -h / | tail -1 | awk '{print $5}'"
+                ],
+                capture_output=True, text=True, timeout=10
+            )
+            disk_usage = disk_result.stdout.strip() if disk_result.stdout.strip() else "Unknown"
+            
+            # Memory usage
+            mem_result = subprocess.run(
+                [
+                    "ssh", "-o", "StrictHostKeyChecking=no",
+                    "-o", "UserKnownHostsFile=/dev/null",
+                    "-o", "ConnectTimeout=5",
+                    "-o", "BatchMode=yes",
+                    "-p", str(ssh_port),
+                    "ubuntu@localhost",
+                    "free -h | grep '^Mem:' | awk '{print $3 \"/\" $2}'"
+                ],
+                capture_output=True, text=True, timeout=10
+            )
+            mem_usage = mem_result.stdout.strip() if mem_result.stdout.strip() else "Unknown"
+            
+            log.info(f"    💾 Disk usage: {disk_usage}")
+            log.info(f"    🧠 Memory usage: {mem_usage}")
+            
+            # 8. Check for any errors in logs
+            log.info("  📋 Error Check:")
+            error_result = subprocess.run(
+                [
+                    "ssh", "-o", "StrictHostKeyChecking=no",
+                    "-o", "UserKnownHostsFile=/dev/null",
+                    "-o", "ConnectTimeout=5",
+                    "-o", "BatchMode=yes",
+                    "-p", str(ssh_port),
+                    "ubuntu@localhost",
+                    "sudo journalctl -u cloud-final --no-pager -n 20 | grep -i error | wc -l"
+                ],
+                capture_output=True, text=True, timeout=10
+            )
+            try:
+                error_count = int(error_result.stdout.strip())
+                if error_count > 0:
+                    log.warning(f"    ⚠ {error_count} errors found in cloud-init logs")
+                else:
+                    log.info("    ✓ No errors in cloud-init logs")
+            except ValueError:
+                log.info("    ℹ Could not check for errors")
+            
+            log.info("  " + "=" * 58)
+            log.info("  VERIFICATION COMPLETE")
+            log.info("  " + "=" * 58)
+            
+        except Exception as e:
+            log.error(f"    Error during verification: {e}")
+            log.info("  Continuing despite verification errors...")
 
     def _open_viewer(self, vm_name: str) -> None:
         """Open SPICE/VNC viewer for VM."""

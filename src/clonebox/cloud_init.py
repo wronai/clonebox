@@ -180,6 +180,11 @@ WantedBy=default.target
         runcmd_lines.append("echo '[clonebox] Running post-commands...' > /dev/ttyS0")
         for cmd in config.post_commands:
             runcmd_lines.append(cmd)
+        # Add marker to indicate post-commands completed
+        runcmd_lines.extend([
+            "touch /tmp/clonebox-post-commands-done",
+            "echo '[clonebox] Post-commands completed' > /dev/ttyS0",
+        ])
     
     # Setup monitor script
     monitor_script = f'''#!/bin/bash

@@ -1,3 +1,23 @@
+## [1.1.38] - 2026-02-05
+
+### Summary
+
+feat(build): configuration management system
+
+### Core
+
+- update src/clonebox/cloner.py
+- update src/clonebox/cloud_init.py
+
+### Build
+
+- update pyproject.toml
+
+### Other
+
+- build: update Makefile
+
+
 ## [1.1.37] - 2026-02-05
 
 ### Summary

@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "clonebox"
-version = "1.1.37"
+version = "1.1.38"
 description = "Clone your workstation environment to an isolated VM with selective apps, paths and services"
 readme = "README.md"
 license = {text = "Apache-2.0"}
@@ -123,4 +123,5 @@ filterwarnings = [
 omit = [
     "src/clonebox/container.py",
     "src/clonebox/cli.py",
+    "src/clonebox/cli/*.py",
 ]

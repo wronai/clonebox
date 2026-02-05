@@ -93,7 +93,7 @@ test-unit:
 
 test-e2e:
 	@if [ -d ".venv" ]; then \
-		.venv/bin/pytest tests/e2e/ -m "e2e" -v --tb=short; \
+		.venv/bin/pytest tests/e2e/ -m "e2e" -v --tb=short --no-cov; \
 	else \
 		echo "No virtual environment found. Run 'make install-dev' first."; \
 		exit 1; \
