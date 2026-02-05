@@ -168,6 +168,7 @@ class SOPSSecretsProvider(SecretsProvider):
                 capture_output=True,
                 text=True,
                 check=True,
+                timeout=30,  # 30 second timeout for sops decrypt
             )
             import yaml
 
@@ -198,7 +199,12 @@ class SOPSSecretsProvider(SecretsProvider):
 
     def is_available(self) -> bool:
         try:
-            subprocess.run(["sops", "--version"], capture_output=True, check=True)
+            subprocess.run(
+                ["sops", "--version"],
+                capture_output=True,
+                check=True,
+                timeout=5,  # Quick timeout for version check
+            )
             return self.secrets_file.exists()
         except (subprocess.CalledProcessError, FileNotFoundError):
             return False
@@ -313,6 +319,7 @@ class SSHKeyPair:
             subprocess.run(
                 ["ssh-keygen", "-t", key_type, "-N", "", "-f", str(key_path), "-q"],
                 check=True,
+                timeout=30,  # 30 second timeout for key generation
             )
 
             private_key = key_path.read_text()

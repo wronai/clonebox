@@ -338,3 +338,104 @@ class TestVMCreation:
         with patch.object(Path, "mkdir", side_effect=PermissionError("Permission denied")):
             with pytest.raises(PermissionError):
                 cloner.create_vm(config)
+
+
+class TestVMGUIDetection:
+    """Test GUI/SPICE/VNC detection in diagnostics."""
+
+    @patch("clonebox.cloner.libvirt")
+    @patch("clonebox.cloner.SelectiveVMCloner._get_saved_ssh_port")
+    def test_check_vm_processes_detects_spice(self, mock_get_ssh_port, mock_libvirt):
+        """Test that _check_vm_processes detects SPICE graphics."""
+        mock_conn = MagicMock()
+        mock_libvirt.open.return_value = mock_conn
+        mock_libvirt.openAuth.return_value = mock_conn
+        
+        # Mock SSH port to prevent early return
+        mock_get_ssh_port.return_value = 2222
+
+        # Mock VM XML with SPICE graphics
+        vm_xml = """<domain type='qemu'>
+            <devices>
+                <graphics type='spice' port='5900' autoport='yes' listen='0.0.0.0'/>
+            </devices>
+        </domain>"""
+        
+        mock_vm = MagicMock()
+        mock_vm.XMLDesc.return_value = vm_xml
+        mock_conn.lookupByName.return_value = mock_vm
+        
+        # Mock process info
+        mock_vm.info.return_value = [1, 4194304, 0, 2]  # running
+        mock_vm.isActive.return_value = True
+        
+        cloner = SelectiveVMCloner()
+        checks = cloner._check_vm_processes("test-vm")
+        
+        assert "spice_port" in checks
+        assert checks["spice_port"] == "5900"
+
+    @patch("clonebox.cloner.libvirt")
+    @patch("clonebox.cloner.SelectiveVMCloner._get_saved_ssh_port")
+    def test_check_vm_processes_detects_vnc(self, mock_get_ssh_port, mock_libvirt):
+        """Test that _check_vm_processes detects VNC graphics."""
+        mock_conn = MagicMock()
+        mock_libvirt.open.return_value = mock_conn
+        mock_libvirt.openAuth.return_value = mock_conn
+        
+        # Mock SSH port to prevent early return
+        mock_get_ssh_port.return_value = 2222
+
+        # Mock VM XML with VNC graphics
+        vm_xml = """<domain type='qemu'>
+            <devices>
+                <graphics type='vnc' port='5901' autoport='yes' listen='0.0.0.0'/>
+            </devices>
+        </domain>"""
+        
+        mock_vm = MagicMock()
+        mock_vm.XMLDesc.return_value = vm_xml
+        mock_conn.lookupByName.return_value = mock_vm
+        
+        # Mock process info
+        mock_vm.info.return_value = [1, 4194304, 0, 2]
+        mock_vm.isActive.return_value = True
+        
+        cloner = SelectiveVMCloner()
+        checks = cloner._check_vm_processes("test-vm")
+        
+        assert "vnc_port" in checks
+        assert checks["vnc_port"] == "5901"
+
+    @patch("clonebox.cloner.libvirt")
+    @patch("clonebox.cloner.SelectiveVMCloner._get_saved_ssh_port")
+    def test_check_vm_processes_no_graphics(self, mock_get_ssh_port, mock_libvirt):
+        """Test that _check_vm_processes handles VMs without graphics."""
+        mock_conn = MagicMock()
+        mock_libvirt.open.return_value = mock_conn
+        mock_libvirt.openAuth.return_value = mock_conn
+        
+        # Mock SSH port to prevent early return
+        mock_get_ssh_port.return_value = 2222
+
+        # Mock VM XML without graphics
+        vm_xml = """<domain type='qemu'>
+            <devices>
+                <disk type='file' device='disk'/>
+            </devices>
+        </domain>"""
+        
+        mock_vm = MagicMock()
+        mock_vm.XMLDesc.return_value = vm_xml
+        mock_conn.lookupByName.return_value = mock_vm
+        
+        # Mock process info
+        mock_vm.info.return_value = [1, 4194304, 0, 2]
+        mock_vm.isActive.return_value = True
+        
+        cloner = SelectiveVMCloner()
+        checks = cloner._check_vm_processes("test-vm")
+        
+        # Should not have spice or vnc ports
+        assert "spice_port" not in checks
+        assert "vnc_port" not in checks

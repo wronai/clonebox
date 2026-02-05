@@ -215,6 +215,26 @@ class SelectiveVMCloner:
                     # Test SSH connectivity
                     log.info("Testing SSH connectivity (cloud-init may take 2-3 minutes)...")
                     ssh_ok = self._test_ssh_connectivity(config.name, timeout=180)
+                    
+                    # Wait for cloud-init to complete (especially important for GUI mode)
+                    if ssh_ok:
+                        ssh_port = self._get_saved_ssh_port(config.name)
+                        if ssh_port:
+                            # Longer timeout for GUI mode (20 min) vs normal mode (10 min)
+                            cloud_init_timeout = 1200 if config.gui else 600
+                            self._wait_for_cloud_init(config.name, ssh_port, timeout=cloud_init_timeout, gui_mode=config.gui, config=config)
+                        
+                        # If GUI mode and cloud-init done, wait for reboot and check GUI
+                        if config.gui:
+                            log.info("GUI mode enabled - waiting for VM to finish setup and reboot...")
+                            log.info("  (This may take 10-15 minutes for full desktop installation)")
+                            
+                            # Give some time for reboot to happen if it was triggered
+                            time.sleep(30)
+                            
+                            # Re-check SSH after potential reboot
+                            log.info("Re-checking SSH after potential reboot...")
+                            self._test_ssh_connectivity(config.name, timeout=60)
                 
                 log.info(f"VM '{config.name}' creation completed successfully!")
                 return vm_uuid
@@ -264,6 +284,31 @@ class SelectiveVMCloner:
             # Test SSH connectivity
             log.info("Testing SSH connectivity (cloud-init may take 2-3 minutes)...")
             ssh_ok = self._test_ssh_connectivity(vm_name, timeout=180)
+            
+            # Wait for cloud-init to complete if this is a fresh boot
+            if ssh_ok:
+                log.info("Checking cloud-init status...")
+                ssh_port = self._get_saved_ssh_port(vm_name)
+                if ssh_port:
+                    # Check if this VM has GUI enabled by checking VM XML
+                    try:
+                        vm = self.conn.lookupByName(vm_name)
+                        vm_xml = vm.XMLDesc()
+                        import xml.etree.ElementTree as ET
+                        root = ET.fromstring(vm_xml)
+                        
+                        # Look for graphics (SPICE/VNC) which indicates GUI mode
+                        graphics = root.find(".//graphics[@type='spice']") or root.find(".//graphics[@type='vnc']")
+                        gui_mode = graphics is not None
+                        
+                        if gui_mode:
+                            log.info("GUI mode detected - using extended timeout for desktop installation")
+                            self._wait_for_cloud_init(vm_name, ssh_port, timeout=1200, gui_mode=True)
+                        else:
+                            self._wait_for_cloud_init(vm_name, ssh_port, timeout=300, gui_mode=False)
+                    except Exception as e:
+                        log.debug(f"Failed to detect GUI mode: {e}")
+                        self._wait_for_cloud_init(vm_name, ssh_port, timeout=300, gui_mode=False)
             
             if ssh_ok:
                 log.info("=" * 50)
@@ -784,7 +829,7 @@ class SelectiveVMCloner:
             log.debug(f"Running: {' '.join(cmd)}")
             
             try:
-                result = subprocess.run(cmd, check=True, capture_output=True, text=True)
+                result = subprocess.run(cmd, check=True, capture_output=True, text=True, timeout=60)
                 if result.stderr and "Warning" not in result.stderr:
                     log.debug(f"ISO stderr: {result.stderr.strip()}")
             except subprocess.CalledProcessError as e:
@@ -916,7 +961,7 @@ class SelectiveVMCloner:
         try:
             result = subprocess.run(
                 ["pgrep", "-af", f"qemu.*guest={vm_name}"],
-                capture_output=True, text=True
+                capture_output=True, text=True, timeout=10
             )
             if result.returncode == 0 and result.stdout.strip():
                 lines = result.stdout.strip().split('\n')
@@ -927,7 +972,7 @@ class SelectiveVMCloner:
                 try:
                     mem_result = subprocess.run(
                         ["ps", "-o", "rss=", "-p", qemu_pid],
-                        capture_output=True, text=True
+                        capture_output=True, text=True, timeout=5
                     )
                     if mem_result.returncode == 0:
                         mem_kb = int(mem_result.stdout.strip())
@@ -980,7 +1025,7 @@ class SelectiveVMCloner:
             try:
                 result = subprocess.run(
                     ["ss", "-tlnp", f"sport = :{ssh_port}"],
-                    capture_output=True, text=True
+                    capture_output=True, text=True, timeout=5
                 )
                 if f":{ssh_port}" in result.stdout:
                     log.info(f"  ✓ Port {ssh_port} is LISTENING")
@@ -1225,6 +1270,261 @@ class SelectiveVMCloner:
         log.warning(f"    Or check console: virsh --connect {self.conn_uri} console {vm_name}")
         return False
 
+    def _wait_for_cloud_init(self, vm_name: str, ssh_port: int, timeout: int = 1200, gui_mode: bool = False, config: VMConfig = None) -> bool:
+        """Wait for cloud-init to complete, including GUI installation if enabled.
+        
+        Checks every 20 seconds and reports detailed progress.
+        For GUI mode, also verifies desktop environment and applications are ready.
+        """
+        log.info(f"Waiting for cloud-init to complete (timeout: {timeout}s)...")
+        log.info(f"  Checking every 20 seconds for progress updates...")
+        
+        start_time = time.time()
+        check_interval = 20  # Check every 20 seconds as requested
+        last_status = ""
+        last_log_check = 0
+        
+        while time.time() - start_time < timeout:
+            elapsed = time.time() - start_time
+            
+            try:
+                # Check cloud-init status via SSH
+                result = subprocess.run(
+                    [
+                        "ssh", "-o", "StrictHostKeyChecking=no",
+                        "-o", "UserKnownHostsFile=/dev/null",
+                        "-o", "ConnectTimeout=5",
+                        "-o", "BatchMode=yes",
+                        "-o", "LogLevel=ERROR",
+                        "-p", str(ssh_port),
+                        "ubuntu@localhost",
+                        "cloud-init status 2>/dev/null || echo 'STATUS_UNKNOWN'"
+                    ],
+                    capture_output=True, text=True, timeout=15
+                )
+                
+                status_output = result.stdout.strip()
+                
+                # Report status changes
+                if status_output != last_status:
+                    if "running" in status_output.lower():
+                        # Get detailed progress
+                        progress_result = subprocess.run(
+                            [
+                                "ssh", "-o", "StrictHostKeyChecking=no",
+                                "-o", "UserKnownHostsFile=/dev/null",
+                                "-o", "ConnectTimeout=5",
+                                "-o", "BatchMode=yes",
+                                "-p", str(ssh_port),
+                                "ubuntu@localhost",
+                                "tail -10 /var/log/cloud-init-output.log 2>/dev/null | grep -E '(clonebox|Installing|Setting up|Get:|Unpacking|Preparing|Progress|Setting up)' | tail -3 || echo 'No progress info'"
+                            ],
+                            capture_output=True, text=True, timeout=10
+                        )
+                        recent_progress = progress_result.stdout.strip()
+                        if recent_progress and recent_progress != "No progress info":
+                            # Show the most recent activity
+                            lines = recent_progress.split('\n')
+                            for line in lines[-2:]:  # Show last 2 lines
+                                if line.strip():
+                                    # Extract useful info
+                                    if "Progress:" in line:
+                                        # Extract percentage
+                                        import re
+                                        match = re.search(r'Progress:\s*\[(\d+)%\]', line)
+                                        if match:
+                                            pct = match.group(1)
+                                            log.info(f"  [{elapsed:.0f}s] Installation progress: {pct}%")
+                                        else:
+                                            log.info(f"  [{elapsed:.0f}s] {line[:80]}")
+                                    else:
+                                        log.info(f"  [{elapsed:.0f}s] {line[:80]}")
+                        else:
+                            # Check if apt is still running
+                            apt_check = subprocess.run(
+                                [
+                                    "ssh", "-o", "StrictHostKeyChecking=no",
+                                    "-o", "UserKnownHostsFile=/dev/null",
+                                    "-o", "ConnectTimeout=5",
+                                    "-o", "BatchMode=yes",
+                                    "-p", str(ssh_port),
+                                    "ubuntu@localhost",
+                                    "pgrep -f 'apt-get|dpkg' >/dev/null 2>&1 && echo 'APT_RUNNING' || echo 'APT_IDLE'"
+                                ],
+                                capture_output=True, text=True, timeout=5
+                            )
+                            if "APT_RUNNING" in apt_check.stdout:
+                                log.info(f"  [{elapsed:.0f}s] Package installation in progress...")
+                            else:
+                                log.info(f"  [{elapsed:.0f}s] Cloud-init running...")
+                    last_status = status_output
+                else:
+                    # Periodic update every minute even if no change
+                    if int(elapsed) % 60 < check_interval and elapsed > 30:
+                        log.info(f"  [{elapsed:.0f}s] Still working... ({int(elapsed/60)}m elapsed)")
+                
+                if "done" in status_output.lower() or "disabled" in status_output.lower():
+                    log.info(f"  ✓ Cloud-init completed after {elapsed:.0f}s")
+                    
+                    # For GUI mode, do additional verification
+                    if gui_mode:
+                        return self._verify_gui_ready(vm_name, ssh_port, config, timeout=int(timeout - elapsed))
+                    return True
+                    
+                elif "error" in status_output.lower():
+                    log.warning(f"  ⚠ Cloud-init reported errors after {elapsed:.0f}s")
+                    # Continue anyway - partial completion is still useful
+                    if gui_mode:
+                        return self._verify_gui_ready(vm_name, ssh_port, config, timeout=int(timeout - elapsed))
+                    return True
+                
+            except subprocess.TimeoutExpired:
+                log.debug(f"Cloud-init status check timed out at {elapsed:.0f}s")
+            except Exception as e:
+                log.debug(f"Cloud-init status check failed: {e}")
+            
+            time.sleep(check_interval)
+        
+        log.warning(f"  ✗ Cloud-init did not complete within {timeout}s")
+        log.warning("  VM may still be usable but setup may be incomplete")
+        
+        # Even on timeout, try to verify what's available
+        if gui_mode:
+            log.info("  Checking current GUI status despite timeout...")
+            return self._verify_gui_ready(vm_name, ssh_port, config, timeout=60)
+        
+        return False
+
+    def _verify_gui_ready(self, vm_name: str, ssh_port: int, config: VMConfig, timeout: int = 300) -> bool:
+        """Verify that GUI desktop and applications are fully ready."""
+        log.info("Verifying GUI desktop environment is ready...")
+        
+        start_time = time.time()
+        check_interval = 20
+        
+        while time.time() - start_time < timeout:
+            elapsed = time.time() - start_time
+            checks_passed = 0
+            total_checks = 4
+            status_details = []
+            
+            try:
+                # Check 1: GDM service status
+                gdm_result = subprocess.run(
+                    [
+                        "ssh", "-o", "StrictHostKeyChecking=no",
+                        "-o", "UserKnownHostsFile=/dev/null",
+                        "-o", "ConnectTimeout=5",
+                        "-o", "BatchMode=yes",
+                        "-p", str(ssh_port),
+                        "ubuntu@localhost",
+                        "systemctl is-active gdm3 2>/dev/null || systemctl is-active gdm 2>/dev/null || echo 'inactive'"
+                    ],
+                    capture_output=True, text=True, timeout=10
+                )
+                gdm_active = "active" in gdm_result.stdout.lower()
+                if gdm_active:
+                    checks_passed += 1
+                    status_details.append("GDM:OK")
+                else:
+                    status_details.append("GDM:pending")
+                
+                # Check 2: Desktop packages installed
+                desktop_result = subprocess.run(
+                    [
+                        "ssh", "-o", "StrictHostKeyChecking=no",
+                        "-o", "UserKnownHostsFile=/dev/null",
+                        "-o", "ConnectTimeout=5",
+                        "-o", "BatchMode=yes",
+                        "-p", str(ssh_port),
+                        "ubuntu@localhost",
+                        "dpkg -l ubuntu-desktop-minimal 2>/dev/null | grep -q '^ii' && echo 'installed' || echo 'missing'"
+                    ],
+                    capture_output=True, text=True, timeout=10
+                )
+                desktop_installed = "installed" in desktop_result.stdout.lower()
+                if desktop_installed:
+                    checks_passed += 1
+                    status_details.append("Desktop:OK")
+                else:
+                    status_details.append("Desktop:pending")
+                
+                # Check 3: Snap packages installed (if any)
+                if config and config.snap_packages:
+                    snap_result = subprocess.run(
+                        [
+                            "ssh", "-o", "StrictHostKeyChecking=no",
+                            "-o", "UserKnownHostsFile=/dev/null",
+                            "-o", "ConnectTimeout=5",
+                            "-o", "BatchMode=yes",
+                            "-p", str(ssh_port),
+                            "ubuntu@localhost",
+                            f"snap list 2>/dev/null | grep -E '({'|'.join(config.snap_packages[:3])})' | wc -l"
+                        ],
+                        capture_output=True, text=True, timeout=10
+                    )
+                    try:
+                        snaps_found = int(snap_result.stdout.strip())
+                        if snaps_found >= min(len(config.snap_packages), 3):
+                            checks_passed += 1
+                            status_details.append(f"Snaps:{snaps_found}/{len(config.snap_packages)}")
+                        else:
+                            status_details.append(f"Snaps:{snaps_found}/{len(config.snap_packages)} pending")
+                    except ValueError:
+                        status_details.append("Snaps:checking")
+                else:
+                    checks_passed += 1  # No snaps to check
+                    status_details.append("Snaps:none")
+                
+                # Check 4: Graphical target active
+                target_result = subprocess.run(
+                    [
+                        "ssh", "-o", "StrictHostKeyChecking=no",
+                        "-o", "UserKnownHostsFile=/dev/null",
+                        "-o", "ConnectTimeout=5",
+                        "-o", "BatchMode=yes",
+                        "-p", str(ssh_port),
+                        "ubuntu@localhost",
+                        "systemctl get-default 2>/dev/null | grep -q graphical && echo 'graphical' || echo 'other'"
+                    ],
+                    capture_output=True, text=True, timeout=10
+                )
+                graphical_target = "graphical" in target_result.stdout.lower()
+                if graphical_target:
+                    checks_passed += 1
+                    status_details.append("Target:graphical")
+                else:
+                    status_details.append("Target:other")
+                
+                # Report progress every check
+                status_str = " | ".join(status_details)
+                log.info(f"  [{elapsed:.0f}s] GUI checks: {checks_passed}/{total_checks} | {status_str}")
+                
+                # If all checks passed, we're ready
+                if checks_passed == total_checks:
+                    log.info(f"  ✓ GUI desktop fully ready after {elapsed:.0f}s!")
+                    
+                    # Final summary of what's installed
+                    log.info("=" * 60)
+                    log.info("GUI VM READY FOR USE!")
+                    log.info(f"  SSH: ssh -p {ssh_port} ubuntu@localhost")
+                    log.info(f"  SPICE: remote-viewer spice://localhost:5900")
+                    if config and config.snap_packages:
+                        log.info(f"  Apps: {', '.join(config.snap_packages[:5])}{'...' if len(config.snap_packages) > 5 else ''}")
+                    log.info("=" * 60)
+                    return True
+                
+            except subprocess.TimeoutExpired:
+                log.debug(f"GUI verification timed out at {elapsed:.0f}s")
+            except Exception as e:
+                log.debug(f"GUI verification check failed: {e}")
+            
+            time.sleep(check_interval)
+        
+        log.warning(f"  ⚠ GUI verification incomplete after {timeout}s")
+        log.warning("  VM may need more time or manual intervention")
+        return False
+
     def _open_viewer(self, vm_name: str) -> None:
         """Open SPICE/VNC viewer for VM."""
         import shutil
@@ -1348,7 +1648,7 @@ class SelectiveVMCloner:
                 "-iso-level", "4",  # Support long filenames for network-config
             ] + iso_files
             
-            subprocess.run(cmd, check=True, capture_output=True)
+            subprocess.run(cmd, check=True, capture_output=True, timeout=30)
             
             # Copy to vm_dir
             final_iso = vm_dir / f"{config.name}-cloud-init.iso"

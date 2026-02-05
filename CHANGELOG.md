@@ -1,3 +1,24 @@
+## [1.1.36] - 2026-02-05
+
+### Summary
+
+feat(tests): configuration management system
+
+### Core
+
+- update src/clonebox/cloner.py
+- update src/clonebox/plugins/manager.py
+- update src/clonebox/secrets.py
+
+### Test
+
+- update tests/test_cloner.py
+
+### Other
+
+- scripts: update monitor-vm-clone.sh
+
+
 ## [1.1.35] - 2026-02-05
 
 ### Summary

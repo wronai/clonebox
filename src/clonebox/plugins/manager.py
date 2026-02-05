@@ -427,6 +427,7 @@ class PluginManager:
                 [sys.executable, "-m", "pip", "install", "--user", source],
                 capture_output=True,
                 text=True,
+                timeout=300,  # 5 minute timeout for pip install
             )
             return result.returncode == 0
         except Exception:
@@ -459,6 +460,7 @@ class PluginManager:
                 [sys.executable, "-m", "pip", "uninstall", "-y", f"clonebox-plugin-{name}"],
                 capture_output=True,
                 text=True,
+                timeout=60,  # 1 minute timeout for pip uninstall
             )
             if result.returncode == 0:
                 return True
@@ -468,6 +470,7 @@ class PluginManager:
                 [sys.executable, "-m", "pip", "uninstall", "-y", name],
                 capture_output=True,
                 text=True,
+                timeout=60,  # 1 minute timeout
             )
             return result.returncode == 0
         except Exception:
