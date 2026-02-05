@@ -409,6 +409,7 @@ def generate_clonebox_yaml(
         "post_commands": post_commands,
         "paths": paths_mapping,
         "app_data_paths": app_data_mapping,  # App-specific config/data directories
+        "browser_profiles": ["all"],  # Auto-copy all detected browser profiles
         "detected": {
             "running_apps": [
                 {"name": a.name, "cwd": a.working_dir or "", "memory_mb": round(a.memory_mb)}
@@ -553,6 +554,26 @@ def monitor_cloud_init_status(vm_name: str, user_session: bool = False, timeout:
 
 def create_vm_from_config(config, start=False, user_session=False, replace=False, approved=False):
     """Create VM from configuration dictionary."""
+    # Map new-style app_data_paths to legacy copy_paths.
+    # app_data_paths are intended to be copied (not mounted) into the VM.
+    copy_paths = config.get("copy_paths", {}) or config.get("app_data_paths", {}) or {}
+
+    # Remap some app-data destinations for snap-based apps.
+    # Ubuntu typically uses snap for chromium; its profile lives under ~/snap/chromium/common/chromium.
+    try:
+        snap_packages = set(config.get("snap_packages", []) or [])
+        vm_username = (config.get("vm", {}) or {}).get("username", "ubuntu")
+        if "chromium" in snap_packages:
+            remapped = {}
+            for host_path, guest_path in copy_paths.items():
+                if guest_path == f"/home/{vm_username}/.config/chromium":
+                    remapped[host_path] = f"/home/{vm_username}/snap/chromium/common/chromium"
+                else:
+                    remapped[host_path] = guest_path
+            copy_paths = remapped
+    except Exception:
+        pass
+
     vm_config = VMConfig(
         name=config["vm"]["name"],
         ram_mb=config["vm"].get("ram_mb", 4096),
@@ -568,12 +589,13 @@ def create_vm_from_config(config, start=False, user_session=False, replace=False
         snap_packages=config.get("snap_packages", []),
         services=config.get("services", []),
         post_commands=config.get("post_commands", []),
-        copy_paths=config.get("copy_paths", {}),
+        copy_paths=copy_paths,
         user_session=user_session,
         web_services=config.get("web_services", []),
         resources=config.get("resources", {}),
         auth_method=config["vm"].get("auth_method", "ssh_key"),
         shutdown_after_setup=config.get("shutdown_after_setup", False),
+        browser_profiles=config.get("browser_profiles", []),
     )
     
     cloner = SelectiveVMCloner(user_session=user_session)

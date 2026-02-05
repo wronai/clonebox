@@ -1,3 +1,25 @@
+## [1.1.40] - 2026-02-05
+
+### Summary
+
+feat(goal): configuration management system
+
+### Core
+
+- update src/clonebox/cli/misc_commands.py
+- update src/clonebox/cli/utils.py
+- update src/clonebox/cloner.py
+
+### Docs
+
+- docs: update README
+
+### Other
+
+- update project.functions.toon
+- update project.toon
+
+
 ## [1.1.39] - 2026-02-05
 
 ### Summary

@@ -1,18 +1,18 @@
-# clonebox | 118f 27396L | python:118
+# clonebox | 119f 29383L | python:119
 # Keys: M=modules, D=details, i=imports, c=classes, f=functions, m=methods
-M[118]:
+M[119]:
   fix_qga.py,54
   tests/test_orchestrator.py,228
   tests/conftest.py,345
   tests/test_profiles.py,39
   tests/test_audit.py,244
-  tests/test_cloner.py,268
+  tests/test_cloner.py,336
   tests/__init__.py,0
   tests/test_plugins.py,344
   tests/test_cloner_simple.py,27
   tests/test_validator.py,442
   tests/test_container.py,168
-  tests/test_coverage_boost_final.py,366
+  tests/test_coverage_boost_final.py,368
   tests/test_cli_new_commands.py,374
   tests/test_dashboard_coverage.py,90
   tests/test_models.py,260
@@ -37,8 +37,9 @@ M[118]:
   tests/e2e/__init__.py,1
   tests/e2e/test_container_workflow.py,61
   src/clonebox/resources.py,167
-  src/clonebox/cloud_init.py,278
+  src/clonebox/cloud_init.py,315
   src/clonebox/resource_monitor.py,124
+  src/clonebox/browser_profiles.py,241
   src/clonebox/dashboard.py,136
   src/clonebox/validator.py,2
   src/clonebox/p2p.py,140
@@ -53,15 +54,15 @@ M[118]:
   src/clonebox/container.py,204
   src/clonebox/logging.py,99
   src/clonebox/orchestrator.py,444
-  src/clonebox/cloner.py,922
+  src/clonebox/cloner.py,1858
   src/clonebox/rollback.py,137
   src/clonebox/monitor.py,218
-  src/clonebox/models.py,224
+  src/clonebox/models.py,225
   src/clonebox/profiles.py,47
   src/clonebox/cloner_utils.py,86
   src/clonebox/audit.py,355
-  src/clonebox/secrets.py,266
-  src/clonebox/vm_xml.py,222
+  src/clonebox/secrets.py,273
+  src/clonebox/vm_xml.py,217
   src/clonebox/backends/subprocess_runner.py,50
   src/clonebox/backends/qemu_disk.py,40
   src/clonebox/backends/libvirt_backend.py,180
@@ -79,15 +80,15 @@ M[118]:
   src/clonebox/cli/compose_commands.py,212
   src/clonebox/cli/snapshot_commands.py,86
   src/clonebox/cli/interactive_vm.py,211
-  src/clonebox/cli/parsers.py,663
+  src/clonebox/cli/parsers.py,731
   src/clonebox/cli/interactive.py,77
   src/clonebox/cli/__init__.py,109
   src/clonebox/cli/interactive_snapshots.py,95
   src/clonebox/cli/interactive_import_export.py,103
   src/clonebox/cli/interactive_compose.py,99
-  src/clonebox/cli/misc_commands.py,543
+  src/clonebox/cli/misc_commands.py,722
   src/clonebox/cli/import_export_commands.py,216
-  src/clonebox/cli/utils.py,463
+  src/clonebox/cli/utils.py,464
   src/clonebox/cli/monitoring_commands.py,264
   src/clonebox/cli/interactive_container.py,90
   src/clonebox/cli/container_commands.py,69
@@ -96,7 +97,7 @@ M[118]:
   src/clonebox/cli/plugin_commands.py,195
   src/clonebox/cli/interactive_monitor.py,130
   src/clonebox/plugins/base.py,245
-  src/clonebox/plugins/manager.py,392
+  src/clonebox/plugins/manager.py,395
   src/clonebox/plugins/__init__.py,22
   src/clonebox/snapshots/manager.py,278
   src/clonebox/snapshots/__init__.py,10
@@ -113,7 +114,7 @@ M[118]:
   src/clonebox/validation/__init__.py,1
   src/clonebox/validation/services.py,105
   src/clonebox/validation/disk.py,131
-  src/clonebox/validation/core.py,189
+  src/clonebox/validation/core.py,242
   src/clonebox/validation/packages.py,97
   src/clonebox/policies/engine.py,84
   src/clonebox/policies/__init__.py,12
@@ -161,7 +162,7 @@ D:
     TestGlobalLogger: test_get_audit_logger(0),test_set_audit_logger(1)  # Test global logger functions.
   tests/test_cloner.py:
     i: os,pytest,clonebox.cloner.{SelectiveVMCloner,VMConfig},clonebox.di.{DependencyContainer,set_container},pathlib.Path,unittest.mock.{MagicMock,Mock,patch}
-    e: mock_container,TestVMConfig,TestSelectiveVMClonerInit,TestSelectiveVMClonerMethods,TestVMXMLGeneration,TestVMCreation
+    e: mock_container,TestVMConfig,TestSelectiveVMClonerInit,TestSelectiveVMClonerMethods,TestVMXMLGeneration,TestVMCreation,TestVMGUIDetection
     TestVMConfig: test_default_values(0),test_custom_values(0),test_to_dict(0)  # Test VMConfig dataclass.
     TestSelectiveVMClonerInit: test_system_images_dir(1),test_user_images_dir(1),test_init_session_type(3),test_init_custom_uri(1),test_init_no_libvirt(0)  # Test SelectiveVMCloner initialization.
     TestSelectiveVMClonerMethods: test_get_images_dir(3),test_check_prerequisites_returns_dict(1),test_check_prerequisites_session_type(3),test_list_vms(1),test_close(1)  # Test SelectiveVMCloner methods.
@@ -362,6 +363,15 @@ D:
     e: ResourceUsage,ResourceMonitor
     ResourceUsage:   # Current resource usage of a VM.
     ResourceMonitor: __init__(1),get_usage(1),_calculate_cpu_percent(2),_get_disk_stats(1),_get_network_stats(1)  # Monitor VM resource usage using libvirt.
+  src/clonebox/browser_profiles.py:
+    i: os,shutil,subprocess,pathlib.Path,typing.{Dict,List,Optional,Tuple}
+    e: BROWSER_PROFILE_PATHS,VM_BROWSER_PROFILE_PATHS,detect_browser_profiles,get_profile_size,copy_browser_profile,stage_browser_profiles,generate_browser_profile_setup_script,copy_profiles_to_vm_via_ssh
+    detect_browser_profiles()->Dict[str, Dict[str, Path]]
+    get_profile_size(browser:str;paths:Dict[str;Path])->Tuple[int, str]
+    copy_browser_profile(browser:str;vm_dir:Path;progress_callback:Optional[callable]=None)->Optional[Path]
+    stage_browser_profiles(requested_browsers:List[str];vm_dir:Path;skip_cache:bool=False)->Dict[str, Path]
+    generate_browser_profile_setup_script(staged_profiles:Dict[str;Path];vm_username:str='ubuntu')->str
+    copy_profiles_to_vm_via_ssh(staged_profiles:Dict[str;Path];ssh_port:int;ssh_key:Path;vm_username:str='ubuntu')->bool
   src/clonebox/dashboard.py:
     i: json,subprocess,sys,fastapi.FastAPI,fastapi.responses.{HTMLResponse,JSONResponse},typing.{Any,List}
     e: dashboard,api_vms,api_containers,api_vms_json,api_containers_json,run_dashboard
@@ -432,7 +442,7 @@ D:
   src/clonebox/cloner.py:
     i: base64,json,logging,os,secrets,shutil,socket,string,subprocess,tempfile
     e: SelectiveVMCloner
-    SelectiveVMCloner: __init__(6),create_vm(5),start_vm(3),stop_vm(3),restart_vm(4)  # Creates VMs with only selected applic...
+    SelectiveVMCloner: __init__(6),create_vm(5),start_vm(4),stop_vm(3),restart_vm(4)  # Creates VMs with only selected applic...
   src/clonebox/rollback.py:
     i: logging,shutil,contextlib.contextmanager,dataclasses.{dataclass,field},pathlib.Path,typing.{Any,Callable,List,Optional}
     e: RollbackAction,RollbackContext,vm_creation_transaction
@@ -775,7 +785,7 @@ D:
     e: DiskValidationMixin
     DiskValidationMixin: validate_disk_space(0),_print_disk_usage_breakdown(0)
   src/clonebox/validation/core.py:
-    i: base64,json,shutil,subprocess,time,zlib,pathlib.Path,rich.console.Console,typing.{Dict,Optional}
+    i: base64,json,logging,shutil,subprocess,time,zlib,pathlib.Path,typing.{Dict,Optional}
     e: VMValidatorCore
     VMValidatorCore: __init__(6),_get_ssh_key_path(0),_get_ssh_port(0),_ssh_exec(2),_exec_in_vm(2)
   src/clonebox/validation/packages.py:

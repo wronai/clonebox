@@ -252,6 +252,28 @@ class SelectiveVMCloner:
                             # Re-check SSH after potential reboot
                             log.info("Re-checking SSH after potential reboot...")
                             self._test_ssh_connectivity(config.name, timeout=60)
+
+                        # Copy app data paths (copy_paths/app_data_paths) if configured
+                        if cloud_init_ok and ssh_ok and config.copy_paths:
+                            ssh_port = self._get_saved_ssh_port(config.name)
+                            if ssh_port:
+                                log.info("=" * 50)
+                                log.info("Copying app data paths to VM...")
+                                log.info(f"  Paths requested: {len(config.copy_paths)}")
+                                log.info("  (skipping cache paths)")
+                                log.info("=" * 50)
+
+                                vm_dir = self.USER_IMAGES_DIR / config.name
+                                ssh_key = vm_dir / "ssh_key"
+                                self._copy_paths_to_vm_via_ssh(
+                                    copy_paths=config.copy_paths,
+                                    ssh_port=ssh_port,
+                                    ssh_key=ssh_key if ssh_key.exists() else None,
+                                    vm_username=config.username,
+                                    skip_cache=True,
+                                )
+                            else:
+                                log.warning("No SSH port found - cannot copy app data paths")
                         
                         # Copy browser profiles if requested
                         if config.browser_profiles and ssh_ok:
@@ -290,6 +312,144 @@ class SelectiveVMCloner:
                     else:
                         log.warning(f"VM '{config.name}' created - SSH not yet available")
                 return vm_uuid
+
+    def _copy_paths_to_vm_via_ssh(
+        self,
+        copy_paths: Dict[str, str],
+        ssh_port: int,
+        ssh_key: Optional[Path],
+        vm_username: str = "ubuntu",
+        skip_cache: bool = True,
+    ) -> bool:
+        """Copy host paths into the VM via SSH (no mounts).
+
+        Uses a tar stream to avoid temporary archives on disk.
+        """
+        if not copy_paths:
+            return True
+
+        def _is_cache_path(p: str) -> bool:
+            lowered = p.lower()
+            if "/.cache/" in lowered or lowered.endswith("/.cache"):
+                return True
+            if "/cache/" in lowered and (
+                "/mozilla/" in lowered
+                or "/jetbrains/" in lowered
+                or "/google-chrome/" in lowered
+                or "/chromium/" in lowered
+            ):
+                return True
+            return False
+
+        base_ssh = [
+            "ssh",
+            "-o",
+            "StrictHostKeyChecking=no",
+            "-o",
+            "UserKnownHostsFile=/dev/null",
+            "-o",
+            "BatchMode=yes",
+            "-o",
+            "ConnectTimeout=10",
+            "-p",
+            str(ssh_port),
+        ]
+        if ssh_key is not None:
+            base_ssh.extend(["-i", str(ssh_key)])
+
+        copied = 0
+        total = 0
+        for host_path, guest_path in (copy_paths or {}).items():
+            if not host_path or not guest_path:
+                continue
+            if skip_cache and (_is_cache_path(host_path) or _is_cache_path(guest_path)):
+                continue
+            total += 1
+
+        if total == 0:
+            log.info("No non-cache app data paths to copy")
+            return True
+
+        all_success = True
+        for host_path, guest_path in (copy_paths or {}).items():
+            if not host_path or not guest_path:
+                continue
+            if skip_cache and (_is_cache_path(host_path) or _is_cache_path(guest_path)):
+                continue
+
+            src = Path(host_path).expanduser()
+            if not src.exists():
+                log.warning(f"  ❌ Host path not found, skipping: {src}")
+                all_success = False
+                continue
+
+            copied += 1
+            log.info(f"  [{copied}/{total}] Copying: {src} -> {guest_path}")
+
+            exclude_args = [
+                "--exclude=SingletonLock",
+                "--exclude=SingletonSocket",
+                "--exclude=SingletonCookie",
+                "--exclude=parent.lock",
+                "--exclude=.parentlock",
+                "--exclude=lock",
+            ]
+
+            if src.is_dir():
+                tar_cmd = ["tar", "-C", str(src), "-cf", "-", "."] + exclude_args
+                remote_cmd = (
+                    f"mkdir -p '{guest_path}' && tar -C '{guest_path}' -xpf -"
+                )
+            else:
+                src_parent = str(src.parent)
+                src_name = src.name
+                guest_parent = str(Path(guest_path).parent)
+                tar_cmd = ["tar", "-C", src_parent, "-cf", "-", src_name] + exclude_args
+                remote_cmd = (
+                    f"mkdir -p '{guest_parent}' && tar -C '{guest_parent}' -xpf -"
+                )
+
+            ssh_cmd = base_ssh + [f"{vm_username}@127.0.0.1", remote_cmd]
+
+            try:
+                tar_proc = subprocess.Popen(tar_cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+                ssh_proc = subprocess.Popen(
+                    ssh_cmd,
+                    stdin=tar_proc.stdout,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    text=True,
+                )
+                if tar_proc.stdout is not None:
+                    tar_proc.stdout.close()
+
+                ssh_out, ssh_err = ssh_proc.communicate()
+                tar_err = tar_proc.stderr.read().decode(errors="replace") if tar_proc.stderr else ""
+                tar_rc = tar_proc.wait()
+
+                if tar_rc != 0 or ssh_proc.returncode != 0:
+                    log.warning(f"    ❌ Copy failed: {src} -> {guest_path}")
+                    if tar_err.strip():
+                        log.debug(f"    tar stderr: {tar_err.strip()[:400]}")
+                    if ssh_err and ssh_err.strip():
+                        log.debug(f"    ssh stderr: {ssh_err.strip()[:400]}")
+                    all_success = False
+                    continue
+
+                # Fix ownership for user home paths
+                if guest_path.startswith(f"/home/{vm_username}/"):
+                    chown_cmd = base_ssh + [
+                        f"{vm_username}@127.0.0.1",
+                        f"sudo chown -R {vm_username}:{vm_username} '{guest_path}' || true",
+                    ]
+                    subprocess.run(chown_cmd, capture_output=True, text=True, timeout=120)
+
+                log.info("    ✓ Copied")
+            except Exception as e:
+                log.warning(f"    ❌ Copy error: {e}")
+                all_success = False
+
+        return all_success
 
     def start_vm(self, vm_name: str, open_viewer: bool = False, console: Any = None, config: VMConfig = None) -> None:
         """Start an existing VM."""

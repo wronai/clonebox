@@ -93,6 +93,14 @@ def cmd_clone(args):
         if browser_profiles:
             console.print(f"[cyan]📂 Browser profiles to copy: {', '.join(browser_profiles)}[/]")
             config["browser_profiles"] = browser_profiles
+        else:
+            # Auto-detect and copy browser profiles for GUI VMs
+            from clonebox.browser_profiles import detect_browser_profiles
+            detected = detect_browser_profiles()
+            if detected and config.get("vm", {}).get("gui", True):
+                auto_profiles = list(detected.keys())
+                console.print(f"[cyan]📂 Auto-detected browser profiles: {', '.join(auto_profiles)}[/]")
+                config["browser_profiles"] = auto_profiles
         
         from clonebox.cli.utils import create_vm_from_config
         vm_uuid = create_vm_from_config(

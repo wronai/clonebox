@@ -325,6 +325,9 @@ Simply run `clonebox` to start the interactive wizard:
 clonebox
 
 clonebox clone . --user --run --replace --base-image ~/ubuntu-22.04-cloud.qcow2 --disk-size-gb 60
+clonebox clone . --user --run --replace --browser-profiles chrome firefox
+# Lub automatycznie (dla GUI VM wykryje i skopiuje wszystkie profile)
+clonebox clone . --user --run --replace
 # Sprawdź diagnostykę na żywo
 clonebox watch . --user
 
