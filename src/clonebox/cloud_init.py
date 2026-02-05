@@ -40,40 +40,68 @@ def generate_cloud_init_config(
         "echo '[clonebox] Core packages installed successfully' > /dev/ttyS0",
     ]
     
-    # Install packages
+    # Install GNOME desktop if GUI mode is enabled
+    if config.gui:
+        runcmd_lines.extend([
+            "echo '[clonebox] =========================================' > /dev/ttyS0",
+            "echo '[clonebox] Installing GNOME Desktop Environment...' > /dev/ttyS0",
+            "echo '[clonebox] This may take 10-15 minutes depending on connection speed' > /dev/ttyS0",
+            # Update package lists first
+            "apt-get update 2>&1 | tee -a /var/log/cloud-init-output.log | while read line; do echo \"[clonebox] [apt] $line\" > /dev/ttyS0; done",
+            # Install ubuntu-desktop (minimal) or full ubuntu-desktop
+            "echo '[clonebox] Installing ubuntu-desktop packages...' > /dev/ttyS0",
+            "DEBIAN_FRONTEND=noninteractive apt-get install -y ubuntu-desktop-minimal gdm3 2>&1 | tee -a /var/log/cloud-init-output.log | while read line; do echo \"[clonebox] [apt-desktop] $line\" > /dev/ttyS0; done || echo '[clonebox] WARNING: Some desktop packages failed to install' > /dev/ttyS0",
+            # Ensure GDM is enabled
+            "systemctl enable gdm3 2>&1 | tee -a /var/log/cloud-init-output.log || echo '[clonebox] WARNING: Failed to enable gdm3' > /dev/ttyS0",
+            # Set graphical target as default
+            "systemctl set-default graphical.target 2>&1 | tee -a /var/log/cloud-init-output.log || echo '[clonebox] WARNING: Failed to set graphical target' > /dev/ttyS0",
+            "echo '[clonebox] GNOME Desktop installation complete' > /dev/ttyS0",
+        ])
+    
+    # Install packages with progress logging
     if config.packages:
         runcmd_lines.extend([
             f"echo '[clonebox] Installing {len(config.packages)} packages...' > /dev/ttyS0",
-            f"apt-get install -y {' '.join(config.packages)}",
+            f"echo '[clonebox] Packages: {' '.join(config.packages[:5])}{'...' if len(config.packages) > 5 else ''}' > /dev/ttyS0",
+            f"apt-get install -y {' '.join(config.packages)} 2>&1 | tee -a /var/log/cloud-init-output.log | while read line; do echo \"[clonebox] [apt] $line\" > /dev/ttyS0; done || true",
         ])
     
-    # Install snap packages
+    # Install snap packages with progress logging
     if config.snap_packages:
         runcmd_lines.extend([
             "echo '[clonebox] Installing snap packages...' > /dev/ttyS0",
-            "apt-get install -y snapd",
+            "apt-get install -y snapd 2>&1 | tee -a /var/log/cloud-init-output.log",
         ])
         
-        for snap in config.snap_packages:
+        for idx, snap in enumerate(config.snap_packages):
+            runcmd_lines.append(f"echo '[clonebox] [{idx+1}/{len(config.snap_packages)}] Installing snap: {snap}...' > /dev/ttyS0")
             if snap in SNAP_INTERFACES:
-                # Snap with interfaces
                 runcmd_lines.extend([
-                    f"snap install {snap}",
+                    f"snap install {snap} 2>&1 | tee -a /var/log/cloud-init-output.log",
                 ])
                 for iface in SNAP_INTERFACES[snap]:
                     runcmd_lines.append(f"snap connect {snap}:{iface}")
             else:
                 # Regular snap
+                runcmd_lines.append(f"snap install {snap} 2>&1 | tee -a /var/log/cloud-init-output.log")
                 runcmd_lines.append(f"snap install {snap}")
     
-    # Create mount points
+    # Create mount points with error handling
     if config.paths:
         runcmd_lines.append("echo '[clonebox] Setting up mount points...' > /dev/ttyS0")
+        runcmd_lines.append(f"echo '[clonebox] Configuring {len(config.paths)} mount(s)...' > /dev/ttyS0")
         for idx, (host_path, guest_path) in enumerate(config.paths.items()):
+            mount_name = f"mount{idx}"
             runcmd_lines.extend([
+                f"echo '[clonebox] [{idx+1}/{len(config.paths)}] Mount: {host_path} -> {guest_path}' > /dev/ttyS0",
                 f"mkdir -p {guest_path}",
-                f"echo 'mount{idx} {guest_path} 9p trans=virtio,version=9p2000.L,rw 0 0' >> /etc/fstab",
+                # Add nofail option to prevent boot failures if mount fails
+                f"echo '{mount_name} {guest_path} 9p trans=virtio,version=9p2000.L,rw,nofail,x-systemd.device-timeout=5s 0 0' >> /etc/fstab",
+                # Try to mount immediately and report status
+                f"if mount {guest_path} 2>/dev/null; then echo '[clonebox] [OK] Mounted {guest_path}' > /dev/ttyS0; else echo '[clonebox] [WARN] Mount {guest_path} failed (will retry on boot)' > /dev/ttyS0; fi",
             ])
+        runcmd_lines.append("echo '[clonebox] Mount configuration complete' > /dev/ttyS0")
+        runcmd_lines.append("echo '[clonebox] Note: 9p mounts require virtio-9p in VM XML' > /dev/ttyS0")
     
     # Copy paths
     if config.copy_paths:

@@ -1,3 +1,24 @@
+## [1.1.35] - 2026-02-05
+
+### Summary
+
+feat(tests): configuration management system
+
+### Core
+
+- update src/clonebox/cloner.py
+- update src/clonebox/cloud_init.py
+- update src/clonebox/validation/core.py
+
+### Test
+
+- update tests/test_coverage_boost_final.py
+
+### Other
+
+- scripts: update diagnose-vm.sh
+
+
 ## [1.1.34] - 2026-02-04
 
 ### Summary

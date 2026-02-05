@@ -270,6 +270,7 @@ echo "    Logs:    tail -f $VM_DIR/serial.log"
 echo ""
 
 section "Recommendations"
+cat << EOF
   1. Wait for cloud-init to complete (can take 2-3 minutes)
   2. Check VM console: virsh --connect $CONN_URI console $VM_NAME
   3. Look for network issues in console output
@@ -285,7 +286,6 @@ ${BOLD}Manual network fix (via console):${NC}
   sudo ip addr add 10.0.2.15/24 dev enp*s0
   sudo ip route add default via 10.0.2.2
   echo 'nameserver 10.0.2.3' | sudo tee /etc/resolv.conf
-"
-fi
+EOF
 
 echo -e "\n${BOLD}Diagnostic complete${NC}"

@@ -212,7 +212,9 @@ def test_cloner_create_vm_branches():
             "os.path.exists", return_value=True
         ), patch(
             "clonebox.secrets.SSHKeyPair.generate"
-        ) as mock_ssh_gen:
+        ) as mock_ssh_gen, patch(
+            "os.path.getsize", return_value=1024
+        ):
             # Mock SSH key pair
             mock_key_pair = Mock()
             mock_key_pair.private_key = "private key"

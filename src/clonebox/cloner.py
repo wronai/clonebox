@@ -587,19 +587,53 @@ class SelectiveVMCloner:
         """Create the VM disk image."""
         
         # Get base image path
+        log.debug(f"Resolving base image for VM '{config.name}'...")
         if config.base_image:
             base_image = config.base_image
+            log.debug(f"Using user-specified base image: {base_image}")
         else:
+            log.debug("No base image specified, searching for default...")
             base_image = self._get_default_base_image()
+            log.debug(f"Found default base image: {base_image}")
         
         if not os.path.exists(base_image):
+            log.error(f"Base image not found: {base_image}")
+            log.error("Please download a cloud image:")
+            log.error("  wget https://cloud-images.ubuntu.com/jammy/current/jammy-server-cloudimg-amd64.img")
             raise FileNotFoundError(f"Base image not found: {base_image}")
+        
+        # Verify base image is readable
+        try:
+            base_size = os.path.getsize(base_image)
+            log.debug(f"Base image size: {base_size / (1024*1024):.1f} MB")
+        except Exception as e:
+            log.warning(f"Could not check base image size: {e}")
         
         # Create disk path
         disk_dir = Path("/var/lib/libvirt/images") if not self.user_session else Path.home() / ".local/share/libvirt/images"
-        disk_dir.mkdir(parents=True, exist_ok=True)
+        log.debug(f"Disk directory: {disk_dir}")
+        
+        try:
+            disk_dir.mkdir(parents=True, exist_ok=True)
+            log.debug(f"Disk directory ensured: {disk_dir}")
+        except PermissionError as e:
+            log.error(f"Cannot create disk directory: {disk_dir}")
+            log.error(f"Permission denied. Try: sudo mkdir -p {disk_dir} && sudo chown $USER:$USER {disk_dir}")
+            raise
         
         disk_path = disk_dir / f"{config.name}.qcow2"
+        log.debug(f"Target disk path: {disk_path}")
+        
+        # Check if disk already exists
+        if disk_path.exists():
+            log.warning(f"Disk already exists: {disk_path}")
+            log.debug("Will be overwritten by qemu-img create")
+        
+        # Verify qemu-img is available
+        if not shutil.which("qemu-img"):
+            log.error("qemu-img not found in PATH")
+            log.error("Install with: sudo apt-get install qemu-utils")
+            raise FileNotFoundError("qemu-img not found. Install qemu-utils.")
         
         # Create disk from base image
         cmd = [
@@ -611,41 +645,95 @@ class SelectiveVMCloner:
             str(disk_path),
             f"{config.disk_size_gb}G"
         ]
+        log.debug(f"Running: {' '.join(cmd)}")
         
-        subprocess.run(cmd, check=True)
-        log.info(f"Created disk: {disk_path}")
+        try:
+            result = subprocess.run(cmd, check=True, capture_output=True, text=True)
+            if result.stderr:
+                log.debug(f"qemu-img stderr: {result.stderr.strip()}")
+            log.info(f"Created disk: {disk_path}")
+        except subprocess.CalledProcessError as e:
+            log.error(f"qemu-img create failed with exit code {e.returncode}")
+            if e.stderr:
+                log.error(f"Error: {e.stderr.strip()}")
+            log.error("Possible causes:")
+            log.error("  - Base image is corrupted")
+            log.error("  - Insufficient disk space")
+            log.error("  - Permission denied")
+            raise
+        
+        # Verify disk was created
+        if not disk_path.exists():
+            log.error(f"Disk creation failed - file not found: {disk_path}")
+            raise FileNotFoundError(f"Disk not created: {disk_path}")
+        
+        disk_size = os.path.getsize(disk_path)
+        log.debug(f"Created disk size: {disk_size / 1024:.1f} KB")
         
         return str(disk_path)
 
     def _generate_cloud_init(self, config: VMConfig) -> str:
         """Generate cloud-init ISO image."""
+        log.debug(f"Generating cloud-init for VM '{config.name}'...")
+        log.debug(f"Auth method: {config.auth_method}")
         
         # Read host SSH key only if auth_method is ssh_key
         if not config.ssh_public_key and config.auth_method == "ssh_key":
+            log.debug("Looking for host SSH public key...")
             # Try to read host's SSH public key
             ssh_key_paths = [
                 Path.home() / ".ssh" / "id_ed25519.pub",
                 Path.home() / ".ssh" / "id_rsa.pub",
+                Path.home() / ".ssh" / "id_ecdsa.pub",
             ]
             for key_path in ssh_key_paths:
+                log.debug(f"Checking for SSH key at: {key_path}")
                 if key_path.exists():
-                    config.ssh_public_key = key_path.read_text().strip()
-                    log.info(f"Using host SSH key: {key_path}")
-                    break
+                    try:
+                        config.ssh_public_key = key_path.read_text().strip()
+                        log.info(f"Using host SSH key: {key_path}")
+                        break
+                    except Exception as e:
+                        log.warning(f"Could not read SSH key {key_path}: {e}")
             else:
                 # Fallback: generate new key if no host key found
                 log.warning("No host SSH key found. Generating new key pair.")
-                key_pair = SSHKeyPair.generate()
-                config.ssh_public_key = key_pair.public_key
+                log.warning("You may want to create one: ssh-keygen -t ed25519")
+                try:
+                    key_pair = SSHKeyPair.generate()
+                    config.ssh_public_key = key_pair.public_key
+                    log.debug("Generated temporary SSH key pair")
+                    
+                    # Save the generated key pair to VM directory for later use
+                    self._save_ssh_key(config.name, key_pair)
+                except Exception as e:
+                    log.error(f"Failed to generate SSH key: {e}")
+                    log.warning("Falling back to password authentication")
+                    config.auth_method = "password"
+        
+        # Also copy host SSH key to VM directory if using host key
+        if config.ssh_public_key and config.auth_method == "ssh_key":
+            self._copy_host_ssh_key_to_vm(config.name)
+        
+        log.debug(f"User session mode: {self.user_session}")
         
         # Generate cloud-init config (returns tuple: user_data, meta_data, network_config)
-        user_data, meta_data, network_config = generate_cloud_init_config(
-            config=config,
-            user_session=self.user_session,
-        )
+        try:
+            user_data, meta_data, network_config = generate_cloud_init_config(
+                config=config,
+                user_session=self.user_session,
+            )
+            log.debug(f"Cloud-init user-data generated ({len(user_data)} bytes)")
+            log.debug(f"Cloud-init meta-data generated ({len(meta_data)} bytes)")
+            if network_config:
+                log.debug(f"Cloud-init network-config generated ({len(network_config)} bytes)")
+        except Exception as e:
+            log.error(f"Failed to generate cloud-init config: {e}")
+            raise
         
         # Create temporary directory
         with tempfile.TemporaryDirectory() as tmpdir:
+            log.debug(f"Using temp directory: {tmpdir}")
             # Write user-data
             user_data_path = Path(tmpdir) / "user-data"
             user_data_path.write_text(user_data)
@@ -663,31 +751,86 @@ class SelectiveVMCloner:
             
             # Create ISO with long filename support for cloud-init
             iso_path = Path(tmpdir) / "cloud-init.iso"
-            cmd = [
-                "mkisofs",
-                "-o", str(iso_path),
-                "-V", "cidata",
-                "-J", "-r",
-                "-iso-level", "4",  # Support long filenames
-            ] + iso_files
             
-            subprocess.run(cmd, check=True)
+            # Find available ISO creation tool
+            mkisofs_cmd = None
+            for cmd_name in ["genisoimage", "mkisofs", "xorriso"]:
+                if shutil.which(cmd_name):
+                    mkisofs_cmd = cmd_name
+                    log.debug(f"Using ISO tool: {cmd_name}")
+                    break
+            
+            if not mkisofs_cmd:
+                log.error("No ISO creation tool found (genisoimage, mkisofs, or xorriso)")
+                log.error("Install with: sudo apt-get install genisoimage")
+                raise FileNotFoundError("No ISO creation tool available. Install genisoimage.")
+            
+            if mkisofs_cmd == "xorriso":
+                cmd = [
+                    "xorriso", "-as", "mkisofs",
+                    "-o", str(iso_path),
+                    "-V", "cidata",
+                    "-J", "-r",
+                ] + iso_files
+            else:
+                cmd = [
+                    mkisofs_cmd,
+                    "-o", str(iso_path),
+                    "-V", "cidata",
+                    "-J", "-r",
+                    "-iso-level", "4",  # Support long filenames
+                ] + iso_files
+            
+            log.debug(f"Running: {' '.join(cmd)}")
+            
+            try:
+                result = subprocess.run(cmd, check=True, capture_output=True, text=True)
+                if result.stderr and "Warning" not in result.stderr:
+                    log.debug(f"ISO stderr: {result.stderr.strip()}")
+            except subprocess.CalledProcessError as e:
+                log.error(f"ISO creation failed with exit code {e.returncode}")
+                if e.stderr:
+                    log.error(f"Error: {e.stderr.strip()}")
+                raise
+            
+            if not iso_path.exists():
+                log.error(f"ISO creation failed - file not found: {iso_path}")
+                raise FileNotFoundError(f"ISO not created: {iso_path}")
+            
+            log.debug(f"Created cloud-init ISO: {iso_path} ({os.path.getsize(iso_path)} bytes)")
             
             # Copy to final location
             iso_dir = Path("/var/lib/libvirt/images") if not self.user_session else Path.home() / ".local/share/libvirt/images"
-            iso_dir.mkdir(parents=True, exist_ok=True)
+            try:
+                iso_dir.mkdir(parents=True, exist_ok=True)
+            except PermissionError:
+                log.error(f"Cannot create ISO directory: {iso_dir}")
+                raise
             
             final_iso_path = iso_dir / f"{config.name}-cloud-init.iso"
+            log.debug(f"Copying ISO to: {final_iso_path}")
             shutil.copy2(iso_path, final_iso_path)
             
+            log.debug(f"Cloud-init ISO ready: {final_iso_path}")
             return str(final_iso_path)
 
     def _setup_vm_networking(self, vm, config: VMConfig) -> None:
         """Setup networking for VM."""
+        log.debug(f"Setting up networking for VM '{config.name}'...")
+        log.debug(f"Network mode: {config.network_mode}")
+        log.debug(f"User session: {self.user_session}")
         
         # Network setup is handled in the VM XML
         # Additional network configuration can be done here if needed
-        pass
+        
+        if self.user_session:
+            log.debug("User session networking uses QEMU user-mode (slirp) with hostfwd")
+            log.debug("VM will get IP 10.0.2.15, gateway 10.0.2.2, DNS 10.0.2.3")
+        else:
+            log.debug("System session uses libvirt default network (NAT)")
+            log.debug("VM will get IP from DHCP on 192.168.122.x")
+        
+        log.debug("Network setup complete (configuration in VM XML)")
 
     def _wait_for_ip(self, vm, timeout: int = 60) -> Optional[str]:
         """Wait for VM to get an IP address."""
@@ -971,20 +1114,65 @@ class SelectiveVMCloner:
         return None
     
     def _test_ssh_connectivity(self, vm_name: str, timeout: int = 120) -> bool:
-        """Test SSH connectivity to VM."""
+        """Test SSH connectivity to VM with multiple fallback methods."""
         ssh_port = self._get_saved_ssh_port(vm_name)
         if not ssh_port:
             log.warning("No SSH port configured for VM")
-            return False
+            log.warning("Attempting to derive port from VM name...")
+            # Fallback: compute port from VM name hash
+            ssh_port = 22000 + (zlib.crc32(vm_name.encode()) % 1000)
+            log.warning(f"Using fallback port: {ssh_port}")
         
         log.info(f"Testing SSH connectivity on port {ssh_port}...")
         log.info(f"  (waiting up to {timeout}s for cloud-init to complete)")
         
+        # First check if port is listening
+        log.debug(f"Checking if port {ssh_port} is listening...")
+        try:
+            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            sock.settimeout(2)
+            result = sock.connect_ex(('127.0.0.1', ssh_port))
+            sock.close()
+            if result == 0:
+                log.debug(f"Port {ssh_port} is accepting connections")
+            else:
+                log.debug(f"Port {ssh_port} not yet accepting connections (error: {result})")
+        except Exception as e:
+            log.debug(f"Port check failed: {e}")
+        
         start_time = time.time()
         attempt = 0
+        last_error = None
+        tcp_ok = False
         
         while time.time() - start_time < timeout:
             attempt += 1
+            elapsed = time.time() - start_time
+            
+            # First check TCP connectivity
+            if not tcp_ok or attempt % 5 == 0:
+                try:
+                    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                    sock.settimeout(3)
+                    result = sock.connect_ex(('127.0.0.1', ssh_port))
+                    sock.close()
+                    if result == 0:
+                        if not tcp_ok:
+                            log.debug(f"TCP connection to port {ssh_port} successful after {elapsed:.1f}s")
+                        tcp_ok = True
+                    else:
+                        tcp_ok = False
+                except Exception as e:
+                    log.debug(f"TCP check failed: {e}")
+                    tcp_ok = False
+            
+            if not tcp_ok:
+                if attempt % 10 == 0:
+                    log.info(f"  ... waiting for port {ssh_port} to accept connections ({elapsed:.0f}s elapsed)")
+                time.sleep(2)
+                continue
+            
+            # Try SSH connection
             try:
                 result = subprocess.run(
                     [
@@ -992,6 +1180,7 @@ class SelectiveVMCloner:
                         "-o", "UserKnownHostsFile=/dev/null",
                         "-o", "ConnectTimeout=5",
                         "-o", "BatchMode=yes",
+                        "-o", "LogLevel=ERROR",
                         "-p", str(ssh_port),
                         "ubuntu@localhost",
                         "echo 'SSH_OK'"
@@ -1001,21 +1190,39 @@ class SelectiveVMCloner:
                 if "SSH_OK" in result.stdout:
                     elapsed = time.time() - start_time
                     log.info(f"  ✓ SSH connection successful after {elapsed:.1f}s ({attempt} attempts)")
+                    log.info("=" * 50)
+                    log.info("VM READY FOR USE!")
+                    log.info(f"  ssh -p {ssh_port} ubuntu@localhost")
+                    log.info("=" * 50)
                     return True
+                else:
+                    # SSH connected but command failed
+                    if result.stderr:
+                        last_error = result.stderr.strip()
+                        log.debug(f"SSH stderr: {last_error}")
             except subprocess.TimeoutExpired:
-                pass
+                log.debug(f"SSH attempt {attempt} timed out")
             except Exception as e:
+                last_error = str(e)
                 log.debug(f"SSH attempt {attempt} failed: {e}")
             
             if attempt % 10 == 0:
-                elapsed = time.time() - start_time
                 log.info(f"  ... still waiting for SSH ({elapsed:.0f}s elapsed, {attempt} attempts)")
+                if last_error:
+                    log.debug(f"    Last error: {last_error}")
             
             time.sleep(3)
         
         log.warning(f"  ✗ SSH connection not available after {timeout}s")
-        log.warning("    Cloud-init may still be running. Try manually:")
+        log.warning("    Possible causes:")
+        log.warning("    - Cloud-init still running (wait and try again)")
+        log.warning("    - SSH not enabled in VM")
+        log.warning("    - Network misconfiguration")
+        if last_error:
+            log.warning(f"    - Last error: {last_error}")
+        log.warning("    Manual connection:")
         log.warning(f"    ssh -p {ssh_port} ubuntu@localhost")
+        log.warning(f"    Or check console: virsh --connect {self.conn_uri} console {vm_name}")
         return False
 
     def _open_viewer(self, vm_name: str) -> None:
@@ -1168,39 +1375,213 @@ class SelectiveVMCloner:
         import socket
         import random
         
+        log.debug(f"Allocating SSH port for VM '{vm_name}'...")
+        
+        # First check if we already have a saved port for this VM
+        existing_port = self._get_saved_ssh_port(vm_name)
+        if existing_port:
+            log.debug(f"Found existing SSH port for VM: {existing_port}")
+            # Verify it's still available
+            try:
+                with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+                    s.bind(('127.0.0.1', existing_port))
+                    log.debug(f"Existing port {existing_port} is available, reusing")
+                    return existing_port
+            except OSError:
+                log.debug(f"Existing port {existing_port} is in use, allocating new one")
+        
+        # Try to allocate a deterministic port based on VM name (for consistency)
+        base_port = 22000 + (zlib.crc32(vm_name.encode()) % 1000)
+        log.debug(f"Trying deterministic port based on VM name: {base_port}")
+        
+        try:
+            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+                s.bind(('127.0.0.1', base_port))
+                log.debug(f"Allocated deterministic port: {base_port}")
+                return base_port
+        except OSError:
+            log.debug(f"Deterministic port {base_port} is in use, trying random ports")
+        
         # Try to find a free port in range 22000-22999
+        attempts = 0
         for _ in range(100):
             port = random.randint(22000, 22999)
+            attempts += 1
             try:
                 with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
                     s.bind(('127.0.0.1', port))
+                    log.debug(f"Allocated random port {port} after {attempts} attempts")
                     return port
             except OSError:
                 continue
         
+        log.warning(f"Could not find free port in range 22000-22999 after {attempts} attempts")
+        log.warning("Falling back to OS-assigned port")
+        
         # Fallback: let OS assign a port
-        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-            s.bind(('127.0.0.1', 0))
-            return s.getsockname()[1]
+        try:
+            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+                s.bind(('127.0.0.1', 0))
+                port = s.getsockname()[1]
+                log.debug(f"OS assigned port: {port}")
+                return port
+        except Exception as e:
+            log.error(f"Failed to allocate any port: {e}")
+            # Last resort fallback
+            fallback_port = 22000 + (zlib.crc32(vm_name.encode()) % 1000)
+            log.warning(f"Using fallback port without verification: {fallback_port}")
+            return fallback_port
 
     def _save_ssh_port(self, vm_name: str, port: int) -> None:
         """Save SSH port to file for later retrieval."""
         images_dir = self.USER_IMAGES_DIR if self.user_session else Path("/var/lib/libvirt/images")
         vm_dir = images_dir / vm_name
-        vm_dir.mkdir(parents=True, exist_ok=True)
+        
+        log.debug(f"Saving SSH port {port} for VM '{vm_name}'...")
+        
+        try:
+            vm_dir.mkdir(parents=True, exist_ok=True)
+        except PermissionError as e:
+            log.error(f"Cannot create VM directory: {vm_dir}")
+            log.error(f"Permission denied: {e}")
+            # Try alternative location
+            alt_dir = Path.home() / ".local/share/clonebox"
+            try:
+                alt_dir.mkdir(parents=True, exist_ok=True)
+                port_file = alt_dir / f"{vm_name}.ssh_port"
+                port_file.write_text(str(port))
+                log.warning(f"Saved SSH port to alternative location: {port_file}")
+                return
+            except Exception as e2:
+                log.error(f"Failed to save to alternative location: {e2}")
+                return
+        except Exception as e:
+            log.error(f"Failed to create VM directory: {e}")
+            return
+        
         port_file = vm_dir / "ssh_port"
-        port_file.write_text(str(port))
-        log.debug(f"SSH port {port} saved to {port_file}")
+        try:
+            port_file.write_text(str(port))
+            log.debug(f"SSH port {port} saved to {port_file}")
+        except Exception as e:
+            log.error(f"Failed to save SSH port to {port_file}: {e}")
+            # Try alternative location
+            alt_file = Path.home() / ".local/share/clonebox" / f"{vm_name}.ssh_port"
+            try:
+                alt_file.parent.mkdir(parents=True, exist_ok=True)
+                alt_file.write_text(str(port))
+                log.warning(f"Saved SSH port to alternative location: {alt_file}")
+            except Exception as e2:
+                log.error(f"Failed to save to alternative location: {e2}")
+
+    def _save_ssh_key(self, vm_name: str, key_pair: SSHKeyPair) -> None:
+        """Save SSH key pair to VM directory for later use."""
+        images_dir = self.USER_IMAGES_DIR if self.user_session else Path("/var/lib/libvirt/images")
+        vm_dir = images_dir / vm_name
+        
+        log.debug(f"Saving SSH key pair for VM '{vm_name}'...")
+        
+        try:
+            vm_dir.mkdir(parents=True, exist_ok=True)
+        except PermissionError as e:
+            log.error(f"Cannot create VM directory for SSH key: {vm_dir}")
+            log.error(f"Permission denied: {e}")
+            return
+        except Exception as e:
+            log.error(f"Failed to create VM directory: {e}")
+            return
+        
+        # Save private key
+        private_key_file = vm_dir / "ssh_key"
+        try:
+            private_key_file.write_text(key_pair.private_key)
+            private_key_file.chmod(0o600)  # Secure permissions
+            log.info(f"SSH private key saved to: {private_key_file}")
+        except Exception as e:
+            log.error(f"Failed to save SSH private key: {e}")
+            return
+        
+        # Save public key
+        public_key_file = vm_dir / "ssh_key.pub"
+        try:
+            public_key_file.write_text(key_pair.public_key)
+            log.debug(f"SSH public key saved to: {public_key_file}")
+        except Exception as e:
+            log.warning(f"Failed to save SSH public key: {e}")
+        
+        log.info(f"Use: ssh -i {private_key_file} -p <port> ubuntu@localhost")
+
+    def _copy_host_ssh_key_to_vm(self, vm_name: str) -> None:
+        """Copy host SSH private key to VM directory for convenience."""
+        images_dir = self.USER_IMAGES_DIR if self.user_session else Path("/var/lib/libvirt/images")
+        vm_dir = images_dir / vm_name
+        ssh_key_file = vm_dir / "ssh_key"
+        
+        # Skip if key already exists (e.g., generated key)
+        if ssh_key_file.exists():
+            log.debug(f"SSH key already exists at {ssh_key_file}")
+            return
+        
+        log.debug(f"Looking for host SSH private key to copy...")
+        
+        # Find the corresponding private key
+        ssh_key_paths = [
+            (Path.home() / ".ssh" / "id_ed25519", Path.home() / ".ssh" / "id_ed25519.pub"),
+            (Path.home() / ".ssh" / "id_rsa", Path.home() / ".ssh" / "id_rsa.pub"),
+            (Path.home() / ".ssh" / "id_ecdsa", Path.home() / ".ssh" / "id_ecdsa.pub"),
+        ]
+        
+        for private_path, public_path in ssh_key_paths:
+            if private_path.exists() and public_path.exists():
+                try:
+                    vm_dir.mkdir(parents=True, exist_ok=True)
+                    
+                    # Copy private key with secure permissions
+                    shutil.copy2(private_path, ssh_key_file)
+                    ssh_key_file.chmod(0o600)
+                    log.debug(f"Copied host SSH private key to: {ssh_key_file}")
+                    
+                    # Copy public key
+                    shutil.copy2(public_path, vm_dir / "ssh_key.pub")
+                    log.debug(f"Copied host SSH public key to: {vm_dir / 'ssh_key.pub'}")
+                    
+                    log.info(f"Host SSH key copied to VM directory: {ssh_key_file}")
+                    return
+                except PermissionError as e:
+                    log.warning(f"Permission denied copying SSH key: {e}")
+                except Exception as e:
+                    log.warning(f"Failed to copy SSH key: {e}")
+        
+        log.debug("No host SSH private key found to copy")
 
     def _setup_ssh_port_forward(self, vm_name: str, host_port: int, guest_port: int = 22) -> None:
         """Setup SSH port forwarding using socat with nsenter for passt network namespace."""
         import subprocess
         import time
         
+        log.debug(f"Setting up SSH port forwarding for VM '{vm_name}'...")
+        log.debug(f"Host port: {host_port}, Guest port: {guest_port}")
+        
         # Wait a bit for VM to start
+        log.debug("Waiting 3s for VM processes to initialize...")
         time.sleep(3)
         
+        # Check if port forwarding is already handled by QEMU hostfwd
+        log.debug(f"Checking if port {host_port} is already listening (QEMU hostfwd)...")
+        try:
+            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            sock.settimeout(1)
+            result = sock.connect_ex(('127.0.0.1', host_port))
+            sock.close()
+            if result == 0:
+                log.info(f"Port {host_port} already listening (QEMU hostfwd active)")
+                log.info("No additional port forwarding needed")
+                return
+        except Exception as e:
+            log.debug(f"Port check failed: {e}")
+        
         # Find passt PID for this VM
+        log.debug(f"Looking for passt process for VM '{vm_name}'...")
         try:
             pgrep_result = subprocess.run(
                 ["pgrep", "-f", f"passt.*{vm_name}"],
@@ -1209,15 +1590,33 @@ class SelectiveVMCloner:
             )
             if pgrep_result.returncode != 0 or not pgrep_result.stdout.strip():
                 log.warning(f"passt process not found for VM '{vm_name}'")
+                log.debug("This is normal for QEMU user-mode networking (slirp with hostfwd)")
                 # Fallback to direct socat (for slirp mode)
                 self._start_socat_direct(host_port, guest_port)
                 return
             
             passt_pid = pgrep_result.stdout.strip().split('\n')[0].strip()
             log.debug(f"Found passt PID: {passt_pid} for VM '{vm_name}'")
+        except FileNotFoundError:
+            log.debug("pgrep not found - assuming no passt")
+            self._start_socat_direct(host_port, guest_port)
+            return
         except Exception as e:
             log.warning(f"Failed to find passt PID: {e}")
             self._start_socat_direct(host_port, guest_port)
+            return
+        
+        # Check if required tools are available
+        if not shutil.which("nsenter"):
+            log.warning("nsenter not found - falling back to direct socat")
+            log.warning("Install util-linux for better port forwarding: sudo apt-get install util-linux")
+            self._start_socat_direct(host_port, guest_port)
+            return
+        
+        if not shutil.which("socat"):
+            log.warning("socat not found - port forwarding not available")
+            log.warning("Install socat: sudo apt-get install socat")
+            log.warning(f"SSH should still work via QEMU hostfwd on port {host_port}")
             return
         
         # Use nsenter to enter passt network namespace and run socat
@@ -1232,28 +1631,66 @@ class SelectiveVMCloner:
             f"TCP:10.0.2.15:{guest_port}"
         ]
         
+        log.debug(f"Running: {' '.join(socat_cmd)}")
+        
         try:
             # Start socat in background
-            subprocess.Popen(
+            process = subprocess.Popen(
                 socat_cmd,
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
                 start_new_session=True
             )
-            log.info(f"SSH port forwarding started: localhost:{host_port} -> 10.0.2.15:{guest_port} (via passt ns)")
-        except FileNotFoundError as e:
-            if "nsenter" in str(e):
-                log.warning("nsenter not found. SSH port forwarding not available.")
-                log.warning("Install util-linux: sudo apt-get install util-linux")
+            # Brief wait to check if it started
+            time.sleep(0.5)
+            if process.poll() is not None:
+                # Process exited immediately
+                _, stderr = process.communicate()
+                if stderr:
+                    log.warning(f"nsenter/socat failed: {stderr.decode().strip()}")
+                log.warning("Falling back to direct socat")
+                self._start_socat_direct(host_port, guest_port)
             else:
-                log.warning("socat not found. SSH port forwarding not available.")
-                log.warning("Install socat: sudo apt-get install socat")
+                log.info(f"SSH port forwarding started: localhost:{host_port} -> 10.0.2.15:{guest_port} (via passt ns)")
+        except FileNotFoundError as e:
+            log.warning(f"Command not found: {e}")
+            log.warning("Falling back to direct socat")
+            self._start_socat_direct(host_port, guest_port)
+        except PermissionError as e:
+            log.warning(f"Permission denied for nsenter: {e}")
+            log.warning("nsenter may require root privileges")
+            log.warning("Falling back to direct socat")
+            self._start_socat_direct(host_port, guest_port)
         except Exception as e:
-            log.warning(f"Failed to setup SSH port forwarding: {e}")
+            log.warning(f"Failed to setup SSH port forwarding via passt ns: {e}")
+            log.warning("Falling back to direct socat")
+            self._start_socat_direct(host_port, guest_port)
 
     def _start_socat_direct(self, host_port: int, guest_port: int) -> None:
         """Start socat directly (for slirp mode where VM IP is reachable from host)."""
         import subprocess
+        
+        log.debug(f"Starting direct socat: localhost:{host_port} -> 10.0.2.15:{guest_port}")
+        
+        # Check if socat is available
+        if not shutil.which("socat"):
+            log.warning("socat not found - SSH port forwarding not available")
+            log.warning("Install with: sudo apt-get install socat")
+            log.warning(f"SSH may still work if QEMU hostfwd is configured on port {host_port}")
+            return
+        
+        # Check if port is already in use
+        try:
+            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            sock.settimeout(1)
+            result = sock.connect_ex(('127.0.0.1', host_port))
+            sock.close()
+            if result == 0:
+                log.debug(f"Port {host_port} already in use - skipping socat")
+                log.info(f"SSH port forwarding already active on port {host_port}")
+                return
+        except Exception as e:
+            log.debug(f"Port check failed: {e}")
         
         socat_cmd = [
             "socat",
@@ -1261,18 +1698,38 @@ class SelectiveVMCloner:
             f"TCP:10.0.2.15:{guest_port}"
         ]
         
+        log.debug(f"Running: {' '.join(socat_cmd)}")
+        
         try:
-            subprocess.Popen(
+            process = subprocess.Popen(
                 socat_cmd,
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
                 start_new_session=True
             )
-            log.info(f"SSH port forwarding started: localhost:{host_port} -> 10.0.2.15:{guest_port}")
+            # Brief wait to check if it started
+            time.sleep(0.3)
+            if process.poll() is not None:
+                # Process exited immediately
+                _, stderr = process.communicate()
+                if stderr:
+                    error_msg = stderr.decode().strip()
+                    log.warning(f"socat failed: {error_msg}")
+                    if "Address already in use" in error_msg:
+                        log.info(f"Port {host_port} already in use - another forwarder may be active")
+                    elif "Connection refused" in error_msg:
+                        log.debug("VM not yet accepting connections - this is normal during boot")
+            else:
+                log.info(f"SSH port forwarding started: localhost:{host_port} -> 10.0.2.15:{guest_port}")
         except FileNotFoundError:
-            log.warning("socat not found. SSH port forwarding not available.")
+            log.warning("socat not found - SSH port forwarding not available")
+            log.warning("Install with: sudo apt-get install socat")
+        except PermissionError as e:
+            log.warning(f"Permission denied starting socat: {e}")
+            log.warning(f"Try: sudo socat TCP-LISTEN:{host_port},fork,reuseaddr TCP:10.0.2.15:{guest_port}")
         except Exception as e:
             log.warning(f"Failed to setup SSH port forwarding: {e}")
+            log.debug(f"Exception type: {type(e).__name__}")
 
     def __del__(self):
         """Cleanup libvirt connection."""
