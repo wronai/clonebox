@@ -1,7 +1,8 @@
 project: clonebox
-generated: "2026-02-05T15:03:25.383963"
-modules[119]{path,lang,items}:
+generated: "2026-02-06T20:09:44.976080"
+modules[123]{path,lang,items}:
   fix_qga.py,python,1
+  tests/test_detector_discovery.py,python,26
   tests/test_orchestrator.py,python,19
   tests/conftest.py,python,17
   tests/test_profiles.py,python,5
@@ -15,37 +16,38 @@ modules[119]{path,lang,items}:
   tests/test_coverage_boost_final.py,python,13
   tests/test_cli_new_commands.py,python,27
   tests/test_dashboard_coverage.py,python,3
+  tests/test_post_install_repair.py,python,51
   tests/test_models.py,python,22
   tests/test_network.py,python,14
   tests/test_coverage_additional.py,python,4
   tests/test_remote.py,python,37
   tests/test_detector.py,python,15
   tests/test_cli.py,python,27
-  scripts/advanced_vm_diagnostic.py,python,13
-  scripts/fetch-logs.py,python,3
+  scripts/fetch-logs.py,python,2
   scripts/vm_state_diagnostic_models.py,python,1
   scripts/fix_interface_name.py,python,1
   scripts/fix_network_config.py,python,2
   scripts/fix_ssh_keys.py,python,2
-  scripts/vm_state_diagnostic.py,python,26
+  scripts/vm_state_diagnostic.py,python,35
   scripts/fix_yaml_quotes.py,python,1
   scripts/fix_yaml_bootcmd.py,python,1
   scripts/vm_console_interact.py,python,2
   tests/e2e/test_p2p_workflow.py,python,29
   tests/e2e/test_full_workflow.py,python,10
   tests/e2e/test_v2_features.py,python,36
+  tests/e2e/test_detect_repair_pipeline.py,python,14
   tests/e2e/__init__.py,python,0
   tests/e2e/test_container_workflow.py,python,1
   src/clonebox/resources.py,python,15
   src/clonebox/cloud_init.py,python,2
   src/clonebox/resource_monitor.py,python,5
-  src/clonebox/browser_profiles.py,python,6
+  src/clonebox/browser_profiles.py,python,7
   src/clonebox/dashboard.py,python,8
   src/clonebox/validator.py,python,0
   src/clonebox/p2p.py,python,8
   src/clonebox/cli.py,python,0
   src/clonebox/importer.py,python,11
-  src/clonebox/detector.py,python,13
+  src/clonebox/detector.py,python,18
   src/clonebox/exporter.py,python,11
   src/clonebox/__init__.py,python,0
   src/clonebox/di.py,python,9
@@ -53,13 +55,15 @@ modules[119]{path,lang,items}:
   src/clonebox/__main__.py,python,0
   src/clonebox/container.py,python,16
   src/clonebox/logging.py,python,3
+  src/clonebox/paths.py,python,11
   src/clonebox/orchestrator.py,python,16
-  src/clonebox/cloner.py,python,42
+  src/clonebox/cloner.py,python,48
   src/clonebox/rollback.py,python,9
   src/clonebox/monitor.py,python,10
   src/clonebox/models.py,python,14
+  src/clonebox/post_install_repair.py,python,24
+  src/clonebox/ssh.py,python,4
   src/clonebox/profiles.py,python,3
-  src/clonebox/cloner_utils.py,python,7
   src/clonebox/audit.py,python,22
   src/clonebox/secrets.py,python,29
   src/clonebox/vm_xml.py,python,10
@@ -73,7 +77,7 @@ modules[119]{path,lang,items}:
   src/clonebox/health/probes.py,python,7
   src/clonebox/cli/interactive_plugins.py,python,1
   src/clonebox/cli/interactive_ssh.py,python,1
-  src/clonebox/cli/vm_commands.py,python,11
+  src/clonebox/cli/vm_commands.py,python,12
   src/clonebox/cli/remote_commands.py,python,8
   src/clonebox/cli/interactive_settings.py,python,1
   src/clonebox/cli/interactive_audit.py,python,1
@@ -86,10 +90,10 @@ modules[119]{path,lang,items}:
   src/clonebox/cli/interactive_snapshots.py,python,1
   src/clonebox/cli/interactive_import_export.py,python,1
   src/clonebox/cli/interactive_compose.py,python,1
-  src/clonebox/cli/misc_commands.py,python,16
+  src/clonebox/cli/misc_commands.py,python,15
   src/clonebox/cli/import_export_commands.py,python,8
-  src/clonebox/cli/utils.py,python,16
-  src/clonebox/cli/monitoring_commands.py,python,6
+  src/clonebox/cli/utils.py,python,17
+  src/clonebox/cli/monitoring_commands.py,python,7
   src/clonebox/cli/interactive_container.py,python,1
   src/clonebox/cli/container_commands.py,python,5
   src/clonebox/cli/interactive_remote.py,python,1
@@ -114,7 +118,7 @@ modules[119]{path,lang,items}:
   src/clonebox/validation/__init__.py,python,0
   src/clonebox/validation/services.py,python,1
   src/clonebox/validation/disk.py,python,2
-  src/clonebox/validation/core.py,python,7
+  src/clonebox/validation/core.py,python,8
   src/clonebox/validation/packages.py,python,2
   src/clonebox/policies/engine.py,python,7
   src/clonebox/policies/__init__.py,python,0
@@ -125,6 +129,34 @@ function_details:
   fix_qga.py:
     functions[1]{name,kind,sig,loc,async,lines,cc,does}:
       create_fixed_cloudinit,function,() -> None,12-75,false,64,5,Create a new cloud-init ISO with fixed runcmd
+  tests/test_detector_discovery.py:
+    functions[26]{name,kind,sig,loc,async,lines,cc,does}:
+      TestDiscoverXdgDirs.test_finds_config_dir,method,(tmp_path) -> None,15-23,false,9,1,checks finds config dir
+      TestDiscoverXdgDirs.test_finds_local_share_dir,method,(tmp_path) -> None,25-33,false,9,1,checks finds local share dir
+      TestDiscoverXdgDirs.test_finds_dotdir,method,(tmp_path) -> None,35-43,false,9,1,checks finds dotdir
+      TestDiscoverXdgDirs.test_case_insensitive_match,method,(tmp_path) -> None,45-52,false,8,1,checks case insensitive match
+      TestDiscoverXdgDirs.test_no_match_returns_empty,method,(tmp_path) -> None,54-61,false,8,1,checks no match returns empty
+      TestDiscoverSnapDirs.test_finds_snap_common_dirs,method,(tmp_path) -> None,67-77,false,11,3,checks finds snap common dirs
+      TestDiscoverSnapDirs.test_no_snap_dir,method,(tmp_path) -> None,79-84,false,6,1,checks no snap dir
+      TestDiscoverSnapDirs.test_no_matching_snap,method,(tmp_path) -> None,86-93,false,8,1,checks no matching snap
+      TestDiscoverProcDataDirs.test_nonexistent_pid,method,() -> None,99-102,false,4,1,checks nonexistent pid
+      TestDiscoverProcDataDirs.test_filters_cache_paths,method,(tmp_path) -> None,104-116,false,13,1,checks filters cache paths
+      TestDiscoverProcDataDirs.test_too_broad_dirs_filtered,method,() -> None,118-122,false,5,1,checks too broad dirs filtered
+      TestDiscoverDesktopAppName.test_finds_name_from_desktop_file,method,(tmp_path) -> None,128-152,false,25,1,checks finds name from desktop file
+      TestDiscoverDesktopAppName.test_no_exe_returns_empty,method,() -> None,154-157,false,4,1,checks no exe returns empty
+      TestAutoDiscoverAppData.test_static_registry_used,method,(tmp_path) -> None,163-174,false,12,2,checks static registry used
+      TestAutoDiscoverAppData.test_xdg_discovers_unknown_app,method,(tmp_path) -> None,176-194,false,19,4,checks xdg discovers unknown app
+      TestAutoDiscoverAppData.test_snap_discovery,method,(tmp_path) -> None,196-206,false,11,3,checks snap discovery
+      TestAutoDiscoverAppData.test_deduplication,method,(tmp_path) -> None,208-220,false,13,3,checks deduplication
+      TestAutoDiscoverAppData.test_nonexistent_dirs_skipped,method,(tmp_path) -> None,222-227,false,6,1,checks nonexistent dirs skipped
+      TestAutoDiscoverAppData.test_detect_app_data_dirs_compatibility,method,(tmp_path) -> None,229-245,false,17,2,detect_app_data_dirs wraps auto_discover_app_data in legacy format.
+      TestSuggestPackagesForApps.test_apt_package,method,() -> None,251-255,false,5,1,checks apt package
+      TestSuggestPackagesForApps.test_snap_package,method,() -> None,257-261,false,5,1,checks snap package
+      TestSuggestPackagesForApps.test_deb_package_generates_command,method,() -> None,263-268,false,6,1,checks deb package generates command
+      TestSuggestPackagesForApps.test_deb_commands_for_cursor,method,() -> None,270-275,false,6,1,checks deb commands for cursor
+      TestSuggestPackagesForApps.test_no_duplicate_deb_commands,method,() -> None,277-286,false,10,3,checks no duplicate deb commands
+      TestSuggestPackagesForApps.test_empty_apps,method,() -> None,288-293,false,6,1,checks empty apps
+      TestSuggestPackagesForApps.test_deb_install_commands_defined,method,() -> None,295-299,false,5,1,checks deb install commands defined
   tests/test_orchestrator.py:
     functions[19]{name,kind,sig,loc,async,lines,cc,does}:
       TestOrchestratedVM.test_create_vm,method,() -> None,22-32,false,11,1,Test creating an orchestrated VM.
@@ -343,6 +375,59 @@ function_details:
       test_dashboard_import_and_functions,function,() -> None,12-41,false,30,7,Test dashboard module import and basic function existence.
       test_dashboard_with_mocked_dependencies,function,() -> None,44-102,false,59,5,Test dashboard with all dependencies mocked.
       test_dashboard_constant_values,function,() -> None,105-128,false,24,4,Test dashboard constants if they exist.
+  tests/test_post_install_repair.py:
+    functions[51]{name,kind,sig,loc,async,lines,cc,does}:
+      _make_ctx,function,(responses) -> None,107-111,false,5,1,Create a mock RepairCtx that returns sequential responses.
+      TestRepairResult.test_create_ok_result,method,() -> None,38-43,false,6,1,checks create ok result
+      TestRepairResult.test_create_fixed_result,method,() -> None,45-48,false,4,1,checks create fixed result
+      TestRepairResult.test_create_failed_result,method,() -> None,50-54,false,5,1,checks create failed result
+      TestRepairReport.test_empty_report,method,() -> None,58-62,false,5,1,checks empty report
+      TestRepairReport.test_report_with_results,method,() -> None,64-73,false,10,1,checks report with results
+      TestRepairReport.test_log_summary,method,(caplog) -> None,75-84,false,10,1,checks log summary
+      TestRepairCtx.test_init,method,() -> None,91-94,false,4,1,checks init
+      TestRepairCtx.test_run_delegates_to_ssh_exec,method,(mock_ssh) -> None,97-101,false,5,1,checks run delegates to ssh exec
+      TestRepairSnapDirOwnership.test_no_snap_dirs,method,() -> None,115-118,false,4,1,checks no snap dirs
+      TestRepairSnapDirOwnership.test_all_ok,method,() -> None,120-128,false,9,2,checks all ok
+      TestRepairSnapDirOwnership.test_detects_and_fixes_root_ownership,method,() -> None,130-140,false,11,1,checks detects and fixes root ownership
+      TestRepairCopiedDataOwnership.test_all_dirs_ok,method,() -> None,144-148,false,5,1,checks all dirs ok
+      TestRepairCopiedDataOwnership.test_detects_root_owned_dir,method,() -> None,150-162,false,13,1,checks detects root owned dir
+      TestRepairAppLockFiles.test_no_locks,method,() -> None,166-170,false,5,1,checks no locks
+      TestRepairAppLockFiles.test_detects_and_removes_locks,method,() -> None,172-181,false,10,1,checks detects and removes locks
+      TestRepairCrashReports.test_no_crash_dumps,method,() -> None,185-188,false,4,1,checks no crash dumps
+      TestRepairCrashReports.test_detects_and_removes_crash_dumps,method,() -> None,190-198,false,9,1,checks detects and removes crash dumps
+      TestRepairSnapInterfaces.test_no_snap_packages,method,() -> None,202-205,false,4,1,checks no snap packages
+      TestRepairSnapInterfaces.test_classic_snap_skipped,method,() -> None,207-215,false,9,1,checks classic snap skipped
+      TestRepairSnapInterfaces.test_all_interfaces_connected,method,() -> None,217-234,false,18,1,checks all interfaces connected
+      TestRepairXdgRuntimeDir.test_already_exists,method,() -> None,238-241,false,4,1,checks already exists
+      TestRepairXdgRuntimeDir.test_creates_dir,method,() -> None,243-247,false,5,1,checks creates dir
+      TestRepairMachineId.test_valid_machine_id,method,() -> None,251-254,false,4,1,checks valid machine id
+      TestRepairMachineId.test_empty_machine_id_fixed,method,() -> None,256-264,false,9,1,checks empty machine id fixed
+      TestRepairMachineId.test_all_zeros_detected,method,() -> None,266-273,false,8,1,checks all zeros detected
+      TestRepairDbusSession.test_already_installed,method,() -> None,277-280,false,4,1,checks already installed
+      TestRepairDbusSession.test_installs_dbus,method,() -> None,282-286,false,5,1,checks installs dbus
+      TestRepairHomeDirPermissions.test_all_ok,method,() -> None,290-293,false,4,1,checks all ok
+      TestRepairHomeDirPermissions.test_fixes_root_owned,method,() -> None,295-303,false,9,1,checks fixes root owned
+      TestRepairGdmRunning.test_not_gui_mode,method,() -> None,307-310,false,4,1,checks not gui mode
+      TestRepairGdmRunning.test_gdm_already_active,method,(_) -> None,313-316,false,4,1,checks gdm already active
+      TestRepairGdmRunning.test_gdm_started,method,(_) -> None,319-323,false,5,1,checks gdm started
+      TestRepairDnsResolution.test_dns_ok,method,() -> None,327-330,false,4,1,checks dns ok
+      TestRepairDnsResolution.test_dns_fixed,method,(_) -> None,333-337,false,5,1,checks dns fixed
+      TestRepairAptLock.test_no_lock,method,() -> None,341-344,false,4,1,checks no lock
+      TestRepairAptLock.test_lock_released,method,(_) -> None,347-351,false,5,1,checks lock released
+      TestRepairFontconfigCache.test_cache_exists,method,() -> None,355-358,false,4,1,checks cache exists
+      TestRepairFontconfigCache.test_rebuilds_cache,method,() -> None,360-364,false,5,1,checks rebuilds cache
+      TestRepairFirefoxProfilesIni.test_no_profiles_ini,method,() -> None,368-371,false,4,1,checks no profiles ini
+      TestRepairFirefoxProfilesIni.test_correct_paths_ok,method,() -> None,373-377,false,5,1,checks correct paths ok
+      TestRepairFirefoxProfilesIni.test_fixes_wrong_host_paths,method,() -> None,379-388,false,10,1,checks fixes wrong host paths
+      TestRepairIdeConfigPaths.test_no_host_username,method,() -> None,392-396,false,5,1,checks no host username
+      TestRepairIdeConfigPaths.test_same_user_skipped,method,() -> None,398-401,false,4,1,checks same user skipped
+      TestRepairIdeConfigPaths.test_fixes_host_paths_in_settings,method,() -> None,403-414,false,12,1,checks fixes host paths in settings
+      TestVerifyHeadlessBrowsers.test_no_browsers,method,() -> None,418-421,false,4,1,checks no browsers
+      TestVerifyHeadlessBrowsers.test_browser_not_installed,method,() -> None,423-426,false,4,1,checks browser not installed
+      TestVerifyHeadlessBrowsers.test_browser_headless_ok,method,() -> None,428-433,false,6,1,checks browser headless ok
+      TestVerifyIdeLaunch.test_no_ides_installed,method,() -> None,437-444,false,8,1,checks no ides installed
+      TestVerifyIdeLaunch.test_ide_version_ok,method,() -> None,446-458,false,13,1,checks ide version ok
+      TestRunPostInstallRepairs.test_runs_all_phases,method,(mock_ssh) -> None,466-489,false,24,2,checks runs all phases
   tests/test_models.py:
     functions[22]{name,kind,sig,loc,async,lines,cc,does}:
       TestVMSettings.test_default_values,method,() -> None,15-20,false,6,1,checks default values
@@ -474,29 +559,13 @@ function_details:
       TestCLIIntegration.test_create_vm_from_config_propagates_disk_size,method,"(mock_cloner_class, mock_cloner_utils_class, tmp_path) -> None",372-399,false,28,1,checks create vm from config propagates disk size
       TestCLIParametrized.test_generate_yaml_custom_vm_names,method,"(vm_name, expected) -> None",413-432,false,20,1,Test YAML generation with various VM names.
       TestCLIParametrized.test_generate_yaml_services_count,method,"(services, expected_count) -> None",443-461,false,19,2,Test YAML generation with various service configurations.
-  scripts/advanced_vm_diagnostic.py:
-    functions[13]{name,kind,sig,loc,async,lines,cc,does}:
-      main,function,() -> None,532-563,false,32,7,main
-      AdvancedVMDiagnostic.__init__,method,"(vm_name:str, conn_uri:str='qemu:///session') -> None",52-105,false,54,1,creates
-      AdvancedVMDiagnostic.run_cmd,method,"(cmd:List[str], timeout:int=10) -> tuple[int, str, str]",107-115,false,9,3,"Run command and return (returncode, stdout, stderr)."
-      AdvancedVMDiagnostic.analyze_serial_log,method,"() -> Dict[str, Any]",117-179,false,63,18,Deep analysis of serial.log for known issues.
-      AdvancedVMDiagnostic.check_cloud_init_progress,method,"() -> Dict[str, Any]",181-217,false,37,10,Check current cloud-init progress.
-      AdvancedVMDiagnostic.detect_network_interface_name,method,"() -> Optional[str]",219-248,false,30,10,Try to detect the actual network interface name in VM.
-      AdvancedVMDiagnostic.generate_fixes,method,"() -> List[Dict[str, Any]]",250-278,false,29,9,Generate specific fixes for detected issues.
-      AdvancedVMDiagnostic._generate_yaml_fix,method,() -> str,280-301,false,22,1,Generate specific fix for YAML parsing error.
-      AdvancedVMDiagnostic.watch_cloud_init,method,"(duration:int=300) -> None",303-346,false,44,10,Watch cloud-init progress in real-time.
-      AdvancedVMDiagnostic.apply_fix,method,"(fix_info:Dict[str,Any]) -> bool",348-377,false,30,6,Apply a specific fix.
-      AdvancedVMDiagnostic.run_comprehensive_diagnostic,method,"() -> Dict[str, Any]",379-421,false,43,5,Run full diagnostic analysis.
-      AdvancedVMDiagnostic._generate_recommendations,method,"() -> List[str]",423-466,false,44,16,Generate specific recommendations based on findings.
-      AdvancedVMDiagnostic.print_report,method,"(report:Dict[str,Any]) -> None",468-529,false,62,13,Print formatted diagnostic report.
   scripts/fetch-logs.py:
-    functions[3]{name,kind,sig,loc,async,lines,cc,does}:
-      qga_exec,function,"(vm_name, conn_uri, command, timeout=10) -> None",12-64,false,53,8,Execute command via QEMU Guest Agent
-      ssh_exec,function,"(vm_name, command, timeout=20) -> None",67-109,false,43,7,Execute command via SSH (requires passt port-forward + ssh_key).
-      main,function,() -> None,111-146,false,36,5,main
+    functions[2]{name,kind,sig,loc,async,lines,cc,does}:
+      qga_exec,function,"(vm_name, conn_uri, command, timeout=10) -> None",55-84,false,30,8,Execute command via QEMU Guest Agent.
+      main,function,() -> None,86-121,false,36,5,main
   scripts/vm_state_diagnostic_models.py:
     functions[1]{name,kind,sig,loc,async,lines,cc,does}:
-      DiagnosticContext.__post_init__,method,() -> None,46-48,false,3,2,creates init
+      DiagnosticContext.__post_init__,method,() -> None,64-69,false,6,3,creates init
   scripts/fix_interface_name.py:
     functions[1]{name,kind,sig,loc,async,lines,cc,does}:
       fix_interface_name,function,"(vm_name:str) -> None",13-73,false,61,3,Fix the interface name in cloud-init configuration.
@@ -509,33 +578,42 @@ function_details:
       fix_ssh_keys,function,"(vm_name:str) -> None",14-162,false,149,27,Fix SSH key configuration for specific VM.
       run_command,function,(cmd) -> None,165-172,false,8,2,"Run command and return (rc, stdout, stderr)."
   scripts/vm_state_diagnostic.py:
-    functions[26]{name,kind,sig,loc,async,lines,cc,does}:
-      main,function,() -> None,976-993,false,18,2,main
-      VMDiagnostic.__init__,method,"(vm_name:str, conn_uri:str='qemu:///session', verbose:bool=False) -> None",27-29,false,3,1,creates
-      VMDiagnostic.run_cmd,method,"(cmd:List[str], timeout:int=10) -> tuple[int, str, str]",31-39,false,9,3,"Run command and return (returncode, stdout, stderr)."
-      VMDiagnostic.virsh,method,"() -> tuple[int, str, str]",41-44,false,4,1,Run virsh command.
-      VMDiagnostic.qga_exec,method,"(command:str, timeout:int=15) -> Optional[str]",46-85,false,40,8,Execute command via QEMU Guest Agent.
-      VMDiagnostic.ssh_exec,method,"(command:str, timeout:int=15) -> Optional[str]",87-105,false,19,5,Execute command via SSH.
-      VMDiagnostic.exec_in_vm,method,"(command:str, timeout:int=15) -> Optional[str]",107-117,false,11,4,Execute command in VM using best available method.
-      VMDiagnostic.add_result,method,"(result:TestResult) -> None",119-127,false,9,3,Add test result to context.
-      VMDiagnostic.test_vm_exists,method,() -> TestResult,131-159,false,29,4,Check if VM is defined in libvirt.
-      VMDiagnostic.test_vm_running,method,() -> TestResult,161-194,false,34,4,Check if VM is running.
-      VMDiagnostic.test_vm_directory,method,() -> TestResult,196-250,false,55,9,Check VM directory and files.
-      VMDiagnostic.test_passt_process,method,() -> TestResult,252-293,false,42,10,Check if passt process is running for this VM.
-      VMDiagnostic.test_port_listening,method,() -> TestResult,295-323,false,29,4,Check if SSH port is listening.
-      VMDiagnostic.test_tcp_connection,method,() -> TestResult,325-371,false,47,5,Test TCP connection to SSH port.
-      VMDiagnostic.test_qga_ping,method,() -> TestResult,373-402,false,30,4,Test QEMU Guest Agent connectivity.
-      VMDiagnostic.test_ssh_connection,method,() -> TestResult,404-462,false,59,11,Test SSH connection to VM.
-      VMDiagnostic.test_vm_network_via_qga,method,() -> TestResult,464-526,false,63,12,Get VM network configuration via QGA.
-      VMDiagnostic.test_cloud_init_status,method,() -> TestResult,528-605,false,78,14,Check cloud-init status.
-      VMDiagnostic.test_serial_log_analysis,method,() -> TestResult,607-683,false,77,19,Analyze serial.log for errors and progress.
-      VMDiagnostic.test_cloud_init_config,method,() -> TestResult,685-747,false,63,11,Check cloud-init configuration files.
-      VMDiagnostic.test_vm_services,method,() -> TestResult,749-792,false,44,7,Check critical services in VM.
-      VMDiagnostic.run_all_tests,method,"() -> List[TestResult]",794-821,false,28,4,Run all diagnostic tests in order.
-      VMDiagnostic.generate_report,method,() -> str,823-879,false,57,16,Generate Q&A format diagnostic report.
-      VMDiagnostic._analyze_root_cause,method,"() -> List[str]",881-910,false,30,12,Analyze results to identify root cause.
-      VMDiagnostic._get_next_steps,method,"() -> List[str]",912-942,false,31,9,Get recommended next steps based on results.
-      VMDiagnostic.to_json,method,() -> str,944-973,false,30,2,Export results as JSON.
+    functions[35]{name,kind,sig,loc,async,lines,cc,does}:
+      main,function,() -> None,1621-1638,false,18,2,main
+      VMDiagnostic.__init__,method,"(vm_name:str, conn_uri:str='qemu:///session', verbose:bool=False) -> None",41-43,false,3,1,creates
+      VMDiagnostic.run_cmd,method,"(cmd:List[str], timeout:int=10) -> tuple[int, str, str]",45-53,false,9,3,"Run command and return (returncode, stdout, stderr)."
+      VMDiagnostic.virsh,method,"() -> tuple[int, str, str]",55-58,false,4,1,Run virsh command.
+      VMDiagnostic.qga_exec,method,"(command:str, timeout:int=15) -> Optional[str]",60-99,false,40,8,Execute command via QEMU Guest Agent.
+      VMDiagnostic.ssh_exec,method,"(command:str, timeout:int=15) -> Optional[str]",101-124,false,24,6,Execute command via SSH.
+      VMDiagnostic.exec_in_vm,method,"(command:str, timeout:int=15) -> Optional[str]",126-136,false,11,4,Execute command in VM using best available method.
+      VMDiagnostic.add_result,method,"(result:TestResult) -> None",138-146,false,9,3,Add test result to context.
+      VMDiagnostic.test_vm_exists,method,() -> TestResult,150-178,false,29,4,Check if VM is defined in libvirt.
+      VMDiagnostic.test_vm_running,method,() -> TestResult,180-213,false,34,4,Check if VM is running.
+      VMDiagnostic.test_vm_directory,method,() -> TestResult,215-269,false,55,9,Check VM directory and files.
+      VMDiagnostic.test_passt_process,method,() -> TestResult,271-337,false,67,15,Check if passt/QEMU port-forwarding is active for this VM.
+      VMDiagnostic.test_port_listening,method,() -> TestResult,339-367,false,29,4,Check if SSH port is listening.
+      VMDiagnostic.test_tcp_connection,method,() -> TestResult,369-415,false,47,5,Test TCP connection to SSH port.
+      VMDiagnostic.test_qga_ping,method,() -> TestResult,417-446,false,30,4,Test QEMU Guest Agent connectivity.
+      VMDiagnostic.test_ssh_connection,method,() -> TestResult,448-506,false,59,11,Test SSH connection to VM.
+      VMDiagnostic.test_vm_network_via_qga,method,() -> TestResult,508-570,false,63,12,Get VM network configuration via QGA.
+      VMDiagnostic.test_cloud_init_status,method,() -> TestResult,572-649,false,78,14,Check cloud-init status.
+      VMDiagnostic.test_serial_log_analysis,method,() -> TestResult,651-727,false,77,19,Analyze serial.log for errors and progress.
+      VMDiagnostic.test_cloud_init_config,method,() -> TestResult,729-791,false,63,11,Check cloud-init configuration files.
+      VMDiagnostic.test_vm_services,method,() -> TestResult,793-836,false,44,7,Check critical services in VM.
+      VMDiagnostic.test_browser_detection,method,() -> TestResult,840-892,false,53,10,Detect installed browsers in VM.
+      VMDiagnostic.test_firefox_profile,method,() -> TestResult,894-968,false,75,11,Check Firefox profile integrity.
+      VMDiagnostic.test_chrome_profile,method,() -> TestResult,970-1058,false,89,16,Check Chrome/Chromium profile integrity.
+      VMDiagnostic.test_firefox_headless,method,() -> TestResult,1060-1121,false,62,8,Test Firefox headless launch.
+      VMDiagnostic.test_browser_permissions,method,() -> TestResult,1123-1187,false,65,10,Check browser profile permissions.
+      VMDiagnostic.test_browser_lock_files,method,() -> TestResult,1189-1230,false,42,7,Check for stale browser lock files from copied profiles.
+      VMDiagnostic.test_browser_crash_reports,method,() -> TestResult,1232-1275,false,44,6,Check for recent browser crash dumps.
+      VMDiagnostic.test_snap_browser_interfaces,method,() -> TestResult,1277-1341,false,65,15,Check snap browser interface connections.
+      VMDiagnostic.test_browser_logs,method,() -> TestResult,1343-1399,false,57,14,Check browser error logs.
+      VMDiagnostic.run_all_tests,method,"() -> List[TestResult]",1401-1438,false,38,4,Run all diagnostic tests in order.
+      VMDiagnostic.generate_report,method,() -> str,1440-1496,false,57,16,Generate Q&A format diagnostic report.
+      VMDiagnostic._analyze_root_cause,method,"() -> List[str]",1498-1535,false,38,19,Analyze results to identify root cause.
+      VMDiagnostic._get_next_steps,method,"() -> List[str]",1537-1581,false,45,15,Get recommended next steps based on results.
+      VMDiagnostic.to_json,method,() -> str,1583-1618,false,36,2,Export results as JSON.
   scripts/fix_yaml_quotes.py:
     functions[1]{name,kind,sig,loc,async,lines,cc,does}:
       fix_yaml_quotes,function,"(vm_name:str) -> None",12-104,false,93,9,Fix YAML quote escaping in bootcmd.
@@ -627,6 +705,22 @@ function_details:
       TestRollbackSystem.test_rollback_on_exception,method,(tmp_path) -> None,508-523,false,16,2,Test rollback happens on exception.
       TestV2ConfigFormat.test_v2_config_with_auth_section,method,(tmp_path) -> None,533-563,false,31,1,Test v2 config format with nested auth section.
       TestV2ConfigFormat.test_v1_config_backward_compatibility,method,(tmp_path) -> None,565-581,false,17,1,Test v1 config format still works.
+  tests/e2e/test_detect_repair_pipeline.py:
+    functions[14]{name,kind,sig,loc,async,lines,cc,does}:
+      TestAutoDiscoveryPipeline.test_detect_command_includes_app_data,method,() -> None,38-44,false,7,1,clonebox detect should include app data dirs in output.
+      TestAutoDiscoveryPipeline.test_discovery_finds_real_xdg_dirs,method,() -> None,46-60,false,15,2,Auto-discovery should find actual ~/.config dirs on this host.
+      TestAutoDiscoveryPipeline.test_discovery_sources_are_diverse,method,() -> None,62-70,false,9,3,"Auto-discovery should use multiple sources, not just static."
+      TestAutoDiscoveryPipeline.test_detect_app_data_dirs_backward_compatible,method,() -> None,72-79,false,8,2,Legacy detect_app_data_dirs should return same format as before.
+      TestAutoDiscoveryPipeline.test_suggest_packages_returns_deb_commands,method,() -> None,81-90,false,10,1,suggest_packages_for_apps should return deb_commands key.
+      TestConfigGeneration.test_init_generates_config_with_app_data,method,(tmp_path) -> None,102-114,false,13,3,clonebox init should generate config with app_data_paths.
+      TestConfigGeneration.test_deb_commands_in_post_commands,method,() -> None,116-130,false,15,2,DEB install commands should be generated for detected deb apps.
+      TestPostInstallRepairPipeline.test_repair_all_phases_run,method,(mock_ssh) -> None,143-179,false,37,3,All 5 repair phases should execute.
+      TestPostInstallRepairPipeline.test_repair_report_counts,method,(mock_ssh) -> None,182-197,false,16,1,Repair report should have correct counts.
+      TestPostInstallRepairPipeline.test_repair_handles_ssh_failures,method,(mock_ssh) -> None,200-211,false,12,1,Repair should handle SSH failures gracefully.
+      TestPostInstallRepairPipeline.test_ide_config_paths_repair,method,(mock_ssh) -> None,214-234,false,21,3,IDE config path repair should rewrite host paths.
+      TestPostInstallRepairPipeline.test_snap_classic_detection,method,(mock_ssh) -> None,237-262,false,26,3,Classic snaps should be detected and skipped for interface repair.
+      TestRepairCLI.test_repair_module_help,method,() -> None,274-281,false,8,1,python -m clonebox.post_install_repair without args shows usage.
+      TestRepairCLI.test_repair_module_bad_vm,method,() -> None,283-289,false,7,1,python -m clonebox.post_install_repair nonexistent-vm should fail.
   tests/e2e/test_container_workflow.py:
     functions[1]{name,kind,sig,loc,async,lines,cc,does}:
       test_container_full_workflow,function,(tmp_path) -> None,12-72,false,61,6,"E2E: clonebox container up → ps → stop → rm."
@@ -649,8 +743,8 @@ function_details:
       ResourceLimits.from_dict,method,"(data:dict) -> \"ResourceLimits\"",215-222,false,8,1,Create from config dict.
   src/clonebox/cloud_init.py:
     functions[2]{name,kind,sig,loc,async,lines,cc,does}:
-      generate_cloud_init_config,function,"(config:VMConfig, autostart_apps:List[Dict]=None, user_session:bool=False, bootcmd_extra:List=None) -> Tuple[str, str, str]",13-335,false,323,35,Generate cloud-init configuration for VM.
-      generate_network_config,function,() -> str,338-354,false,17,1,Generate network-config for cloud-init NoCloud datasource.
+      generate_cloud_init_config,function,"(config:VMConfig, autostart_apps:List[Dict]=None, user_session:bool=False, bootcmd_extra:List=None) -> Tuple[str, str, str]",13-341,false,329,36,Generate cloud-init configuration for VM.
+      generate_network_config,function,() -> str,344-360,false,17,1,Generate network-config for cloud-init NoCloud datasource.
   src/clonebox/resource_monitor.py:
     functions[5]{name,kind,sig,loc,async,lines,cc,does}:
       ResourceMonitor.__init__,method,"(conn:Optional[Any]=None) -> None",38-40,false,3,1,creates
@@ -659,13 +753,14 @@ function_details:
       ResourceMonitor._get_disk_stats,method,"(domain) -> Dict[str, int]",107-133,false,27,4,Get aggregated disk stats.
       ResourceMonitor._get_network_stats,method,"(domain) -> Dict[str, int]",135-162,false,28,4,Get aggregated network stats.
   src/clonebox/browser_profiles.py:
-    functions[6]{name,kind,sig,loc,async,lines,cc,does}:
-      detect_browser_profiles,function,"() -> Dict[str, Dict[str, Path]]",52-66,false,15,5,Detect available browser profiles on the host system.
-      get_profile_size,function,"(browser:str, paths:Dict[str,Path]) -> Tuple[int, str]",69-105,false,37,8,Get total size of browser profile.
-      copy_browser_profile,function,"(browser:str, vm_dir:Path, progress_callback:Optional[callable]=None) -> Optional[Path]",108-159,false,52,10,Copy browser profile from host to VM staging directory.
-      stage_browser_profiles,function,"(requested_browsers:List[str], vm_dir:Path, skip_cache:bool=False) -> Dict[str, Path]",162-201,false,40,7,Stage browser profiles for copying to VM.
-      generate_browser_profile_setup_script,function,"(staged_profiles:Dict[str,Path], vm_username:str='ubuntu') -> str",204-247,false,44,3,Generate cloud-init script to setup browser profiles in VM.
-      copy_profiles_to_vm_via_ssh,function,"(staged_profiles:Dict[str,Path], ssh_port:int, ssh_key:Path, vm_username:str='ubuntu') -> bool",250-312,false,63,6,Copy staged browser profiles to running VM via SSH.
+    functions[7]{name,kind,sig,loc,async,lines,cc,does}:
+      _resolve_host_profile_paths,function,"(browser:str) -> Dict[str, Path]",57-69,false,13,5,resolve host profile paths
+      detect_browser_profiles,function,"() -> Dict[str, Dict[str, Path]]",72-87,false,16,5,Detect available browser profiles on the host system.
+      get_profile_size,function,"(browser:str, paths:Dict[str,Path]) -> Tuple[int, str]",90-126,false,37,8,Get total size of browser profile.
+      copy_browser_profile,function,"(browser:str, vm_dir:Path, progress_callback:Optional[callable]=None, skip_cache:bool=False) -> Optional[Path]",129-184,false,56,12,Copy browser profile from host to VM staging directory.
+      stage_browser_profiles,function,"(requested_browsers:List[str], vm_dir:Path, skip_cache:bool=False) -> Dict[str, Path]",187-226,false,40,7,Stage browser profiles for copying to VM.
+      generate_browser_profile_setup_script,function,"(staged_profiles:Dict[str,Path], vm_username:str='ubuntu') -> str",229-272,false,44,3,Generate cloud-init script to setup browser profiles in VM.
+      copy_profiles_to_vm_via_ssh,function,"(staged_profiles:Dict[str,Path], ssh_port:int, ssh_key:Path, vm_username:str='ubuntu') -> bool",275-397,false,123,16,Copy staged browser profiles to running VM via SSH.
   src/clonebox/dashboard.py:
     functions[8]{name,kind,sig,loc,async,lines,cc,does}:
       _run_clonebox,function,"(args:List[str]) -> subprocess.CompletedProcess",12-17,false,6,1,starts clonebox
@@ -700,20 +795,25 @@ function_details:
       SecureImporter.import_decrypted,method,"(encrypted_path:Path, import_user_data:bool=False, import_app_data:bool=False, new_name:Optional[str]=None) -> str",177-217,false,41,3,Import VM with AES-256 decryption.
       SecureImporter.close,method,() -> None,219-220,false,2,1,stops
   src/clonebox/detector.py:
-    functions[13]{name,kind,sig,loc,async,lines,cc,does}:
+    functions[18]{name,kind,sig,loc,async,lines,cc,does}:
       SystemSnapshot.running_services,method,() -> list,56-57,false,2,3,starts services
       SystemSnapshot.running_apps,method,() -> list,60-61,false,2,1,starts apps
-      SystemDetector.__init__,method,() -> None,349-351,false,3,1,creates
-      SystemDetector.detect_app_data_dirs,method,"(applications:list) -> list",353-398,false,46,15,Detect config/data directories for running applications.
-      SystemDetector.detect_all,method,() -> SystemSnapshot,400-406,false,7,1,"Detect all services, applications and paths."
-      SystemDetector.detect_services,method,() -> list,408-456,false,49,9,Detect systemd services.
-      SystemDetector.detect_applications,method,() -> list,458-499,false,42,11,Detect running applications/processes.
-      SystemDetector.detect_paths,method,() -> list,501-601,false,101,15,"Detect important paths (projects, configs, data)."
-      SystemDetector._get_dir_size,method,"(path:Path, max_depth:int=2) -> int",603-619,false,17,9,Get approximate directory size in bytes.
-      SystemDetector.detect_docker_containers,method,() -> list,621-638,false,18,5,Detect running Docker containers.
-      SystemDetector.suggest_packages_for_apps,method,"(applications:list) -> dict",640-659,false,20,5,Suggest packages based on detected applications.
-      SystemDetector.suggest_packages_for_services,method,"(services:list) -> dict",661-680,false,20,5,Suggest packages based on detected services.
-      SystemDetector.get_system_info,method,() -> dict,682-693,false,12,1,Get basic system information.
+      SystemDetector.__init__,method,() -> None,354-356,false,3,1,creates
+      SystemDetector._discover_xdg_dirs,method,"(app_name:str) -> list",360-399,false,40,12,Discover app data via XDG Base Directory conventions.
+      SystemDetector._discover_snap_dirs,method,"(app_name:str) -> list",401-430,false,30,10,Discover snap data dirs for an app.
+      SystemDetector._discover_proc_data_dirs,method,"(pid:int) -> list",438-482,false,45,17,Discover config dirs by examining open file descriptors of a process.
+      SystemDetector._discover_desktop_app_name,method,"(exe_path:str) -> list",484-516,false,33,11,Parse .desktop files to find canonical app name for an executable.
+      SystemDetector.auto_discover_app_data,method,"(applications:list) -> list",518-604,false,87,21,Automatically discover ALL config/data dirs for detected apps.
+      SystemDetector.detect_app_data_dirs,method,"(applications:list) -> list",606-622,false,17,2,Detect config/data directories for running applications.
+      SystemDetector.detect_all,method,() -> SystemSnapshot,624-630,false,7,1,"Detect all services, applications and paths."
+      SystemDetector.detect_services,method,() -> list,632-680,false,49,9,Detect systemd services.
+      SystemDetector.detect_applications,method,() -> list,682-723,false,42,11,Detect running applications/processes.
+      SystemDetector.detect_paths,method,() -> list,725-825,false,101,15,"Detect important paths (projects, configs, data)."
+      SystemDetector._get_dir_size,method,"(path:Path, max_depth:int=2) -> int",827-843,false,17,9,Get approximate directory size in bytes.
+      SystemDetector.detect_docker_containers,method,() -> list,845-862,false,18,5,Detect running Docker containers.
+      SystemDetector.suggest_packages_for_apps,method,"(applications:list) -> dict",887-917,false,31,8,Suggest packages based on detected applications.
+      SystemDetector.suggest_packages_for_services,method,"(services:list) -> dict",919-938,false,20,5,Suggest packages based on detected services.
+      SystemDetector.get_system_info,method,() -> dict,940-951,false,12,1,Get basic system information.
   src/clonebox/exporter.py:
     functions[11]{name,kind,sig,loc,async,lines,cc,does}:
       VMExporter.__init__,method,"(conn_uri:str='qemu:///system') -> None",24-26,false,3,1,creates
@@ -789,68 +889,87 @@ function_details:
       configure_logging,function,"(level:str='INFO', json_output:bool=False, log_file:Optional[Path]=None, console_output:bool=True) -> None",14-88,false,75,4,Configure structured logging for CloneBox.
       get_logger,function,"(name:str='clonebox') -> structlog.stdlib.BoundLogger",91-93,false,3,1,Get a structured logger instance.
       log_operation,function,"(logger:Any, operation:str) -> None",101-125,false,25,2,Context manager for logging operation start/end.
+  src/clonebox/paths.py:
+    functions[11]{name,kind,sig,loc,async,lines,cc,does}:
+      conn_uri,function,"(user_session:bool=True) -> str",21-23,false,3,2,Return the libvirt connection URI for the given session type.
+      user_images_dir,function,() -> Path,28-33,false,6,1,~/.local/share/libvirt/images (user-session VMs).
+      system_images_dir,function,() -> Path,36-38,false,3,1,/var/lib/libvirt/images (system-session VMs).
+      images_dir,function,"(user_session:bool=True) -> Path",41-43,false,3,2,Return the appropriate images root for the given session type.
+      vm_dir,function,"(vm_name:str, user_session:bool=True) -> Path",46-48,false,3,1,"Per-VM directory that holds disk, ssh_key, serial.log, etc."
+      ssh_key_path,function,"(vm_name:str, user_session:bool=True) -> Optional[Path]",53-56,false,4,2,Return the SSH private key path if it exists on disk.
+      ssh_port_file,function,"(vm_name:str, user_session:bool=True) -> Path",59-61,false,3,1,Path to the file that persists the allocated SSH forward port.
+      serial_log_path,function,"(vm_name:str, user_session:bool=True) -> Path",64-66,false,3,1,Path to the QEMU serial log for a VM.
+      fallback_ssh_port,function,"(vm_name:str) -> int",71-73,false,3,1,Deterministic fallback port derived from the VM name (22000–22999).
+      resolve_ssh_port,function,"(vm_name:str, user_session:bool=True) -> int",76-107,false,32,7,Resolve the SSH forward port for *vm_name*.
+      save_ssh_port,function,"(vm_name:str, port:int, user_session:bool=True) -> None",110-122,false,13,3,Persist the SSH forward port for later retrieval.
   src/clonebox/orchestrator.py:
     functions[16]{name,kind,sig,loc,async,lines,cc,does}:
-      load_compose_file,function,"(path:Path) -> Dict[str, Any]",556-568,false,13,3,Load and validate a compose file.
-      Orchestrator.__init__,method,"(config:Dict[str,Any], cloner:Optional[Any]=None, user_session:bool=False, max_workers:int=4) -> None",79-94,false,16,1,creates
-      Orchestrator.from_file,method,"(compose_file:Path, cloner:Optional[Any]=None, user_session:bool=False) -> \"Orchestrator\"",97-111,false,15,2,Create orchestrator from compose file.
-      Orchestrator.cloner,method,() -> Any,114-119,false,6,2,Get or create VM cloner.
-      Orchestrator._create_plan,method,() -> OrchestrationPlan,121-150,false,30,4,Create execution plan from configuration.
-      Orchestrator._topological_sort,method,"(vms:Dict[str,OrchestratedVM]) -> List[List[str]]",152-188,false,37,13,Topological sort with parallel group detection.
-      Orchestrator._get_vms_with_dependencies,method,"(services:List[str]) -> Set[str]",190-206,false,17,4,Get VMs and all their dependencies.
-      Orchestrator._start_vm,method,"(vm_name:str, console:Optional[Any]=None) -> bool",208-270,false,63,10,Start a single VM.
-      Orchestrator._stop_vm,method,"(vm_name:str, force:bool=False, console:Optional[Any]=None) -> bool",272-290,false,19,2,Stop a single VM.
-      Orchestrator._run_health_check,method,"(vm_name:str, timeout:int=60) -> bool",292-356,false,65,19,Run health check for a VM.
-      Orchestrator.up,method,"(services:Optional[List[str]]=None, parallel:bool=True, console:Optional[Any]=None) -> OrchestrationResult",358-439,false,82,17,Start VMs in dependency order.
-      Orchestrator.down,method,"(services:Optional[List[str]]=None, force:bool=False, console:Optional[Any]=None) -> OrchestrationResult",441-491,false,51,9,Stop VMs in reverse dependency order.
-      Orchestrator.restart,method,"(services:Optional[List[str]]=None, console:Optional[Any]=None) -> OrchestrationResult",493-502,false,10,2,Restart VMs (down then up).
-      Orchestrator.status,method,"() -> Dict[str, Dict[str, Any]]",504-526,false,23,4,Get status of all VMs in the orchestration.
-      Orchestrator.logs,method,"(vm_name:str, follow:bool=False, lines:int=100) -> Optional[str]",528-540,false,13,5,Get logs from a VM.
-      Orchestrator.exec,method,"(vm_name:str, command:str, timeout:int=30) -> Optional[str]",542-553,false,12,4,Execute command in a VM.
+      load_compose_file,function,"(path:Path) -> Dict[str, Any]",558-570,false,13,3,Load and validate a compose file.
+      Orchestrator.__init__,method,"(config:Dict[str,Any], cloner:Optional[Any]=None, user_session:bool=False, max_workers:int=4) -> None",81-96,false,16,1,creates
+      Orchestrator.from_file,method,"(compose_file:Path, cloner:Optional[Any]=None, user_session:bool=False) -> \"Orchestrator\"",99-113,false,15,2,Create orchestrator from compose file.
+      Orchestrator.cloner,method,() -> Any,116-121,false,6,2,Get or create VM cloner.
+      Orchestrator._create_plan,method,() -> OrchestrationPlan,123-152,false,30,4,Create execution plan from configuration.
+      Orchestrator._topological_sort,method,"(vms:Dict[str,OrchestratedVM]) -> List[List[str]]",154-190,false,37,13,Topological sort with parallel group detection.
+      Orchestrator._get_vms_with_dependencies,method,"(services:List[str]) -> Set[str]",192-208,false,17,4,Get VMs and all their dependencies.
+      Orchestrator._start_vm,method,"(vm_name:str, console:Optional[Any]=None) -> bool",210-272,false,63,10,Start a single VM.
+      Orchestrator._stop_vm,method,"(vm_name:str, force:bool=False, console:Optional[Any]=None) -> bool",274-292,false,19,2,Stop a single VM.
+      Orchestrator._run_health_check,method,"(vm_name:str, timeout:int=60) -> bool",294-358,false,65,18,Run health check for a VM.
+      Orchestrator.up,method,"(services:Optional[List[str]]=None, parallel:bool=True, console:Optional[Any]=None) -> OrchestrationResult",360-441,false,82,17,Start VMs in dependency order.
+      Orchestrator.down,method,"(services:Optional[List[str]]=None, force:bool=False, console:Optional[Any]=None) -> OrchestrationResult",443-493,false,51,9,Stop VMs in reverse dependency order.
+      Orchestrator.restart,method,"(services:Optional[List[str]]=None, console:Optional[Any]=None) -> OrchestrationResult",495-504,false,10,2,Restart VMs (down then up).
+      Orchestrator.status,method,"() -> Dict[str, Dict[str, Any]]",506-528,false,23,4,Get status of all VMs in the orchestration.
+      Orchestrator.logs,method,"(vm_name:str, follow:bool=False, lines:int=100) -> Optional[str]",530-542,false,13,4,Get logs from a VM.
+      Orchestrator.exec,method,"(vm_name:str, command:str, timeout:int=30) -> Optional[str]",544-555,false,12,3,Execute command in a VM.
   src/clonebox/cloner.py:
-    functions[42]{name,kind,sig,loc,async,lines,cc,does}:
-      SelectiveVMCloner.__init__,method,"(conn_uri:str=None, user_session:bool=False, hypervisor:HypervisorBackend=None, disk_manager:DiskManager=None, network_manager:NetworkManager=None, secrets_manager:SecretsManager=None) -> None",61-102,false,42,9,creates
-      SelectiveVMCloner.create_vm,method,"(config:VMConfig, start:bool=False, replace:bool=False, approved:bool=False, console:Any=None) -> str",104-292,false,189,26,Create a new VM with the given configuration.
-      SelectiveVMCloner.start_vm,method,"(vm_name:str, open_viewer:bool=False, console:Any=None, config:VMConfig=None) -> None",294-394,false,101,21,Start an existing VM.
-      SelectiveVMCloner.stop_vm,method,"(vm_name:str, force:bool=False, console:Any=None) -> None",396-415,false,20,4,Stop a VM.
-      SelectiveVMCloner.restart_vm,method,"(vm_name:str, force:bool=False, open_viewer:bool=False, console:Any=None) -> None",417-422,false,6,1,Restart a VM.
-      SelectiveVMCloner.delete_vm,method,"(vm_name:str, delete_storage:bool=False, approved:bool=False, console:Any=None) -> None",424-468,false,45,10,Delete a VM and its storage.
-      SelectiveVMCloner.SYSTEM_IMAGES_DIR,method,() -> Path,471-473,false,3,1,Get the system images directory.
-      SelectiveVMCloner.USER_IMAGES_DIR,method,() -> Path,476-480,false,5,1,Get the user images directory.
-      SelectiveVMCloner._generate_vm_xml,method,"(config:VMConfig, disk_path:Path, cloud_init_path:Optional[Path]) -> str",482-497,false,16,3,Generate VM XML configuration.
-      SelectiveVMCloner.get_images_dir,method,() -> Path,499-503,false,5,2,Get the appropriate images directory based on session type.
-      SelectiveVMCloner._get_downloads_dir,method,() -> Path,505-507,false,3,1,Get the downloads directory.
-      SelectiveVMCloner.check_prerequisites,method,"(config:Optional[VMConfig]=None) -> dict",509-603,false,95,17,Check system prerequisites for VM creation.
-      SelectiveVMCloner._passt_supported,method,() -> bool,605-607,false,3,1,Check if passt is supported.
-      SelectiveVMCloner._default_network_state,method,() -> str,609-621,false,13,4,Get default network state.
-      SelectiveVMCloner._default_network_active,method,() -> bool,623-625,false,3,1,Check if default network is active.
-      SelectiveVMCloner.resolve_network_mode,method,"(config:VMConfig) -> str",627-642,false,16,5,Resolve network mode for VM.
-      SelectiveVMCloner.list_vms,method,"() -> List[Dict]",644-696,false,53,8,List all VMs.
-      SelectiveVMCloner.close,method,() -> None,698-702,false,5,3,Close the libvirt connection.
-      SelectiveVMCloner._create_vm_disk,method,"(config:VMConfig) -> str",704-791,false,88,12,Create the VM disk image.
-      SelectiveVMCloner._generate_cloud_init,method,"(config:VMConfig) -> str",793-933,false,141,23,Generate cloud-init ISO image.
-      SelectiveVMCloner._setup_vm_networking,method,"(vm, config:VMConfig) -> None",935-951,false,17,2,Setup networking for VM.
-      SelectiveVMCloner._wait_for_ip,method,"(vm, timeout:int=60) -> Optional[str]",953-982,false,30,5,Wait for VM to get an IP address.
-      SelectiveVMCloner._get_vm_ip,method,"(vm) -> Optional[str]",984-1019,false,36,13,Get IP address of VM.
-      SelectiveVMCloner._check_vm_processes,method,"(vm_name:str) -> dict",1021-1207,false,187,33,Check that all required VM processes are running.
-      SelectiveVMCloner._get_saved_ssh_port,method,"(vm_name:str) -> int | None",1209-1237,false,29,6,Get saved SSH port for a VM.
-      SelectiveVMCloner._test_ssh_connectivity,method,"(vm_name:str, timeout:int=120) -> bool",1239-1349,false,111,19,Test SSH connectivity to VM with multiple fallback methods.
-      SelectiveVMCloner._wait_for_cloud_init,method,"(vm_name:str, ssh_port:int, timeout:int=1200, gui_mode:bool=False, config:VMConfig=None) -> bool",1351-1474,false,124,21,"Wait for cloud-init to complete, including GUI installation if enabled."
-      SelectiveVMCloner._verify_gui_ready,method,"(vm_name:str, ssh_port:int, config:VMConfig, timeout:int=300) -> bool",1476-1611,false,136,16,Verify that GUI desktop and applications are fully ready.
-      SelectiveVMCloner._verify_deployment_completion,method,"(vm_name:str, ssh_port:int, config:VMConfig) -> None",1613-1839,false,227,31,Comprehensive verification of all deployed components.
-      SelectiveVMCloner._open_viewer,method,"(vm_name:str) -> None",1841-1871,false,31,5,Open SPICE/VNC viewer for VM.
-      SelectiveVMCloner._get_state_string,method,"(state:int) -> str",1873-1886,false,14,1,Convert libvirt state to string.
-      SelectiveVMCloner._get_default_base_image,method,() -> str,1888-1903,false,16,3,Get default base image path.
-      SelectiveVMCloner._ensure_default_base_image,method,(console=None) -> Path,1905-1928,false,24,3,"Ensure a default base image exists, downloading if necessary."
-      SelectiveVMCloner._create_cloudinit_iso,method,"(vm_dir:Path, config:VMConfig, user_session:bool=False) -> Path",1930-1970,false,41,3,Create cloud-init ISO image for VM.
-      SelectiveVMCloner._get_state_string,method,"(state_code:int) -> str",1972-1984,false,13,1,Convert libvirt state code to string.
-      SelectiveVMCloner._allocate_ssh_port,method,"(vm_name:str) -> int",1986-2046,false,61,7,Allocate a free localhost port for SSH forwarding.
-      SelectiveVMCloner._save_ssh_port,method,"(vm_name:str, port:int) -> None",2048-2088,false,41,7,Save SSH port to file for later retrieval.
-      SelectiveVMCloner._save_ssh_key,method,"(vm_name:str, key_pair:SSHKeyPair) -> None",2090-2125,false,36,6,Save SSH key pair to VM directory for later use.
-      SelectiveVMCloner._copy_host_ssh_key_to_vm,method,"(vm_name:str) -> None",2127-2168,false,42,8,Copy host SSH private key to VM directory for convenience.
-      SelectiveVMCloner._setup_ssh_port_forward,method,"(vm_name:str, host_port:int, guest_port:int=22) -> None",2170-2280,false,111,14,Setup SSH port forwarding using socat with nsenter for passt network namespace.
-      SelectiveVMCloner._start_socat_direct,method,"(host_port:int, guest_port:int) -> None",2282-2345,false,64,11,Start socat directly (for slirp mode where VM IP is reachable from host).
-      SelectiveVMCloner.__del__,method,() -> None,2347-2354,false,8,4,Cleanup libvirt connection.
+    functions[48]{name,kind,sig,loc,async,lines,cc,does}:
+      SelectiveVMCloner.__init__,method,"(conn_uri:str=None, user_session:bool=False, hypervisor:HypervisorBackend=None, disk_manager:DiskManager=None, network_manager:NetworkManager=None, secrets_manager:SecretsManager=None) -> None",66-107,false,42,9,creates
+      SelectiveVMCloner.create_vm,method,"(config:VMConfig, start:bool=False, replace:bool=False, approved:bool=False, console:Any=None) -> str",109-362,false,254,36,Create a new VM with the given configuration.
+      SelectiveVMCloner._copy_paths_to_vm_via_ssh,method,"(copy_paths:Dict[str,str], ssh_port:int, ssh_key:Optional[Path], vm_username:str='ubuntu', skip_cache:bool=True) -> bool",364-511,false,148,31,Copy host paths into the VM via SSH (no mounts).
+      SelectiveVMCloner._ssh_exec,method,"(ssh_port:int, ssh_key:Optional[Path], vm_username:str, command:str, timeout:int=20) -> Optional[str]",513-517,false,5,1,ssh exec
+      SelectiveVMCloner._verify_copied_paths_in_vm,method,"(copy_paths:Dict[str,str], ssh_port:int, ssh_key:Optional[Path], vm_username:str, skip_cache:bool=True) -> bool",519-613,false,95,23,validates copied paths in vm
+      SelectiveVMCloner._ensure_browsers_installed_in_vm,method,"(browsers:List[str], ssh_port:int, ssh_key:Optional[Path], vm_username:str) -> None",615-733,false,119,22,ensure browsers installed in vm
+      SelectiveVMCloner._verify_browser_profiles_in_vm,method,"(browsers:List[str], ssh_port:int, ssh_key:Optional[Path], vm_username:str) -> bool",735-796,false,62,8,validates browser profiles in vm
+      SelectiveVMCloner._smoke_test_browsers_in_vm,method,"(browsers:List[str], ssh_port:int, ssh_key:Optional[Path], vm_username:str, try_gui_launch:bool=False) -> None",798-904,false,107,14,smoke test browsers in vm
+      SelectiveVMCloner.start_vm,method,"(vm_name:str, open_viewer:bool=False, console:Any=None, config:VMConfig=None) -> None",906-1095,false,190,40,Start an existing VM.
+      SelectiveVMCloner.stop_vm,method,"(vm_name:str, force:bool=False, console:Any=None) -> None",1097-1116,false,20,4,Stop a VM.
+      SelectiveVMCloner.restart_vm,method,"(vm_name:str, force:bool=False, open_viewer:bool=False, console:Any=None) -> None",1118-1123,false,6,1,Restart a VM.
+      SelectiveVMCloner.delete_vm,method,"(vm_name:str, delete_storage:bool=False, approved:bool=False, console:Any=None) -> None",1125-1169,false,45,10,Delete a VM and its storage.
+      SelectiveVMCloner.SYSTEM_IMAGES_DIR,method,() -> Path,1172-1174,false,3,1,Get the system images directory.
+      SelectiveVMCloner.USER_IMAGES_DIR,method,() -> Path,1177-1179,false,3,1,Get the user images directory.
+      SelectiveVMCloner._generate_vm_xml,method,"(config:VMConfig, disk_path:Path, cloud_init_path:Optional[Path]) -> str",1181-1196,false,16,3,Generate VM XML configuration.
+      SelectiveVMCloner.get_images_dir,method,() -> Path,1198-1202,false,5,2,Get the appropriate images directory based on session type.
+      SelectiveVMCloner._get_downloads_dir,method,() -> Path,1204-1206,false,3,1,Get the downloads directory.
+      SelectiveVMCloner.check_prerequisites,method,"(config:Optional[VMConfig]=None) -> dict",1208-1302,false,95,17,Check system prerequisites for VM creation.
+      SelectiveVMCloner._passt_supported,method,() -> bool,1304-1306,false,3,1,Check if passt is supported.
+      SelectiveVMCloner._default_network_state,method,() -> str,1308-1320,false,13,4,Get default network state.
+      SelectiveVMCloner._default_network_active,method,() -> bool,1322-1324,false,3,1,Check if default network is active.
+      SelectiveVMCloner.resolve_network_mode,method,"(config:VMConfig) -> str",1326-1341,false,16,5,Resolve network mode for VM.
+      SelectiveVMCloner.list_vms,method,"() -> List[Dict]",1343-1395,false,53,8,List all VMs.
+      SelectiveVMCloner.close,method,() -> None,1397-1401,false,5,3,Close the libvirt connection.
+      SelectiveVMCloner._create_vm_disk,method,"(config:VMConfig) -> str",1403-1490,false,88,11,Create the VM disk image.
+      SelectiveVMCloner._generate_cloud_init,method,"(config:VMConfig) -> str",1492-1632,false,141,22,Generate cloud-init ISO image.
+      SelectiveVMCloner._setup_vm_networking,method,"(vm, config:VMConfig) -> None",1634-1650,false,17,2,Setup networking for VM.
+      SelectiveVMCloner._wait_for_ip,method,"(vm, timeout:int=60) -> Optional[str]",1652-1681,false,30,5,Wait for VM to get an IP address.
+      SelectiveVMCloner._get_vm_ip,method,"(vm) -> Optional[str]",1683-1718,false,36,13,Get IP address of VM.
+      SelectiveVMCloner._check_vm_processes,method,"(vm_name:str, config:Optional[VMConfig]=None) -> dict",1720-1901,false,182,32,Check that all required VM processes are running.
+      SelectiveVMCloner._get_saved_ssh_port,method,"(vm_name:str) -> Optional[int]",1903-1915,false,13,3,Get saved SSH port for a VM.
+      SelectiveVMCloner._test_ssh_connectivity,method,"(vm_name:str, timeout:int=120) -> bool",1917-2016,false,100,19,Test SSH connectivity to VM with multiple fallback methods.
+      SelectiveVMCloner._wait_for_cloud_init,method,"(vm_name:str, ssh_port:int, timeout:int=1200, gui_mode:bool=False, config:VMConfig=None) -> bool",2018-2122,false,105,21,"Wait for cloud-init to complete, including GUI installation if enabled."
+      SelectiveVMCloner._verify_gui_ready,method,"(vm_name:str, ssh_port:int, config:VMConfig, timeout:int=300) -> bool",2124-2237,false,114,16,Verify that GUI desktop and applications are fully ready.
+      SelectiveVMCloner._verify_deployment_completion,method,"(vm_name:str, ssh_port:int, config:VMConfig) -> None",2239-2408,false,170,31,Comprehensive verification of all deployed components.
+      SelectiveVMCloner._open_viewer,method,"(vm_name:str) -> None",2410-2440,false,31,5,Open SPICE/VNC viewer for VM.
+      SelectiveVMCloner._get_state_string,method,"(state:int) -> str",2442-2455,false,14,1,Convert libvirt state to string.
+      SelectiveVMCloner._get_default_base_image,method,() -> str,2457-2472,false,16,3,Get default base image path.
+      SelectiveVMCloner._ensure_default_base_image,method,(console=None) -> Path,2474-2497,false,24,3,"Ensure a default base image exists, downloading if necessary."
+      SelectiveVMCloner._create_cloudinit_iso,method,"(vm_dir:Path, config:VMConfig, user_session:bool=False) -> Path",2499-2539,false,41,3,Create cloud-init ISO image for VM.
+      SelectiveVMCloner._get_state_string,method,"(state_code:int) -> str",2541-2553,false,13,1,Convert libvirt state code to string.
+      SelectiveVMCloner._allocate_ssh_port,method,"(vm_name:str) -> int",2555-2615,false,61,7,Allocate a free localhost port for SSH forwarding.
+      SelectiveVMCloner._save_ssh_port,method,"(vm_name:str, port:int) -> None",2617-2619,false,3,1,Save SSH port to file for later retrieval.
+      SelectiveVMCloner._save_ssh_key,method,"(vm_name:str, key_pair:SSHKeyPair) -> None",2621-2656,false,36,6,Save SSH key pair to VM directory for later use.
+      SelectiveVMCloner._copy_host_ssh_key_to_vm,method,"(vm_name:str) -> None",2658-2699,false,42,8,Copy host SSH private key to VM directory for convenience.
+      SelectiveVMCloner._setup_ssh_port_forward,method,"(vm_name:str, host_port:int, guest_port:int=22) -> None",2701-2811,false,111,14,Setup SSH port forwarding using socat with nsenter for passt network namespace.
+      SelectiveVMCloner._start_socat_direct,method,"(host_port:int, guest_port:int) -> None",2813-2876,false,64,11,Start socat directly (for slirp mode where VM IP is reachable from host).
+      SelectiveVMCloner.__del__,method,() -> None,2878-2885,false,8,4,Cleanup libvirt connection.
   src/clonebox/rollback.py:
     functions[9]{name,kind,sig,loc,async,lines,cc,does}:
       vm_creation_transaction,function,"(cloner:Any, config:Any, console:Optional[Any]=None) -> None",147-172,false,26,3,Context manager for VM creation with automatic rollback.
@@ -890,20 +1009,43 @@ function_details:
       ContainerConfig.ports_must_be_valid,method,"(v:List[str]) -> List[str]",226-237,false,12,8,ports must be valid
       ContainerConfig.mounts,method,"() -> Dict[str, str]",240-245,false,6,1,mounts
       ContainerConfig.to_docker_run_cmd,method,"() -> List[str]",247-260,false,14,4,converts docker run cmd
+  src/clonebox/post_install_repair.py:
+    functions[24]{name,kind,sig,loc,async,lines,cc,does}:
+      _repair_snap_dir_ownership,function,"(ctx:_RepairCtx) -> List[RepairResult]",112-148,false,37,9,"BUG: sudo mkdir -p creates /home/<user>/snap/<app> owned by root."
+      _repair_copied_data_ownership,function,"(ctx:_RepairCtx, copy_paths:Dict[str,str]) -> List[RepairResult]",151-208,false,58,16,"BUG: tar extract via sudo leaves copied dirs owned by root."
+      _repair_app_lock_files,function,"(ctx:_RepairCtx) -> List[RepairResult]",211-269,false,59,12,"BUG: Lock/socket files copied from running apps on host prevent VM app launch."
+      _repair_crash_reports,function,"(ctx:_RepairCtx) -> List[RepairResult]",272-317,false,46,7,"BUG: Stale crash dumps copied from host confuse apps on first launch."
+      _repair_snap_interfaces,function,"(ctx:_RepairCtx, snap_packages:Optional[List[str]]=None) -> List[RepairResult]",320-392,false,73,24,"BUG: Snap app interfaces may not be auto-connected after install."
+      _repair_xdg_runtime_dir,function,"(ctx:_RepairCtx) -> List[RepairResult]",395-422,false,28,5,"BUG: /run/user/<uid> may not exist if user hasn't logged in via GDM yet."
+      _repair_fontconfig_cache,function,"(ctx:_RepairCtx) -> List[RepairResult]",425-452,false,28,3,"BUG: Missing font cache after fresh install causes slow first browser launch."
+      _repair_machine_id,function,"(ctx:_RepairCtx) -> List[RepairResult]",455-486,false,32,8,"BUG: Cloned VMs may have the same /etc/machine-id as the base image,"
+      _repair_dbus_session,function,"(ctx:_RepairCtx) -> List[RepairResult]",489-515,false,27,3,"BUG: Snap browsers need a running dbus session."
+      _repair_home_dir_permissions,function,"(ctx:_RepairCtx) -> List[RepairResult]",518-556,false,39,10,"BUG: /home/<user> or subdirs may be owned by root after copy operations."
+      _repair_gdm_running,function,"(ctx:_RepairCtx, gui_mode:bool) -> List[RepairResult]",559-583,false,25,6,"BUG: GDM may not start after cloud-init desktop install until reboot."
+      _repair_dns_resolution,function,"(ctx:_RepairCtx) -> List[RepairResult]",586-607,false,22,4,"BUG: DNS may not work right after boot (systemd-resolved not ready)."
+      _repair_apt_lock,function,"(ctx:_RepairCtx) -> List[RepairResult]",610-633,false,24,8,"BUG: dpkg/apt may still hold locks after cloud-init finishes."
+      _repair_firefox_profiles_ini,function,"(ctx:_RepairCtx) -> List[RepairResult]",636-687,false,52,10,"BUG: Firefox profiles.ini may reference wrong absolute paths after copy"
+      _repair_ide_config_paths,function,"(ctx:_RepairCtx, host_username:Optional[str]=None) -> List[RepairResult]",690-734,false,45,8,"BUG: Electron IDE settings.json / state files may contain absolute paths"
+      _verify_ide_launch,function,"(ctx:_RepairCtx) -> List[RepairResult]",737-766,false,30,6,"VERIFY: Check if IDE executables exist and can show version info."
+      _verify_headless_browsers,function,"(ctx:_RepairCtx, browsers:List[str]) -> List[RepairResult]",769-817,false,49,7,"VERIFY: Run headless smoke test for each browser after all repairs."
+      run_post_install_repairs,function,"(ssh_port:int, ssh_key:Optional[Path], vm_username:str='ubuntu', browsers:Optional[List[str]]=None, gui_mode:bool=False, copy_paths:Optional[Dict[str,str]]=None, snap_packages:Optional[List[str]]=None, host_username:Optional[str]=None) -> RepairReport",824-891,false,68,3,Run all post-install diagnostics and auto-repairs.
+      RepairReport.detected_count,method,() -> int,48-49,false,2,3,detected count
+      RepairReport.repaired_count,method,() -> int,52-53,false,2,3,repaired count
+      RepairReport.failed_count,method,() -> int,56-57,false,2,4,failed count
+      RepairReport.log_summary,method,() -> None,59-77,false,19,7,logs summary
+      _RepairCtx.__init__,method,"(ssh_port:int, ssh_key:Optional[Path], vm_username:str='ubuntu', timeout:int=30) -> None",85-95,false,11,1,creates
+      _RepairCtx.run,method,"(cmd:str, timeout:int=None) -> Optional[str]",97-104,false,8,2,starts
+  src/clonebox/ssh.py:
+    functions[4]{name,kind,sig,loc,async,lines,cc,does}:
+      build_ssh_command,function,"(port:int, key:Optional[Path]=None, username:str='ubuntu', host:str='127.0.0.1', connect_timeout:int=10, log_level:Optional[str]=None, extra_opts:Optional[List[str]]=None) -> List[str]",31-56,false,26,4,Build a reusable SSH base command list.
+      ssh_exec,function,"(port:int, key:Optional[Path], command:str, username:str='ubuntu', host:str='127.0.0.1', timeout:int=20, connect_timeout:int=10) -> Optional[str]",61-96,false,36,6,Execute *command* on *host* via SSH and return stripped stdout.
+      ssh_run,function,"(port:int, key:Optional[Path], command:str, username:str='ubuntu', host:str='127.0.0.1', timeout:int=20, connect_timeout:int=10) -> subprocess.CompletedProcess",99-114,false,16,1,"Like :func:`ssh_exec` but returns the full ``CompletedProcess``."
+      vm_ssh_exec,function,"(vm_name:str, command:str, username:str='ubuntu', user_session:bool=True, timeout:int=20) -> Optional[str]",119-130,false,12,1,"Resolve SSH port & key for *vm_name* automatically, then execute."
   src/clonebox/profiles.py:
     functions[3]{name,kind,sig,loc,async,lines,cc,does}:
       load_profile,function,"(profile_name:str, search_paths:list[Path]) -> Optional[Dict[str, Any]]",8-29,false,22,6,"Load profile YAML from ~/.clonebox.d/, .clonebox.d/, templates/profiles/"
       _deep_merge,function,"(base:Dict[str,Any], override:Dict[str,Any]) -> Dict[str, Any]",32-39,false,8,5,deep merge
       merge_with_profile,function,"(base_config:Dict[str,Any], profile_name:Optional[str]=None) -> Dict[str, Any]",42-62,false,21,7,Merge profile OVER base config (profile wins).
-  src/clonebox/cloner_utils.py:
-    functions[7]{name,kind,sig,loc,async,lines,cc,does}:
-      log,function,(msg) -> None,13-17,false,5,1,Log a message with timestamp.
-      get_running_processes,function,() -> None,20-26,false,7,2,Get list of running processes.
-      is_app_running,function,"(app_name, ps_output) -> None",29-41,false,13,3,Check if an application is running.
-      restart_app,function,(app_name) -> None,44-55,false,12,2,Restart an application service.
-      check_mounts,function,() -> None,58-72,false,15,6,Check and mount filesystems if needed.
-      write_status,function,(status) -> None,75-81,false,7,2,Write status to file.
-      main,function,() -> None,84-108,false,25,5,Main monitor service function.
   src/clonebox/audit.py:
     functions[22]{name,kind,sig,loc,async,lines,cc,does}:
       get_audit_logger,function,() -> AuditLogger,425-430,false,6,2,Get the global audit logger.
@@ -961,16 +1103,16 @@ function_details:
       SSHKeyPair.save,method,"(private_key_path:Path) -> None",337-341,false,5,1,Save key pair to files.
   src/clonebox/vm_xml.py:
     functions[10]{name,kind,sig,loc,async,lines,cc,does}:
-      generate_vm_xml,function,"(config:VMConfig, vm_uuid:str, disk_path:str, cdrom_path:Optional[str]=None, user_session:bool=False, ssh_port:int=None) -> str",13-169,false,157,14,Generate libvirt XML configuration for VM.
-      _add_network_interface,function,"(devices:Any, config:VMConfig, user_session:bool, ssh_port:int=None) -> None",172-200,false,29,5,Add network interface configuration.
-      _add_qemu_port_forward,function,"(interface:Any, host_port:int, guest_port:int) -> None",203-215,false,13,1,Add port forwarding configuration for qemu user networking interface.
-      _add_graphics,function,"(devices:Any, config:VMConfig) -> None",218-232,false,15,1,Add graphics configuration.
-      _add_sound_device,function,"(devices:Any) -> None",235-243,false,9,1,Add sound device configuration.
-      _add_resource_limits,function,"(domain:Any, config:VMConfig) -> None",246-280,false,35,14,Add resource limits (cgroups).
-      _generate_mac_address,function,() -> str,283-287,false,5,2,Generate a random MAC address for VM.
-      generate_network_xml,function,"(network_name:str, bridge_name:str='virbr0', dhcp:bool=True) -> str",290-302,false,13,2,Generate network XML for libvirt.
-      generate_pool_xml,function,"(pool_name:str, pool_path:str, pool_type:str='dir') -> str",305-321,false,17,2,Generate storage pool XML for libvirt.
-      generate_volume_xml,function,"(volume_name:str, capacity_gb:int, format_type:str='qcow2') -> str",324-340,false,17,1,Generate storage volume XML for libvirt.
+      generate_vm_xml,function,"(config:VMConfig, vm_uuid:str, disk_path:str, cdrom_path:Optional[str]=None, user_session:bool=False, ssh_port:int=None) -> str",14-170,false,157,14,Generate libvirt XML configuration for VM.
+      _add_network_interface,function,"(devices:Any, config:VMConfig, user_session:bool, ssh_port:int=None) -> None",173-201,false,29,5,Add network interface configuration.
+      _add_qemu_port_forward,function,"(interface:Any, host_port:int, guest_port:int) -> None",204-216,false,13,1,Add port forwarding configuration for qemu user networking interface.
+      _add_graphics,function,"(devices:Any, config:VMConfig) -> None",219-233,false,15,1,Add graphics configuration.
+      _add_sound_device,function,"(devices:Any) -> None",236-244,false,9,1,Add sound device configuration.
+      _add_resource_limits,function,"(domain:Any, config:VMConfig) -> None",247-281,false,35,14,Add resource limits (cgroups).
+      _generate_mac_address,function,() -> str,284-288,false,5,2,Generate a random MAC address for VM.
+      generate_network_xml,function,"(network_name:str, bridge_name:str='virbr0', dhcp:bool=True) -> str",291-303,false,13,2,Generate network XML for libvirt.
+      generate_pool_xml,function,"(pool_name:str, pool_path:str, pool_type:str='dir') -> str",306-322,false,17,2,Generate storage pool XML for libvirt.
+      generate_volume_xml,function,"(volume_name:str, capacity_gb:int, format_type:str='qcow2') -> str",325-341,false,17,1,Generate storage volume XML for libvirt.
   src/clonebox/backends/subprocess_runner.py:
     functions[2]{name,kind,sig,loc,async,lines,cc,does}:
       SubprocessRunner.run,method,"(command:List[str], capture_output:bool=True, timeout:Optional[int]=None, check:bool=True, cwd:Optional[Path]=None, env:Optional[Dict[str,str]]=None) -> ProcessResult",13-36,false,24,2,Run a command.
@@ -1042,18 +1184,19 @@ function_details:
     functions[1]{name,kind,sig,loc,async,lines,cc,does}:
       interactive_ssh_menu,function,() -> None,14-102,false,89,15,SSH key management menu.
   src/clonebox/cli/vm_commands.py:
-    functions[11]{name,kind,sig,loc,async,lines,cc,does}:
-      cmd_init,function,(args) -> None,23-68,false,46,10,Initialize a new CloneBox configuration.
-      cmd_create,function,(args) -> None,71-93,false,23,2,Create VM from JSON config.
-      cmd_start,function,(args) -> None,96-162,false,67,15,Start a VM or create from .clonebox.yaml.
-      cmd_open,function,(args) -> None,165-223,false,59,14,Open VM viewer window.
-      cmd_stop,function,(args) -> None,226-241,false,16,3,Stop a VM.
-      cmd_restart,function,(args) -> None,244-259,false,16,3,Restart a VM (stop and start).
-      cmd_delete,function,(args) -> None,262-283,false,22,5,Delete a VM.
-      cmd_list,function,(args) -> None,286-338,false,53,9,List VMs from both user and system sessions.
-      cmd_detect,function,(args) -> None,341-421,false,81,11,Detect and show system state.
-      format_detection_output,function,"(output, sys_info) -> None",424-518,false,95,15,Format detection output for console display.
-      cmd_set_password,function,(args) -> None,521-548,false,28,6,Set password for a VM.
+    functions[12]{name,kind,sig,loc,async,lines,cc,does}:
+      cmd_init,function,(args) -> None,24-69,false,46,10,Initialize a new CloneBox configuration.
+      cmd_create,function,(args) -> None,72-94,false,23,2,Create VM from JSON config.
+      cmd_start,function,(args) -> None,97-163,false,67,15,Start a VM or create from .clonebox.yaml.
+      cmd_sync_data,function,(args) -> None,166-248,false,83,24,Sync app data paths (copy_paths/app_data_paths) from host into an existing VM (n...
+      cmd_open,function,(args) -> None,251-309,false,59,13,Open VM viewer window.
+      cmd_stop,function,(args) -> None,312-387,false,76,20,Stop a VM.
+      cmd_restart,function,(args) -> None,390-465,false,76,20,Restart a VM (stop and start).
+      cmd_delete,function,(args) -> None,468-505,false,38,11,Delete a VM.
+      cmd_list,function,(args) -> None,508-560,false,53,9,List VMs from both user and system sessions.
+      cmd_detect,function,(args) -> None,563-643,false,81,11,Detect and show system state.
+      format_detection_output,function,"(output, sys_info) -> None",646-740,false,95,15,Format detection output for console display.
+      cmd_set_password,function,(args) -> None,743-786,false,44,12,Set password for a VM.
   src/clonebox/cli/remote_commands.py:
     functions[8]{name,kind,sig,loc,async,lines,cc,does}:
       cmd_remote_list,function,(args) -> None,14-53,false,40,6,List VMs on remote host.
@@ -1081,10 +1224,10 @@ function_details:
       cmd_compose_restart,function,(args) -> None,287-315,false,29,7,Restart services in a compose file.
   src/clonebox/cli/snapshot_commands.py:
     functions[4]{name,kind,sig,loc,async,lines,cc,does}:
-      cmd_snapshot_create,function,(args) -> None,13-39,false,27,5,Create a VM snapshot.
-      cmd_snapshot_list,function,(args) -> None,42-81,false,40,6,List VM snapshots.
-      cmd_snapshot_restore,function,(args) -> None,84-97,false,14,1,Restore a VM snapshot.
-      cmd_snapshot_delete,function,(args) -> None,100-113,false,14,1,Delete a VM snapshot.
+      cmd_snapshot_create,function,(args) -> None,13-32,false,20,3,Create a VM snapshot.
+      cmd_snapshot_list,function,(args) -> None,35-67,false,33,4,List VM snapshots.
+      cmd_snapshot_restore,function,(args) -> None,70-83,false,14,1,Restore a VM snapshot.
+      cmd_snapshot_delete,function,(args) -> None,86-99,false,14,1,Delete a VM snapshot.
   src/clonebox/cli/interactive_vm.py:
     functions[3]{name,kind,sig,loc,async,lines,cc,does}:
       interactive_create_vm,function,() -> None,17-191,false,175,21,Interactive VM creation.
@@ -1092,7 +1235,7 @@ function_details:
       interactive_list_vms,function,() -> None,238-273,false,36,5,List VMs interactively.
   src/clonebox/cli/parsers.py:
     functions[1]{name,kind,sig,loc,async,lines,cc,does}:
-      main,function,() -> None,28-856,false,829,4,Main entry point.
+      main,function,() -> None,28-920,false,893,4,Main entry point.
   src/clonebox/cli/interactive.py:
     functions[2]{name,kind,sig,loc,async,lines,cc,does}:
       interactive_mode,function,() -> None,26-57,false,32,3,Run interactive mode.
@@ -1107,59 +1250,60 @@ function_details:
     functions[1]{name,kind,sig,loc,async,lines,cc,does}:
       interactive_compose_menu,function,() -> None,15-123,false,109,13,Compose menu for multi-VM management.
   src/clonebox/cli/misc_commands.py:
-    functions[16]{name,kind,sig,loc,async,lines,cc,does}:
-      cmd_clone,function,(args) -> None,19-109,false,91,11,Clone current environment to VM.
-      cmd_detect,function,(args) -> None,112-165,false,54,13,Detect system configuration.
-      format_detection_output,function,"(sys_info, console) -> None",168-247,false,80,23,Format system detection output for display.
-      build_config_from_detection,function,"(sys_info:Dict, choices:List[str], path:Path) -> Dict",250-329,false,80,19,Build CloneBox configuration from detection results.
-      cmd_test,function,(args) -> None,332-406,false,75,11,Run CloneBox self-test.
-      cmd_dashboard,function,(args) -> None,409-421,false,13,2,Launch CloneBox dashboard.
-      cmd_status,function,(args) -> None,424-473,false,50,5,Show CloneBox system status.
-      cmd_set_password,function,(args) -> None,476-511,false,36,6,Set VM password.
-      generate_password,function,(length=12) -> None,514-517,false,4,2,Generate a random password.
-      _resolve_vm_name_and_config_file,function,"(name:Optional[str]) -> Tuple[str, Optional[Path]]",520-542,false,23,5,Resolve VM name and find its config file.
-      run_vm_diagnostics,function,"(vm_name:str, conn_uri:str, config_file:Optional[Path]=None, verbose:bool=False, json_output:bool=False) -> None",545-684,false,140,21,Run comprehensive VM diagnostics.
-      cmd_diagnose,function,(args) -> None,687-705,false,19,3,Run detailed VM diagnostics (standalone).
-      cmd_status,function,(args) -> None,708-744,false,37,3,Check VM installation status and health from workstation.
-      cmd_watch,function,(args) -> None,747-790,false,44,12,Watch VM status in real-time.
-      cmd_logs,function,(args) -> None,793-829,false,37,8,Show VM logs (serial log or console output).
-      cmd_repair,function,(args) -> None,832-936,false,105,15,Attempt to repair common VM issues.
+    functions[15]{name,kind,sig,loc,async,lines,cc,does}:
+      cmd_clone,function,(args) -> None,21-111,false,91,11,Clone current environment to VM.
+      cmd_detect,function,(args) -> None,114-167,false,54,13,Detect system configuration.
+      format_detection_output,function,"(sys_info, console) -> None",170-249,false,80,23,Format system detection output for display.
+      build_config_from_detection,function,"(sys_info:Dict, choices:List[str], path:Path) -> Dict",252-331,false,80,19,Build CloneBox configuration from detection results.
+      cmd_test,function,(args) -> None,334-408,false,75,11,Run CloneBox self-test.
+      cmd_dashboard,function,(args) -> None,411-423,false,13,2,Launch CloneBox dashboard.
+      cmd_status,function,(args) -> None,426-475,false,50,5,Show CloneBox system status.
+      cmd_set_password,function,(args) -> None,478-506,false,29,4,Set VM password.
+      generate_password,function,(length=12) -> None,509-512,false,4,2,Generate a random password.
+      run_vm_diagnostics,function,"(vm_name:str, conn_uri:str, config_file:Optional[Path]=None, verbose:bool=False, json_output:bool=False) -> None",515-654,false,140,21,Run comprehensive VM diagnostics.
+      cmd_diagnose,function,(args) -> None,657-675,false,19,2,Run detailed VM diagnostics (standalone).
+      cmd_status,function,(args) -> None,678-714,false,37,2,Check VM installation status and health from workstation.
+      cmd_watch,function,(args) -> None,717-760,false,44,11,Watch VM status in real-time.
+      cmd_logs,function,(args) -> None,763-798,false,36,7,Show VM logs (serial log or console output).
+      cmd_repair,function,(args) -> None,801-893,false,93,15,Attempt to repair common VM issues.
   src/clonebox/cli/import_export_commands.py:
     functions[8]{name,kind,sig,loc,async,lines,cc,does}:
-      cmd_export,function,(args) -> None,17-53,false,37,6,Export VM configuration and data.
-      cmd_import,function,(args) -> None,56-75,false,20,2,Import VM from exported archive.
-      cmd_export_encrypted,function,(args) -> None,78-119,false,42,7,Export VM with encryption.
-      cmd_import_encrypted,function,(args) -> None,122-154,false,33,4,Import VM from encrypted archive.
-      cmd_export_remote,function,(args) -> None,157-197,false,41,5,Export VM to remote host.
-      cmd_import_remote,function,(args) -> None,200-230,false,31,2,Import VM from remote host.
-      cmd_sync_key,function,(args) -> None,233-277,false,45,8,Sync SSH keys with VM.
-      cmd_keygen,function,(args) -> None,280-302,false,23,5,Generate SSH key pair for VM authentication.
+      cmd_export,function,(args) -> None,17-46,false,30,4,Export VM configuration and data.
+      cmd_import,function,(args) -> None,49-68,false,20,2,Import VM from exported archive.
+      cmd_export_encrypted,function,(args) -> None,71-106,false,36,5,Export VM with encryption.
+      cmd_import_encrypted,function,(args) -> None,109-141,false,33,4,Import VM from encrypted archive.
+      cmd_export_remote,function,(args) -> None,144-179,false,36,3,Export VM to remote host.
+      cmd_import_remote,function,(args) -> None,182-212,false,31,2,Import VM from remote host.
+      cmd_sync_key,function,(args) -> None,215-255,false,41,5,Sync SSH keys with VM.
+      cmd_keygen,function,(args) -> None,258-280,false,23,5,Generate SSH key pair for VM authentication.
   src/clonebox/cli/utils.py:
-    functions[16]{name,kind,sig,loc,async,lines,cc,does}:
+    functions[17]{name,kind,sig,loc,async,lines,cc,does}:
       print_banner,function,() -> None,45-59,false,15,1,Print the CloneBox banner.
-      _resolve_vm_name_and_config_file,function,"(name:Optional[str]) -> Tuple[str, Optional[Path]]",62-80,false,19,9,resolve vm name and config file
-      _qga_ping,function,"(vm_name:str, conn_uri:str) -> bool",83-96,false,14,2,Check if QEMU Guest Agent is responding.
-      _qga_exec,function,"(vm_name:str, conn_uri:str, command:str, timeout:int=10) -> Optional[str]",99-150,false,52,7,Execute command in VM via QEMU Guest Agent.
-      load_env_file,function,"(env_path:Path) -> dict",153-162,false,10,6,Load environment variables from .env file.
-      expand_env_vars,function,"(value, env_vars:dict) -> None",165-176,false,12,6,Expand environment variables in a value.
-      _find_unexpanded_env_placeholders,function,(value) -> set,179-186,false,8,4,Find environment variable placeholders that weren't expanded.
-      deduplicate_list,function,"(items:list, key=None) -> list",189-204,false,16,4,"Deduplicate a list, optionally by a key."
-      generate_clonebox_yaml,function,"(snapshot, detector, deduplicate:bool=True, target_path:str=None, vm_name:str=None, network_mode:str='auto', base_image:Optional[str]=None, disk_size_gb:Optional[int]=None) -> str",207-429,false,223,50,Generate YAML config from system snapshot.
-      load_env_file,function,"(env_path:Path) -> dict",432-447,false,16,6,Load environment variables from .env file.
-      expand_env_vars,function,"(value, env_vars:dict) -> None",450-463,false,14,6,"Expand environment variables in string values like ${VAR_NAME}."
-      _find_unexpanded_env_placeholders,function,(value) -> set,466-479,false,14,6,retrieves unexpanded env placeholders
-      load_clonebox_config,function,"(path:Path) -> dict",482-509,false,28,4,Load and validate CloneBox configuration.
-      _exec_in_vm_qga,function,"(vm_name:str, conn_uri:str, command:str) -> Optional[str]",512-519,false,8,3,Execute command in VM via QEMU Guest Agent with retry logic.
-      monitor_cloud_init_status,function,"(vm_name:str, user_session:bool=False, timeout:int=1800) -> None",522-551,false,30,6,Monitor cloud-init status in the VM.
-      create_vm_from_config,function,"(config, start=False, user_session=False, replace=False, approved=False) -> None",554-590,false,37,3,Create VM from configuration dictionary.
+      resolve_vm_name,function,"(name:Optional[str]) -> Optional[str]",62-74,false,13,4,Resolve VM name from args or .clonebox.yaml in cwd.
+      _resolve_vm_name_and_config_file,function,"(name:Optional[str]) -> Tuple[str, Optional[Path]]",77-95,false,19,9,resolve vm name and config file
+      _qga_ping,function,"(vm_name:str, conn_uri:str) -> bool",98-111,false,14,2,Check if QEMU Guest Agent is responding.
+      _qga_exec,function,"(vm_name:str, conn_uri:str, command:str, timeout:int=10) -> Optional[str]",114-165,false,52,7,Execute command in VM via QEMU Guest Agent.
+      load_env_file,function,"(env_path:Path) -> dict",168-177,false,10,6,Load environment variables from .env file.
+      expand_env_vars,function,"(value, env_vars:dict) -> None",180-191,false,12,6,Expand environment variables in a value.
+      _find_unexpanded_env_placeholders,function,(value) -> set,194-201,false,8,4,Find environment variable placeholders that weren't expanded.
+      deduplicate_list,function,"(items:list, key=None) -> list",204-219,false,16,4,"Deduplicate a list, optionally by a key."
+      generate_clonebox_yaml,function,"(snapshot, detector, deduplicate:bool=True, target_path:str=None, vm_name:str=None, network_mode:str='auto', base_image:Optional[str]=None, disk_size_gb:Optional[int]=None) -> str",222-438,false,217,47,Generate YAML config from system snapshot.
+      load_env_file,function,"(env_path:Path) -> dict",441-456,false,16,6,Load environment variables from .env file.
+      expand_env_vars,function,"(value, env_vars:dict) -> None",459-472,false,14,6,"Expand environment variables in string values like ${VAR_NAME}."
+      _find_unexpanded_env_placeholders,function,(value) -> set,475-488,false,14,6,retrieves unexpanded env placeholders
+      load_clonebox_config,function,"(path:Path) -> dict",491-518,false,28,4,Load and validate CloneBox configuration.
+      _exec_in_vm_qga,function,"(vm_name:str, conn_uri:str, command:str) -> Optional[str]",521-528,false,8,3,Execute command in VM via QEMU Guest Agent with retry logic.
+      monitor_cloud_init_status,function,"(vm_name:str, user_session:bool=False, timeout:int=1800) -> None",531-561,false,31,5,Monitor cloud-init status in the VM.
+      create_vm_from_config,function,"(config, start=False, user_session=False, replace=False, approved=False) -> None",564-620,false,57,11,Create VM from configuration dictionary.
   src/clonebox/cli/monitoring_commands.py:
-    functions[6]{name,kind,sig,loc,async,lines,cc,does}:
-      cmd_monitor,function,(args) -> None,18-92,false,75,6,Monitor VM resource usage.
-      cmd_health,function,(args) -> None,95-174,false,80,11,Run health checks on a VM.
-      cmd_exec,function,(args) -> None,177-212,false,36,8,Execute command in VM.
-      cmd_watch,function,(args) -> None,215-266,false,52,10,Watch VM logs and status.
-      cmd_repair,function,(args) -> None,269-331,false,63,11,Attempt to repair VM issues.
-      cmd_logs,function,(args) -> None,334-354,false,21,6,Show VM logs.
+    functions[7]{name,kind,sig,loc,async,lines,cc,does}:
+      cmd_monitor,function,(args) -> None,20-87,false,68,4,Monitor VM resource usage.
+      cmd_health,function,(args) -> None,90-162,false,73,9,Run health checks on a VM.
+      cmd_validate,function,(args) -> None,165-218,false,54,16,Validate a running VM (services/apps/smoke tests).
+      cmd_exec,function,(args) -> None,221-249,false,29,5,Execute command in VM.
+      cmd_watch,function,(args) -> None,252-296,false,45,7,Watch VM logs and status.
+      cmd_repair,function,(args) -> None,299-354,false,56,8,Attempt to repair VM issues.
+      cmd_logs,function,(args) -> None,357-370,false,14,4,Show VM logs.
   src/clonebox/cli/interactive_container.py:
     functions[1]{name,kind,sig,loc,async,lines,cc,does}:
       interactive_container_menu,function,() -> None,14-114,false,101,12,Container management menu.
@@ -1320,7 +1464,7 @@ function_details:
       NetworkManager.get_vm_ip,method,"(vm_name:str) -> Optional[str]",31-33,false,3,1,Get VM's IP address.
   src/clonebox/validation/apps.py:
     functions[1]{name,kind,sig,loc,async,lines,cc,does}:
-      AppValidationMixin.validate_apps,method,() -> Dict,8-303,false,296,56,validates apps
+      AppValidationMixin.validate_apps,method,() -> Dict,8-367,false,360,65,validates apps
   src/clonebox/validation/mounts.py:
     functions[1]{name,kind,sig,loc,async,lines,cc,does}:
       MountValidationMixin.validate_mounts,method,() -> Dict,7-128,false,122,25,Validate all mount points and copied data paths.
@@ -1338,14 +1482,15 @@ function_details:
       DiskValidationMixin.validate_disk_space,method,() -> Dict,7-47,false,41,6,Validate disk space on root filesystem.
       DiskValidationMixin._print_disk_usage_breakdown,method,() -> None,49-149,false,101,16,logs disk usage breakdown
   src/clonebox/validation/core.py:
-    functions[7]{name,kind,sig,loc,async,lines,cc,does}:
-      VMValidatorCore.__init__,method,"(config:dict, vm_name:str, conn_uri:str, console:Console=None, require_running_apps:bool=False, smoke_test:bool=False) -> None",17-50,false,34,2,creates
-      VMValidatorCore._get_ssh_key_path,method,"() -> Optional[Path]",52-62,false,11,4,Return path to the SSH key generated for this VM (if present).
-      VMValidatorCore._get_ssh_port,method,() -> int,64-101,false,38,8,Host-side SSH port for passt port forwarding.
-      VMValidatorCore._ssh_exec,method,"(command:str, timeout:int=10) -> Optional[str]",103-152,false,50,10,Execute command via SSH with detailed logging.
-      VMValidatorCore._exec_in_vm,method,"(command:str, timeout:int=10) -> Optional[str]",154-249,false,96,16,"Execute command in VM using QEMU guest agent, with SSH fallback."
-      VMValidatorCore._setup_in_progress,method,"() -> Optional[bool]",251-264,false,14,3,initializes in progress
-      VMValidatorCore._check_qga_ready,method,() -> bool,266-284,false,19,2,Check if QEMU guest agent is responding.
+    functions[8]{name,kind,sig,loc,async,lines,cc,does}:
+      VMValidatorCore.__init__,method,"(config:dict, vm_name:str, conn_uri:str, console:Console=None, require_running_apps:bool=False, smoke_test:bool=False) -> None",18-51,false,34,2,creates
+      VMValidatorCore._user_session,method,() -> bool,54-55,false,2,1,user session
+      VMValidatorCore._get_ssh_key_path,method,"() -> Optional[Path]",57-59,false,3,1,Return path to the SSH key generated for this VM (if present).
+      VMValidatorCore._get_ssh_port,method,() -> int,61-63,false,3,1,Host-side SSH port for passt port forwarding.
+      VMValidatorCore._ssh_exec,method,"(command:str, timeout:int=10) -> Optional[str]",65-75,false,11,3,Execute command via SSH.
+      VMValidatorCore._exec_in_vm,method,"(command:str, timeout:int=10) -> Optional[str]",77-172,false,96,16,"Execute command in VM using QEMU guest agent, with SSH fallback."
+      VMValidatorCore._setup_in_progress,method,"() -> Optional[bool]",174-187,false,14,3,initializes in progress
+      VMValidatorCore._check_qga_ready,method,() -> bool,189-207,false,19,2,Check if QEMU guest agent is responding.
   src/clonebox/validation/packages.py:
     functions[2]{name,kind,sig,loc,async,lines,cc,does}:
       PackageValidationMixin.validate_packages,method,() -> Dict,7-58,false,52,8,Validate APT packages are installed.
