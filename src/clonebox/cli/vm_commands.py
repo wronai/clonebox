@@ -17,7 +17,7 @@ from rich.table import Table
 from clonebox.cloner import SelectiveVMCloner
 from clonebox.models import VMConfig
 from clonebox.detector import SystemDetector
-from clonebox.cli.utils import console, custom_style, CLONEBOX_CONFIG_FILE, load_clonebox_config, create_vm_from_config
+from clonebox.cli.utils import console, custom_style, CLONEBOX_CONFIG_FILE, load_clonebox_config, create_vm_from_config, _resolve_vm_name_and_config_file
 
 
 def cmd_init(args):
@@ -160,6 +160,91 @@ def cmd_start(args):
     cloner = SelectiveVMCloner(user_session=getattr(args, "user", False))
     open_viewer = getattr(args, "viewer", False) or not getattr(args, "no_viewer", False)
     cloner.start_vm(name, open_viewer=open_viewer, console=console)
+
+
+def cmd_sync_data(args):
+    """Sync app data paths (copy_paths/app_data_paths) from host into an existing VM (no mounts)."""
+    name = args.name
+    user_session = getattr(args, "user", False)
+
+    try:
+        vm_name, config_file = _resolve_vm_name_and_config_file(name)
+    except FileNotFoundError as e:
+        console.print(f"[red]❌ {e}[/]")
+        return
+
+    if config_file is None:
+        cfg = Path.cwd() / CLONEBOX_CONFIG_FILE
+        if cfg.exists():
+            config_file = cfg
+        else:
+            console.print("[red]❌ No .clonebox.yaml found in current directory[/]")
+            console.print("[dim]Run in a folder with .clonebox.yaml or use: clonebox sync-data .[/]")
+            return
+
+    config = load_clonebox_config(config_file)
+
+    vm_username = (config.get("vm", {}) or {}).get("username", "ubuntu")
+    snap_packages = set(config.get("snap_packages", []) or [])
+
+    copy_paths = config.get("copy_paths", {}) or config.get("app_data_paths", {}) or {}
+    if not copy_paths:
+        console.print("[yellow]⚠️  No app_data_paths/copy_paths configured[/]")
+        return
+
+    # Optional: sync only browser-related paths
+    only_browsers = getattr(args, "only_browsers", False)
+    include_cache = getattr(args, "include_cache", False)
+
+    if only_browsers:
+        filtered = {}
+        for host_path, guest_path in copy_paths.items():
+            hp = str(host_path)
+            gp = str(guest_path)
+            if "google-chrome" in hp or "google-chrome" in gp:
+                filtered[host_path] = guest_path
+            elif hp.endswith("/.config/chromium") or "/.config/chromium" in hp or "/.config/chromium" in gp:
+                filtered[host_path] = guest_path
+            elif "/firefox" in hp or "/firefox" in gp:
+                filtered[host_path] = guest_path
+        copy_paths = filtered
+
+    # Remap chromium destination for snap chromium
+    if "chromium" in snap_packages:
+        remapped = {}
+        for host_path, guest_path in copy_paths.items():
+            if guest_path == f"/home/{vm_username}/.config/chromium":
+                remapped[host_path] = f"/home/{vm_username}/snap/chromium/common/chromium"
+            else:
+                remapped[host_path] = guest_path
+        copy_paths = remapped
+
+    cloner = SelectiveVMCloner(user_session=user_session)
+    ssh_port = cloner._get_saved_ssh_port(vm_name)
+    if not ssh_port:
+        console.print("[red]❌ No SSH port configured for this VM[/]")
+        console.print("[dim]If this is a --user VM, ensure ~/.local/share/libvirt/images/<vm>/ssh_port exists[/]")
+        return
+
+    vm_dir = cloner.get_images_dir() / vm_name
+    ssh_key = vm_dir / "ssh_key"
+
+    console.print(f"[bold cyan]🔄 Syncing app data to VM: {vm_name}[/]")
+    console.print(f"[dim]Config: {config_file}[/]")
+    console.print(f"[dim]SSH: localhost:{ssh_port}[/]")
+
+    ok = cloner._copy_paths_to_vm_via_ssh(
+        copy_paths=copy_paths,
+        ssh_port=ssh_port,
+        ssh_key=ssh_key if ssh_key.exists() else None,
+        vm_username=vm_username,
+        skip_cache=not include_cache,
+    )
+
+    if ok:
+        console.print("[green]✅ Sync completed[/]")
+    else:
+        console.print("[yellow]⚠️  Sync completed with warnings (some paths may have failed)[/]")
 
 
 def cmd_open(args):

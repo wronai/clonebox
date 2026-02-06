@@ -602,7 +602,7 @@ def create_vm_from_config(config, start=False, user_session=False, replace=False
     vm_uuid = cloner.create_vm(vm_config, replace=replace, approved=approved, console=console)
     
     if start:
-        cloner.start_vm(vm_config.name, console=console)
+        cloner.start_vm(vm_config.name, console=console, config=vm_config)
         
         # Monitor cloud-init if it's a fresh VM
         if not replace:

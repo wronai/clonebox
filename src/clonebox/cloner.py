@@ -4,11 +4,13 @@ SelectiveVMCloner - Creates isolated VMs with only selected apps/paths/services.
 """
 
 import base64
+import hashlib
 import json
 import logging
 import os
 import secrets
 import shutil
+import shlex
 import socket
 import string
 import subprocess
@@ -194,7 +196,7 @@ class SelectiveVMCloner:
                     time.sleep(2)
                     
                     # Run comprehensive diagnostics
-                    checks = self._check_vm_processes(config.name)
+                    checks = self._check_vm_processes(config.name, config=config)
                     
                     # Setup SSH port forwarding if in user session (if not using QEMU user networking)
                     if self.user_session and ssh_port and not checks.get("port_listening"):
@@ -263,9 +265,16 @@ class SelectiveVMCloner:
                                 log.info("  (skipping cache paths)")
                                 log.info("=" * 50)
 
-                                vm_dir = self.USER_IMAGES_DIR / config.name
+                                vm_dir = self.get_images_dir() / config.name
                                 ssh_key = vm_dir / "ssh_key"
                                 self._copy_paths_to_vm_via_ssh(
+                                    copy_paths=config.copy_paths,
+                                    ssh_port=ssh_port,
+                                    ssh_key=ssh_key if ssh_key.exists() else None,
+                                    vm_username=config.username,
+                                    skip_cache=True,
+                                )
+                                self._verify_copied_paths_in_vm(
                                     copy_paths=config.copy_paths,
                                     ssh_port=ssh_port,
                                     ssh_key=ssh_key if ssh_key.exists() else None,
@@ -282,7 +291,7 @@ class SelectiveVMCloner:
                             log.info(f"  Profiles requested: {', '.join(config.browser_profiles)}")
                             log.info("=" * 50)
                             
-                            vm_dir = self.USER_IMAGES_DIR / config.name
+                            vm_dir = self.get_images_dir() / config.name
                             ssh_port = self._get_saved_ssh_port(config.name)
                             ssh_key = vm_dir / "ssh_key"
                             
@@ -294,12 +303,32 @@ class SelectiveVMCloner:
                             )
                             
                             if staged:
+                                copied_browsers = sorted(staged.keys())
+                                self._ensure_browsers_installed_in_vm(
+                                    browsers=copied_browsers,
+                                    ssh_port=ssh_port,
+                                    ssh_key=ssh_key,
+                                    vm_username=config.username,
+                                )
                                 # Copy to VM via SSH
                                 copy_profiles_to_vm_via_ssh(
                                     staged,
                                     ssh_port,
                                     ssh_key,
                                     config.username,
+                                )
+                                self._verify_browser_profiles_in_vm(
+                                    browsers=copied_browsers,
+                                    ssh_port=ssh_port,
+                                    ssh_key=ssh_key,
+                                    vm_username=config.username,
+                                )
+                                self._smoke_test_browsers_in_vm(
+                                    browsers=copied_browsers,
+                                    ssh_port=ssh_port,
+                                    ssh_key=ssh_key,
+                                    vm_username=config.username,
+                                    try_gui_launch=config.gui,
                                 )
                             else:
                                 log.warning("No browser profiles found to copy")
@@ -396,18 +425,25 @@ class SelectiveVMCloner:
             ]
 
             if src.is_dir():
-                tar_cmd = ["tar", "-C", str(src), "-cf", "-", "."] + exclude_args
+                tar_cmd = ["tar", "-C", str(src)] + exclude_args + ["-cf", "-", "."]
                 remote_cmd = (
-                    f"mkdir -p '{guest_path}' && tar -C '{guest_path}' -xpf -"
+                    f"sudo mkdir -p '{guest_path}' && sudo tar -C '{guest_path}' -xpf -"
                 )
             else:
                 src_parent = str(src.parent)
                 src_name = src.name
                 guest_parent = str(Path(guest_path).parent)
-                tar_cmd = ["tar", "-C", src_parent, "-cf", "-", src_name] + exclude_args
-                remote_cmd = (
-                    f"mkdir -p '{guest_parent}' && tar -C '{guest_parent}' -xpf -"
-                )
+                tar_cmd = ["tar", "-C", src_parent] + exclude_args + ["-cf", "-", src_name]
+                if str(Path(guest_path).name) == src_name:
+                    remote_cmd = (
+                        f"sudo mkdir -p '{guest_parent}' && sudo tar -C '{guest_parent}' -xpf -"
+                    )
+                else:
+                    remote_cmd = (
+                        f"sudo mkdir -p '{guest_parent}' && "
+                        f"sudo tar -C '{guest_parent}' -xpf - && "
+                        f"sudo mv -f '{Path(guest_parent) / src_name}' '{guest_path}'"
+                    )
 
             ssh_cmd = base_ssh + [f"{vm_username}@127.0.0.1", remote_cmd]
 
@@ -451,6 +487,418 @@ class SelectiveVMCloner:
 
         return all_success
 
+    def _ssh_exec(self, ssh_port: int, ssh_key: Optional[Path], vm_username: str, command: str, timeout: int = 20) -> Optional[str]:
+        base = [
+            "ssh",
+            "-o",
+            "StrictHostKeyChecking=no",
+            "-o",
+            "UserKnownHostsFile=/dev/null",
+            "-o",
+            "BatchMode=yes",
+            "-o",
+            "ConnectTimeout=10",
+            "-p",
+            str(ssh_port),
+        ]
+        if ssh_key is not None:
+            base.extend(["-i", str(ssh_key)])
+        base.extend([f"{vm_username}@127.0.0.1", command])
+        try:
+            result = subprocess.run(base, capture_output=True, text=True, timeout=timeout)
+        except subprocess.TimeoutExpired:
+            return None
+        if result.returncode != 0:
+            return None
+        return (result.stdout or "").strip()
+
+    def _verify_copied_paths_in_vm(
+        self,
+        copy_paths: Dict[str, str],
+        ssh_port: int,
+        ssh_key: Optional[Path],
+        vm_username: str,
+        skip_cache: bool = True,
+    ) -> bool:
+        if not copy_paths:
+            return True
+
+        def _is_cache_path(p: str) -> bool:
+            lowered = p.lower()
+            if "/.cache/" in lowered or lowered.endswith("/.cache"):
+                return True
+            if "/cache/" in lowered and (
+                "/mozilla/" in lowered
+                or "/jetbrains/" in lowered
+                or "/google-chrome/" in lowered
+                or "/chromium/" in lowered
+            ):
+                return True
+            return False
+
+        log.info("=" * 50)
+        log.info("Verifying copied paths in VM...")
+        log.info("=" * 50)
+
+        ok = True
+        for host_path, guest_path in (copy_paths or {}).items():
+            if not host_path or not guest_path:
+                continue
+            if skip_cache and (_is_cache_path(host_path) or _is_cache_path(guest_path)):
+                continue
+            src = Path(host_path).expanduser()
+            if not src.exists():
+                continue
+
+            q_guest = shlex.quote(str(guest_path))
+
+            if src.is_dir():
+                exists = self._ssh_exec(ssh_port, ssh_key, vm_username, f"sudo test -d {q_guest} && echo yes || echo no", timeout=15)
+                if exists != "yes":
+                    log.warning(f"  ❌ Missing in VM: {guest_path}")
+                    ok = False
+                    continue
+                size = self._ssh_exec(ssh_port, ssh_key, vm_username, f"sudo du -sb {q_guest} 2>/dev/null | cut -f1", timeout=30)
+                any_file = self._ssh_exec(
+                    ssh_port,
+                    ssh_key,
+                    vm_username,
+                    f"sudo find {q_guest} -type f 2>/dev/null | head -n 1 | wc -l",
+                    timeout=30,
+                )
+                if any_file == "0":
+                    log.warning(f"  ⚠ Copied dir looks empty: {guest_path}")
+                    ok = False
+                else:
+                    log.info(f"  ✓ Copied dir present: {guest_path} (bytes={size or '?'})")
+            else:
+                exists = self._ssh_exec(ssh_port, ssh_key, vm_username, f"sudo test -f {q_guest} && echo yes || echo no", timeout=15)
+                if exists != "yes":
+                    log.warning(f"  ❌ Missing file in VM: {guest_path}")
+                    ok = False
+                    continue
+
+                src_size = None
+                try:
+                    src_size = src.stat().st_size
+                except Exception:
+                    pass
+                dst_size = self._ssh_exec(ssh_port, ssh_key, vm_username, f"sudo stat -c %s {q_guest} 2>/dev/null || true", timeout=15)
+
+                sha_ok = None
+                try:
+                    if src_size is not None and src_size <= 50 * 1024 * 1024:
+                        h = hashlib.sha256()
+                        with src.open("rb") as f:
+                            for chunk in iter(lambda: f.read(1024 * 1024), b""):
+                                h.update(chunk)
+                        src_sha = h.hexdigest()
+                        dst_sha = self._ssh_exec(ssh_port, ssh_key, vm_username, f"sudo sha256sum {q_guest} 2>/dev/null | cut -d ' ' -f1", timeout=60)
+                        sha_ok = dst_sha == src_sha
+                except Exception:
+                    sha_ok = None
+
+                if sha_ok is False:
+                    log.warning(
+                        f"  ⚠ File checksum mismatch: {guest_path} (src_size={src_size}, dst_size={dst_size or '?'})"
+                    )
+                    ok = False
+                else:
+                    log.info(f"  ✓ Copied file present: {guest_path} (src_size={src_size}, dst_size={dst_size or '?'})")
+
+        return ok
+
+    def _ensure_browsers_installed_in_vm(
+        self,
+        browsers: List[str],
+        ssh_port: int,
+        ssh_key: Optional[Path],
+        vm_username: str,
+    ) -> None:
+        if not browsers:
+            return
+
+        log.info("=" * 50)
+        log.info("Ensuring browsers are installed/available in VM...")
+        log.info("=" * 50)
+
+        def _has_cmd(cmd: str) -> bool:
+            out = self._ssh_exec(
+                ssh_port,
+                ssh_key,
+                vm_username,
+                f"command -v {shlex.quote(cmd)} >/dev/null 2>&1 && echo yes || echo no",
+                timeout=15,
+            )
+            return out == "yes"
+
+        def _snap_installed(name: str) -> bool:
+            out = self._ssh_exec(
+                ssh_port,
+                ssh_key,
+                vm_username,
+                f"snap list {shlex.quote(name)} >/dev/null 2>&1 && echo yes || echo no",
+                timeout=15,
+            )
+            return out == "yes"
+
+        for _ in range(30):
+            busy = self._ssh_exec(
+                ssh_port,
+                ssh_key,
+                vm_username,
+                "pgrep -f 'apt-get|dpkg' >/dev/null 2>&1 && echo busy || echo idle",
+                timeout=10,
+            )
+            if busy != "busy":
+                break
+            time.sleep(5)
+
+        wants_firefox = "firefox" in browsers
+        wants_chromium = "chromium" in browsers
+        wants_chrome = "chrome" in browsers
+
+        if wants_firefox or wants_chromium:
+            self._ssh_exec(
+                ssh_port,
+                ssh_key,
+                vm_username,
+                "sudo systemctl start snapd >/dev/null 2>&1 || true",
+                timeout=20,
+            )
+            self._ssh_exec(
+                ssh_port,
+                ssh_key,
+                vm_username,
+                "sudo snap wait system seed.loaded >/dev/null 2>&1 || true",
+                timeout=180,
+            )
+
+        if wants_firefox and not _has_cmd("firefox"):
+            if not _snap_installed("firefox"):
+                log.info("  Installing firefox (snap)...")
+                out = self._ssh_exec(
+                    ssh_port,
+                    ssh_key,
+                    vm_username,
+                    "sudo snap install firefox >/tmp/clonebox-snap-firefox.log 2>&1 && echo ok || echo fail",
+                    timeout=900,
+                )
+                if out != "ok":
+                    log.warning("  Failed to install firefox (snap)")
+            if _has_cmd("firefox"):
+                log.info("  ✓ firefox available")
+            else:
+                log.warning("  ❌ firefox still not available")
+
+        if wants_chromium and not _has_cmd("chromium"):
+            if not _snap_installed("chromium"):
+                log.info("  Installing chromium (snap)...")
+                out = self._ssh_exec(
+                    ssh_port,
+                    ssh_key,
+                    vm_username,
+                    "sudo snap install chromium >/tmp/clonebox-snap-chromium.log 2>&1 && echo ok || echo fail",
+                    timeout=1200,
+                )
+                if out != "ok":
+                    log.warning("  Failed to install chromium (snap)")
+            if _has_cmd("chromium"):
+                log.info("  ✓ chromium available")
+            else:
+                log.warning("  ❌ chromium still not available")
+
+        if wants_chrome and not (_has_cmd("google-chrome") or _has_cmd("google-chrome-stable")):
+            log.info("  Installing google-chrome (deb)...")
+            install_cmd = (
+                "sudo sh -c "
+                + shlex.quote(
+                    "TMP=/tmp/google-chrome.deb; "
+                    "(command -v curl >/dev/null 2>&1 && curl -fsSL -o $TMP https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb) "
+                    "|| (command -v wget >/dev/null 2>&1 && wget -qO $TMP https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb); "
+                    "apt-get update -y >/dev/null 2>&1 || true; "
+                    "DEBIAN_FRONTEND=noninteractive apt-get install -y $TMP >/tmp/clonebox-apt-chrome.log 2>&1 && echo ok || echo fail"
+                )
+            )
+            out = self._ssh_exec(ssh_port, ssh_key, vm_username, install_cmd, timeout=1200)
+            if out != "ok":
+                log.warning("  Failed to install google-chrome (deb)")
+            if _has_cmd("google-chrome") or _has_cmd("google-chrome-stable"):
+                log.info("  ✓ google-chrome available")
+            else:
+                log.warning("  ❌ google-chrome still not available")
+
+    def _verify_browser_profiles_in_vm(
+        self,
+        browsers: List[str],
+        ssh_port: int,
+        ssh_key: Optional[Path],
+        vm_username: str,
+    ) -> bool:
+        if not browsers:
+            return True
+
+        log.info("=" * 50)
+        log.info("Verifying browser profiles in VM...")
+        log.info("=" * 50)
+
+        paths_by_browser = {
+            "chrome": [f"/home/{vm_username}/.config/google-chrome"],
+            "chromium": [
+                f"/home/{vm_username}/.config/chromium",
+                f"/home/{vm_username}/snap/chromium/common/chromium",
+            ],
+            "firefox": [
+                f"/home/{vm_username}/.mozilla/firefox",
+                f"/home/{vm_username}/snap/firefox/common/.mozilla/firefox",
+            ],
+            "edge": [f"/home/{vm_username}/.config/microsoft-edge"],
+            "brave": [f"/home/{vm_username}/.config/BraveSoftware"],
+            "opera": [f"/home/{vm_username}/.config/opera"],
+        }
+
+        ok = True
+        for browser in browsers:
+            cand = paths_by_browser.get(browser, [])
+            if not cand:
+                continue
+
+            found = False
+            for p in cand:
+                qp = shlex.quote(p)
+                nonempty = self._ssh_exec(
+                    ssh_port,
+                    ssh_key,
+                    vm_username,
+                    f"sudo test -d {qp} && [ $(sudo ls -A {qp} 2>/dev/null | wc -l) -gt 0 ] && echo yes || echo no",
+                    timeout=20,
+                )
+                if nonempty == "yes":
+                    size = self._ssh_exec(
+                        ssh_port,
+                        ssh_key,
+                        vm_username,
+                        f"sudo du -sb {qp} 2>/dev/null | cut -f1",
+                        timeout=60,
+                    )
+                    log.info(f"  ✓ {browser} profile present: {p} (bytes={size or '?'})")
+                    found = True
+                    break
+
+            if not found:
+                log.warning(f"  ❌ {browser} profile not found / empty (checked: {', '.join(cand)})")
+                ok = False
+
+        return ok
+
+    def _smoke_test_browsers_in_vm(
+        self,
+        browsers: List[str],
+        ssh_port: int,
+        ssh_key: Optional[Path],
+        vm_username: str,
+        try_gui_launch: bool = False,
+    ) -> None:
+        if not browsers:
+            return
+
+        log.info("=" * 50)
+        log.info("Browser smoke tests (headless) and best-effort launch...")
+        log.info("=" * 50)
+
+        uid_out = self._ssh_exec(ssh_port, ssh_key, vm_username, f"id -u {vm_username} 2>/dev/null || true", timeout=10)
+        vm_uid = (uid_out or "").strip()
+        if not vm_uid.isdigit():
+            vm_uid = "1000"
+
+        runtime_dir = f"/run/user/{vm_uid}"
+        self._ssh_exec(
+            ssh_port,
+            ssh_key,
+            vm_username,
+            f"sudo mkdir -p {runtime_dir} && sudo chown {vm_uid}:{vm_uid} {runtime_dir} && sudo chmod 700 {runtime_dir}",
+            timeout=15,
+        )
+
+        user_env = (
+            f"sudo -u {vm_username} env HOME=/home/{vm_username} USER={vm_username} LOGNAME={vm_username} XDG_RUNTIME_DIR={runtime_dir}"
+        )
+
+        def _run(name: str, cmd: str, timeout: int = 40) -> None:
+            out = self._ssh_exec(ssh_port, ssh_key, vm_username, cmd, timeout=timeout)
+            if out == "yes":
+                log.info(f"  ✓ {name}: headless OK")
+            elif out == "no":
+                log.warning(f"  ❌ {name}: headless FAILED")
+            else:
+                log.warning(f"  ⚠ {name}: headless UNKNOWN")
+
+        for b in browsers:
+            if b == "chromium":
+                _run(
+                    "chromium",
+                    f"{user_env} timeout 25 chromium --headless=new --no-sandbox --disable-gpu --dump-dom about:blank >/dev/null 2>&1 && echo yes || echo no",
+                    timeout=35,
+                )
+            elif b == "firefox":
+                _run(
+                    "firefox",
+                    f"{user_env} timeout 25 firefox --headless --version >/dev/null 2>&1 && echo yes || echo no",
+                    timeout=35,
+                )
+            elif b == "chrome":
+                _run(
+                    "google-chrome",
+                    f"{user_env} timeout 25 sh -c '(google-chrome --headless=new --no-sandbox --disable-gpu --dump-dom about:blank || google-chrome-stable --headless=new --no-sandbox --disable-gpu --dump-dom about:blank) >/dev/null 2>&1' && echo yes || echo no",
+                    timeout=45,
+                )
+
+        if not try_gui_launch:
+            return
+
+        has_x0 = self._ssh_exec(ssh_port, ssh_key, vm_username, "test -S /tmp/.X11-unix/X0 && echo yes || echo no", timeout=10)
+        if has_x0 != "yes":
+            log.info("  ℹ No X display detected yet (login in virt-viewer first to validate GUI launches)")
+            return
+
+        gui_env = f"{user_env} DISPLAY=:0"
+
+        def _launch(name: str, launch_cmd: str, patterns: List[str]) -> None:
+            self._ssh_exec(ssh_port, ssh_key, vm_username, launch_cmd, timeout=20)
+            pid = None
+            for pattern in patterns:
+                pcmd = (
+                    f"pgrep -u {vm_username} -f {shlex.quote(pattern)} 2>/dev/null | head -n 1 || true"
+                )
+                out = self._ssh_exec(ssh_port, ssh_key, vm_username, pcmd, timeout=10)
+                if out and out.strip().isdigit():
+                    pid = out.strip()
+                    break
+            if pid:
+                log.info(f"  ✓ {name}: launched (pid={pid})")
+            else:
+                log.warning(f"  ⚠ {name}: GUI launch attempted but process not detected")
+
+        for b in browsers:
+            if b == "firefox":
+                _launch(
+                    "firefox",
+                    f"{gui_env} nohup firefox about:blank >/tmp/clonebox-firefox-launch.log 2>&1 &",
+                    ["firefox"],
+                )
+            elif b == "chromium":
+                _launch(
+                    "chromium",
+                    f"{gui_env} nohup chromium about:blank >/tmp/clonebox-chromium-launch.log 2>&1 &",
+                    ["chromium", "chromium-browser"],
+                )
+            elif b == "chrome":
+                _launch(
+                    "google-chrome",
+                    f"{gui_env} nohup sh -c 'google-chrome about:blank || google-chrome-stable about:blank' >/tmp/clonebox-chrome-launch.log 2>&1 &",
+                    ["google-chrome", "google-chrome-stable"],
+                )
+
     def start_vm(self, vm_name: str, open_viewer: bool = False, console: Any = None, config: VMConfig = None) -> None:
         """Start an existing VM."""
         
@@ -463,7 +911,29 @@ class SelectiveVMCloner:
                     with open(config_file) as f:
                         config_data = yaml.safe_load(f)
                         if config_data and "vm" in config_data:
-                            config = VMConfig(**config_data["vm"])
+                            vm_data = config_data.get("vm") or {}
+                            config = VMConfig(
+                                name=vm_data.get("name", vm_name),
+                                ram_mb=vm_data.get("ram_mb", 4096),
+                                vcpus=vm_data.get("vcpus", 4),
+                                disk_size_gb=vm_data.get("disk_size_gb", 20),
+                                gui=vm_data.get("gui", True),
+                                base_image=vm_data.get("base_image"),
+                                network_mode=vm_data.get("network_mode", "auto"),
+                                username=vm_data.get("username", "ubuntu"),
+                                password=vm_data.get("password", "ubuntu"),
+                                paths=config_data.get("paths", {}) or {},
+                                copy_paths=(
+                                    config_data.get("copy_paths", {})
+                                    or config_data.get("app_data_paths", {})
+                                    or {}
+                                ),
+                                packages=config_data.get("packages", []) or [],
+                                snap_packages=config_data.get("snap_packages", []) or [],
+                                services=config_data.get("services", []) or [],
+                                post_commands=config_data.get("post_commands", []) or [],
+                                browser_profiles=config_data.get("browser_profiles", []) or [],
+                            )
                             log.debug(f"Loaded config from .clonebox.yaml for VM '{vm_name}'")
             except Exception as e:
                 log.debug(f"Could not load config from YAML: {e}")
@@ -486,7 +956,7 @@ class SelectiveVMCloner:
             time.sleep(2)
             
             # Run comprehensive diagnostics
-            checks = self._check_vm_processes(vm_name)
+            checks = self._check_vm_processes(vm_name, config=config)
             
             # Setup SSH port forwarding if needed
             ssh_port = self._get_saved_ssh_port(vm_name)
@@ -519,28 +989,81 @@ class SelectiveVMCloner:
                 if ssh_port:
                     # Always use extended timeout - cloud-init can take time
                     cloud_init_timeout = 1200  # 20 minutes
+                    gui_mode = False
                     try:
-                        # Check if this VM has GUI enabled by checking VM XML
                         vm = self.conn.lookupByName(vm_name)
                         vm_xml = vm.XMLDesc()
                         root = ET.fromstring(vm_xml)
-                        
-                        # Look for graphics (SPICE/VNC) which indicates GUI mode
                         graphics = root.find(".//graphics[@type='spice']") or root.find(".//graphics[@type='vnc']")
                         gui_mode = graphics is not None
-                        
-                        if gui_mode:
-                            log.info("GUI mode detected - using extended timeout for desktop installation")
-                        
-                        cloud_init_ok = self._wait_for_cloud_init(vm_name, ssh_port, timeout=cloud_init_timeout, gui_mode=gui_mode, config=config)
                     except Exception as e:
-                        log.debug(f"Failed to detect GUI mode: {e}")
-                        cloud_init_ok = self._wait_for_cloud_init(vm_name, ssh_port, timeout=cloud_init_timeout, gui_mode=False, config=config)
-            
-            if ssh_ok and cloud_init_ok:
-                log.info("=" * 50)
-                log.info("VM READY FOR USE!")
-                log.info(f"  ssh -p {ssh_port} ubuntu@localhost")
+                        log.debug(f"Failed to detect GUI mode from VM XML: {e}")
+
+                    if gui_mode:
+                        log.info("GUI mode detected - using extended timeout for desktop installation")
+
+                    cloud_init_ok = self._wait_for_cloud_init(
+                        vm_name,
+                        ssh_port,
+                        timeout=cloud_init_timeout,
+                        gui_mode=gui_mode,
+                        config=config,
+                    )
+
+            if ssh_ok and cloud_init_ok and config is not None:
+                if config.copy_paths:
+                    vm_dir = self.get_images_dir() / vm_name
+                    ssh_key = vm_dir / "ssh_key"
+                    self._copy_paths_to_vm_via_ssh(
+                        copy_paths=config.copy_paths,
+                        ssh_port=ssh_port,
+                        ssh_key=ssh_key if ssh_key.exists() else None,
+                        vm_username=config.username,
+                        skip_cache=True,
+                    )
+                    self._verify_copied_paths_in_vm(
+                        copy_paths=config.copy_paths,
+                        ssh_port=ssh_port,
+                        ssh_key=ssh_key if ssh_key.exists() else None,
+                        vm_username=config.username,
+                        skip_cache=True,
+                    )
+
+                if config.browser_profiles:
+                    vm_dir = self.get_images_dir() / vm_name
+                    ssh_key = vm_dir / "ssh_key"
+                    staged = stage_browser_profiles(
+                        config.browser_profiles,
+                        vm_dir,
+                        skip_cache=True,
+                    )
+                    if staged:
+                        copied_browsers = sorted(staged.keys())
+                        self._ensure_browsers_installed_in_vm(
+                            browsers=copied_browsers,
+                            ssh_port=ssh_port,
+                            ssh_key=ssh_key,
+                            vm_username=config.username,
+                        )
+                        copy_profiles_to_vm_via_ssh(
+                            staged,
+                            ssh_port,
+                            ssh_key,
+                            config.username,
+                        )
+                        self._verify_browser_profiles_in_vm(
+                            browsers=copied_browsers,
+                            ssh_port=ssh_port,
+                            ssh_key=ssh_key,
+                            vm_username=config.username,
+                        )
+                        self._smoke_test_browsers_in_vm(
+                            browsers=copied_browsers,
+                            ssh_port=ssh_port,
+                            ssh_key=ssh_key,
+                            vm_username=config.username,
+                            try_gui_launch=config.gui,
+                        )
                 log.info("=" * 50)
             elif ssh_ok:
                 log.info("=" * 50)
@@ -1178,7 +1701,7 @@ class SelectiveVMCloner:
         
         return None
 
-    def _check_vm_processes(self, vm_name: str) -> dict:
+    def _check_vm_processes(self, vm_name: str, config: Optional[VMConfig] = None) -> dict:
         """Check that all required VM processes are running."""
         import shutil
         import socket
@@ -1331,11 +1854,6 @@ class SelectiveVMCloner:
                 vnc_port = vnc.get('port', 'auto')
                 log.info(f"  ✓ VNC display on port {vnc_port}")
                 checks["vnc_port"] = vnc_port
-                # Even on timeout, try to report what was installed
-                try:
-                    self._verify_deployment_completion(vm_name, ssh_port, config)
-                except Exception as e:
-                    log.debug(f"Could not get final application status: {e}")
         except Exception as e:
             log.debug(f"Failed to get display ports: {e}")
         
@@ -1366,7 +1884,7 @@ class SelectiveVMCloner:
         
         return checks
     
-    def _get_saved_ssh_port(self, vm_name: str) -> int | None:
+    def _get_saved_ssh_port(self, vm_name: str) -> Optional[int]:
         """Get saved SSH port for a VM."""
         # Check both locations for compatibility
         images_dir = self.USER_IMAGES_DIR if self.user_session else Path("/var/lib/libvirt/images")
@@ -1885,9 +2403,9 @@ class SelectiveVMCloner:
             
             # 5. Verify app data paths
             log.info("  💾 App Data Verification:")
-            if config and config.app_data_paths:
+            if config and config.copy_paths:
                 synced_paths = 0
-                for host_path, vm_path in config.app_data_paths.items():
+                for host_path, vm_path in config.copy_paths.items():
                     result = subprocess.run(
                         [
                             "ssh", "-o", "StrictHostKeyChecking=no",
@@ -1905,7 +2423,7 @@ class SelectiveVMCloner:
                     else:
                         log.warning(f"    ❌ App data {vm_path} not found")
                 
-                log.info(f"    ✓ {synced_paths}/{len(config.app_data_paths)} app data paths synced")
+                log.info(f"    ✓ {synced_paths}/{len(config.copy_paths)} app data paths synced")
             else:
                 log.info("    ℹ No app data paths specified")
             

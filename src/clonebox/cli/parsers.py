@@ -190,6 +190,32 @@ def main():
     list_parser.add_argument("--json", action="store_true", help="Output JSON")
     list_parser.set_defaults(func=cmd_list)
 
+    # Sync-data command
+    sync_data_parser = subparsers.add_parser(
+        "sync-data",
+        help="Sync app_data_paths/copy_paths from host into an existing VM (no mounts)",
+    )
+    sync_data_parser.add_argument(
+        "name", nargs="?", default=None, help="VM name or '.' to use .clonebox.yaml"
+    )
+    sync_data_parser.add_argument(
+        "-u",
+        "--user",
+        action="store_true",
+        help="Use user session (qemu:///session) - no root required",
+    )
+    sync_data_parser.add_argument(
+        "--only-browsers",
+        action="store_true",
+        help="Only sync browser-related paths (chrome/chromium/firefox)",
+    )
+    sync_data_parser.add_argument(
+        "--include-cache",
+        action="store_true",
+        help="Include cache paths (can be large)",
+    )
+    sync_data_parser.set_defaults(func=cmd_sync_data)
+
     # Container command
     container_parser = subparsers.add_parser("container", help="Manage container sandboxes")
     container_parser.add_argument(

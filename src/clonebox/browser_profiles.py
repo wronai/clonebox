@@ -5,10 +5,13 @@ Handles copying browser profiles from host to VM.
 """
 
 import os
+import logging
 import shutil
 import subprocess
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
+
+log = logging.getLogger(__name__)
 
 # Browser profile paths on Linux (host)
 BROWSER_PROFILE_PATHS = {
@@ -109,6 +112,7 @@ def copy_browser_profile(
     browser: str,
     vm_dir: Path,
     progress_callback: Optional[callable] = None,
+    skip_cache: bool = False,
 ) -> Optional[Path]:
     """Copy browser profile from host to VM staging directory.
     
@@ -141,17 +145,18 @@ def copy_browser_profile(
         try:
             shutil.copytree(paths["config"], config_dest, dirs_exist_ok=True)
         except Exception as e:
-            print(f"Warning: Failed to copy {browser} config: {e}")
+            log.warning(f"Failed to copy {browser} config: {e}")
     
     # Copy cache directory (optional, can be large)
-    cache_dest = profile_stage_dir / "cache"
-    if paths["cache"].exists():
-        if progress_callback:
-            progress_callback(1, 2, f"Copying {browser} cache...")
-        try:
-            shutil.copytree(paths["cache"], cache_dest, dirs_exist_ok=True)
-        except Exception as e:
-            print(f"Warning: Failed to copy {browser} cache: {e}")
+    if not skip_cache:
+        cache_dest = profile_stage_dir / "cache"
+        if paths["cache"].exists():
+            if progress_callback:
+                progress_callback(1, 2, f"Copying {browser} cache...")
+            try:
+                shutil.copytree(paths["cache"], cache_dest, dirs_exist_ok=True)
+            except Exception as e:
+                log.warning(f"Failed to copy {browser} cache: {e}")
     
     if progress_callback:
         progress_callback(2, 2, f"{browser} profile copied")
@@ -186,15 +191,15 @@ def stage_browser_profiles(
     
     for browser in browsers_to_copy:
         if browser not in detected:
-            print(f"Browser profile '{browser}' not found on host, skipping")
+            log.info(f"Browser profile '{browser}' not found on host, skipping")
             continue
         
         # Get profile size
         size_bytes, size_human = get_profile_size(browser, detected[browser])
-        print(f"Copying {browser} profile ({size_human})...")
+        log.info(f"Copying {browser} profile ({size_human})...")
         
         # Copy to staging
-        staged_path = copy_browser_profile(browser, vm_dir)
+        staged_path = copy_browser_profile(browser, vm_dir, skip_cache=skip_cache)
         if staged_path:
             staged[browser] = staged_path
     
@@ -265,48 +270,125 @@ def copy_profiles_to_vm_via_ssh(
         True if all profiles copied successfully
     """
     import subprocess
-    
+
+    def _ssh(cmd: str) -> subprocess.CompletedProcess:
+        base = [
+            "ssh",
+            "-o",
+            "StrictHostKeyChecking=no",
+            "-o",
+            "UserKnownHostsFile=/dev/null",
+            "-o",
+            "BatchMode=yes",
+            "-o",
+            "ConnectTimeout=10",
+            "-p",
+            str(ssh_port),
+            "-i",
+            str(ssh_key),
+            f"{vm_username}@127.0.0.1",
+            cmd,
+        ]
+        return subprocess.run(base, capture_output=True, text=True)
+
+    def _resolve_dest(browser: str) -> str:
+        if browser == "chromium":
+            probe = _ssh("snap list chromium >/dev/null 2>&1 && echo SNAP || echo NOSNAP")
+            if "SNAP" in (probe.stdout or ""):
+                return f"/home/{vm_username}/snap/chromium/common/chromium"
+        if browser == "firefox":
+            probe = _ssh("snap list firefox >/dev/null 2>&1 && echo SNAP || echo NOSNAP")
+            if "SNAP" in (probe.stdout or ""):
+                return f"/home/{vm_username}/snap/firefox/common/.mozilla/firefox"
+        return VM_BROWSER_PROFILE_PATHS.get(browser, "")
+
     all_success = True
-    
+
     for browser, staged_path in staged_profiles.items():
         if browser not in VM_BROWSER_PROFILE_PATHS:
             continue
-        
-        dest_path = VM_BROWSER_PROFILE_PATHS[browser]
-        
-        # Create destination directory
-        mkdir_result = subprocess.run(
-            [
-                "ssh", "-o", "StrictHostKeyChecking=no", "-o", "BatchMode=yes",
-                "-p", str(ssh_port), "-i", str(ssh_key),
-                f"{vm_username}@127.0.0.1",
-                f"mkdir -p {dest_path}"
-            ],
-            capture_output=True,
-        )
-        
-        if mkdir_result.returncode != 0:
-            print(f"Failed to create {browser} directory in VM")
+
+        dest_path = _resolve_dest(browser)
+        if not dest_path:
+            continue
+
+        config_src = staged_path / "config"
+        if not config_src.exists():
+            continue
+
+        log.info(f"Copying {browser} profile to VM: {dest_path}")
+
+        mk = _ssh(f"sudo mkdir -p '{dest_path}'")
+        if mk.returncode != 0:
+            log.warning(f"Failed to create {dest_path} in VM")
             all_success = False
             continue
-        
-        # Copy profile using scp
-        config_src = staged_path / "config"
-        if config_src.exists():
-            scp_result = subprocess.run(
-                [
-                    "scp", "-r", "-o", "StrictHostKeyChecking=no", "-o", "BatchMode=yes",
-                    "-P", str(ssh_port), "-i", str(ssh_key),
-                    f"{config_src}/*",
-                    f"{vm_username}@127.0.0.1:{dest_path}/"
-                ],
-                capture_output=True,
+
+        tar_cmd = [
+            "tar",
+            "-C",
+            str(config_src),
+            "--exclude=SingletonLock",
+            "--exclude=SingletonSocket",
+            "--exclude=SingletonCookie",
+            "--exclude=parent.lock",
+            "--exclude=.parentlock",
+            "--exclude=lock",
+            "-cf",
+            "-",
+            ".",
+        ]
+
+        remote_cmd = (
+            f"sudo tar -C '{dest_path}' -xpf - && "
+            f"sudo chown -R {vm_username}:{vm_username} '{dest_path}' || true"
+        )
+
+        ssh_cmd = [
+            "ssh",
+            "-o",
+            "StrictHostKeyChecking=no",
+            "-o",
+            "UserKnownHostsFile=/dev/null",
+            "-o",
+            "BatchMode=yes",
+            "-o",
+            "ConnectTimeout=10",
+            "-p",
+            str(ssh_port),
+            "-i",
+            str(ssh_key),
+            f"{vm_username}@127.0.0.1",
+            remote_cmd,
+        ]
+
+        try:
+            tar_proc = subprocess.Popen(tar_cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            ssh_proc = subprocess.Popen(
+                ssh_cmd,
+                stdin=tar_proc.stdout,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
             )
-            
-            if scp_result.returncode == 0:
-                print(f"✓ {browser} profile copied to VM")
+            if tar_proc.stdout is not None:
+                tar_proc.stdout.close()
+
+            _, ssh_err = ssh_proc.communicate()
+            tar_err = tar_proc.stderr.read().decode(errors="replace") if tar_proc.stderr else ""
+            tar_rc = tar_proc.wait()
+
+            if tar_rc == 0 and ssh_proc.returncode == 0:
+                log.info(f"{browser} profile copied")
             else:
-                print(f"✗ Failed to copy {browser} profile")
+                log.warning(f"Failed to copy {browser} profile")
+                if tar_err.strip():
+                    log.debug(tar_err.strip()[:400])
+                if ssh_err and ssh_err.strip():
+                    log.debug(ssh_err.strip()[:400])
                 all_success = False
-    
+        except Exception as e:
+            log.warning(f"Failed to copy {browser} profile: {e}")
+            all_success = False
+
     return all_success

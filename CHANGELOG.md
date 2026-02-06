@@ -1,3 +1,22 @@
+## [1.1.41] - 2026-02-06
+
+### Summary
+
+feat(goal): configuration management system
+
+### Core
+
+- update src/clonebox/browser_profiles.py
+- update src/clonebox/cli/parsers.py
+- update src/clonebox/cli/utils.py
+- update src/clonebox/cli/vm_commands.py
+- update src/clonebox/cloner.py
+
+### Docs
+
+- docs: update README
+
+
 ## [1.1.40] - 2026-02-05
 
 ### Summary

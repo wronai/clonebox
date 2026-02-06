@@ -328,12 +328,19 @@ clonebox clone . --user --run --replace --base-image ~/ubuntu-22.04-cloud.qcow2 
 clonebox clone . --user --run --replace --browser-profiles chrome firefox
 # Lub automatycznie (dla GUI VM wykryje i skopiuje wszystkie profile)
 clonebox clone . --user --run --replace
+
+clonebox logs . --user --all
+
+clonebox open . --user
+
 # Sprawdź diagnostykę na żywo
 clonebox watch . --user
 
 clonebox test . --user --validate --require-running-apps
 # Uruchom pełną walidację (wykorzystuje QGA do sprawdzenia serwisów wewnątrz)
 clonebox test . --user --validate --smoke-test
+
+clonebox sync-data . --user --only-browsers --include-cache
 ```
 
 ### Profiles (Reusable presets)
