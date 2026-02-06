@@ -198,6 +198,7 @@ class SystemDetector:
         "postman",
         "insomnia",
         "dbeaver",
+        "windsurf",
     ]
 
     # Map process/service names to Ubuntu packages or snap packages
@@ -253,6 +254,8 @@ class SystemDetector:
         "idea": ("intellij-idea-community", "snap"),
         "code": ("code", "snap"),
         "vscode": ("code", "snap"),
+        "windsurf": ("windsurf", "deb"),
+        "cursor": ("cursor", "deb"),
         "slack": ("slack", "snap"),
         "discord": ("discord", "snap"),
         "spotify": ("spotify", "snap"),
@@ -284,6 +287,8 @@ class SystemDetector:
         # IDEs and editors - settings, extensions, projects history
         "code": [".config/Code", ".vscode", ".vscode-server"],
         "vscode": [".config/Code", ".vscode", ".vscode-server"],
+        "windsurf": [".config/Windsurf", ".windsurf", "Windsurf"],
+        "cursor": [".config/Cursor", ".cursor"],
         "pycharm": [
             "snap/pycharm-community/common/.config/JetBrains",
             "snap/pycharm-community/common/.local/share/JetBrains",
@@ -350,52 +355,271 @@ class SystemDetector:
         self.user = pwd.getpwuid(os.getuid()).pw_name
         self.home = Path.home()
 
+    # ── Dynamic auto-discovery helpers ─────────────────────────────────────
+
+    def _discover_xdg_dirs(self, app_name: str) -> list:
+        """Discover app data via XDG Base Directory conventions.
+
+        Most Linux GUI apps store data in:
+          ~/.config/<Name>   (settings)
+          ~/.local/share/<Name>  (persistent data)
+          ~/.cache/<Name>    (cache — usually skip)
+        For Electron apps the dir name often starts with uppercase.
+        """
+        variants = {app_name, app_name.capitalize(), app_name.title(),
+                     app_name.lower(), app_name.upper()}
+        # Common Electron patterns: "Code", "Windsurf", "Cursor", "Slack"
+        # JetBrains: "JetBrains", "pycharm" etc.
+        dirs_found = []
+        xdg_roots = [
+            self.home / ".config",
+            self.home / ".local" / "share",
+        ]
+        for root in xdg_roots:
+            if not root.is_dir():
+                continue
+            try:
+                for entry in root.iterdir():
+                    if not entry.is_dir():
+                        continue
+                    entry_lower = entry.name.lower()
+                    if any(v.lower() in entry_lower for v in variants):
+                        dirs_found.append(str(entry.relative_to(self.home)))
+            except (PermissionError, OSError):
+                pass
+
+        # Also check dotfiles: ~/.vscode, ~/.windsurf, ~/.cursor, etc.
+        for entry in self.home.iterdir():
+            if not entry.is_dir():
+                continue
+            name = entry.name.lstrip(".")
+            if name.lower() in {v.lower() for v in variants}:
+                dirs_found.append(str(entry.relative_to(self.home)))
+
+        return dirs_found
+
+    def _discover_snap_dirs(self, app_name: str) -> list:
+        """Discover snap data dirs for an app.
+
+        Snap apps store user data in ~/snap/<name>/common/.
+        """
+        dirs_found = []
+        snap_base = self.home / "snap"
+        if not snap_base.is_dir():
+            return dirs_found
+        try:
+            for entry in snap_base.iterdir():
+                if not entry.is_dir():
+                    continue
+                if app_name.lower() in entry.name.lower():
+                    common = entry / "common"
+                    if common.is_dir():
+                        # Walk one level to find actual data dirs
+                        try:
+                            for sub in common.iterdir():
+                                if sub.is_dir():
+                                    dirs_found.append(
+                                        str(sub.relative_to(self.home))
+                                    )
+                        except (PermissionError, OSError):
+                            pass
+                    # Also include the snap dir itself (for revision dirs)
+                    dirs_found.append(str(entry.relative_to(self.home)))
+        except (PermissionError, OSError):
+            pass
+        return dirs_found
+
+    # Top-level dirs that are too broad to copy wholesale
+    _TOO_BROAD_DIRS = frozenset({
+        ".config", ".local", ".local/share", ".local/lib",
+        ".cache", "snap", "Downloads", "Documents", "Desktop",
+    })
+
+    def _discover_proc_data_dirs(self, pid: int) -> list:
+        """Discover config dirs by examining open file descriptors of a process.
+
+        Reads /proc/<pid>/fd symlinks to find config/data directories the
+        process has open. Filters to user home paths only.
+        Extracts the app-specific subdir, e.g. .config/Windsurf not just .config.
+        """
+        dirs_found = set()
+        fd_dir = Path(f"/proc/{pid}/fd")
+        if not fd_dir.exists():
+            return []
+        try:
+            for fd in fd_dir.iterdir():
+                try:
+                    target = fd.resolve()
+                    target_str = str(target)
+                    home_str = str(self.home)
+                    if not target_str.startswith(home_str + "/"):
+                        continue
+                    # Skip cache, tmp, runtime
+                    if "/.cache/" in target_str or "/tmp/" in target_str:
+                        continue
+                    if "/run/" in target_str:
+                        continue
+                    # Extract the app-specific config dir (2-3 levels under home)
+                    rel = target.relative_to(self.home)
+                    parts = rel.parts
+                    if len(parts) >= 2:
+                        candidate = str(Path(parts[0]) / parts[1])
+                        # If top-level is too broad (e.g. .local/share), go deeper
+                        if candidate in self._TOO_BROAD_DIRS and len(parts) >= 3:
+                            candidate = str(Path(parts[0]) / parts[1] / parts[2])
+                        if candidate not in self._TOO_BROAD_DIRS:
+                            full = self.home / candidate
+                            if full.is_dir():
+                                dirs_found.add(candidate)
+                    elif len(parts) == 1:
+                        p = parts[0]
+                        if p not in self._TOO_BROAD_DIRS and (self.home / p).is_dir():
+                            dirs_found.add(p)
+                except (OSError, ValueError):
+                    continue
+        except (PermissionError, OSError):
+            pass
+        return list(dirs_found)
+
+    def _discover_desktop_app_name(self, exe_path: str) -> list:
+        """Parse .desktop files to find canonical app name for an executable.
+
+        Returns list of Name= values from .desktop files whose Exec= matches.
+        """
+        names = []
+        desktop_dirs = [
+            Path("/usr/share/applications"),
+            self.home / ".local" / "share" / "applications",
+            Path("/var/lib/snapd/desktop/applications"),
+        ]
+        exe_basename = Path(exe_path).name if exe_path else ""
+        if not exe_basename:
+            return names
+
+        for ddir in desktop_dirs:
+            if not ddir.is_dir():
+                continue
+            try:
+                for df in ddir.glob("*.desktop"):
+                    try:
+                        text = df.read_text(errors="replace")
+                        if exe_basename not in text:
+                            continue
+                        for line in text.splitlines():
+                            if line.startswith("Name="):
+                                names.append(line[5:].strip())
+                                break
+                    except (OSError, UnicodeDecodeError):
+                        continue
+            except (PermissionError, OSError):
+                pass
+        return names
+
+    def auto_discover_app_data(self, applications: list) -> list:
+        """Automatically discover ALL config/data dirs for detected apps.
+
+        Combines 4 discovery strategies:
+          1. Static registry (APP_DATA_DIRS) — fast, covers known apps
+          2. XDG convention scan — catches any XDG-compliant app
+          3. /proc/PID/fd probing — catches non-standard locations
+          4. Snap dir discovery — catches snap-sandboxed apps
+
+        Results are deduplicated and enriched with size info.
+        """
+        seen_paths: set = set()
+        results: list = []
+
+        def _add(rel_path: str, app: str, source: str) -> None:
+            full = self.home / rel_path
+            full_str = str(full)
+            if full_str in seen_paths:
+                return
+            if not full.exists():
+                return
+            try:
+                size = self._get_dir_size(full, max_depth=2)
+            except Exception:
+                size = 0
+            seen_paths.add(full_str)
+            results.append({
+                "path": full_str,
+                "app": app,
+                "type": "app_data",
+                "source": source,
+                "size_mb": round(size / 1024 / 1024, 1),
+            })
+
+        # Collect all app names to probe
+        app_names: set = set()
+        app_pids: dict = {}  # name -> pid
+        app_exes: dict = {}  # name -> exe path
+
+        for app in applications:
+            name = app.name.lower()
+            app_names.add(name)
+            app_pids[name] = app.pid
+            app_exes[name] = getattr(app, "exe", "")
+
+        # Always include core apps
+        for core in ("firefox", "chrome", "chromium", "pycharm",
+                      "windsurf", "code", "cursor"):
+            app_names.add(core)
+
+        # Strategy 1: Static registry
+        for app_name in sorted(app_names):
+            for pattern, dirs in self.APP_DATA_DIRS.items():
+                if pattern not in app_name and app_name not in pattern:
+                    continue
+                snap_dirs = [d for d in dirs if d.startswith("snap/")]
+                preferred = snap_dirs if any(
+                    (self.home / d).exists() for d in snap_dirs
+                ) else dirs
+                for d in preferred:
+                    _add(d, pattern, "static")
+
+        # Strategy 2: XDG convention scan
+        for app_name in sorted(app_names):
+            for d in self._discover_xdg_dirs(app_name):
+                _add(d, app_name, "xdg")
+
+        # Strategy 3: Snap dir discovery
+        for app_name in sorted(app_names):
+            for d in self._discover_snap_dirs(app_name):
+                _add(d, app_name, "snap")
+
+        # Strategy 4: /proc/PID/fd probing (only for actually running apps)
+        for app_name, pid in app_pids.items():
+            for d in self._discover_proc_data_dirs(pid):
+                _add(d, app_name, "proc")
+
+        # Strategy 5: .desktop file names → additional XDG scan
+        for app_name in sorted(app_names):
+            exe = app_exes.get(app_name, "")
+            for desktop_name in self._discover_desktop_app_name(exe):
+                for d in self._discover_xdg_dirs(desktop_name):
+                    _add(d, app_name, "desktop")
+
+        # Sort by app name, then path
+        results.sort(key=lambda x: (x["app"], x["path"]))
+        return results
+
     def detect_app_data_dirs(self, applications: list) -> list:
         """Detect config/data directories for running applications.
 
-        Returns list of paths that contain user data needed by running apps.
+        Uses auto_discover_app_data for comprehensive detection, then
+        returns results in the legacy format (without 'source' field).
         """
-        app_data_paths = []
-        seen_paths = set()
-
-        matched_patterns = set()
-
-        for app in applications:
-            app_name = app.name.lower()
-
-            for pattern in self.APP_DATA_DIRS:
-                if pattern in app_name:
-                    matched_patterns.add(pattern)
-
-        for pattern in ("firefox", "chrome", "chromium", "pycharm"):
-            matched_patterns.add(pattern)
-
-        for pattern in sorted(matched_patterns):
-            dirs = self.APP_DATA_DIRS.get(pattern, [])
-            if not dirs:
-                continue
-
-            snap_dirs = [d for d in dirs if d.startswith("snap/")]
-            preferred_dirs = snap_dirs if any((self.home / d).exists() for d in snap_dirs) else dirs
-
-            for dir_name in preferred_dirs:
-                full_path = self.home / dir_name
-                if full_path.exists() and str(full_path) not in seen_paths:
-                    seen_paths.add(str(full_path))
-                    try:
-                        size = self._get_dir_size(full_path, max_depth=2)
-                    except Exception:
-                        size = 0
-                    app_data_paths.append(
-                        {
-                            "path": str(full_path),
-                            "app": pattern,
-                            "type": "app_data",
-                            "size_mb": round(size / 1024 / 1024, 1),
-                        }
-                    )
-
-        return app_data_paths
+        discovered = self.auto_discover_app_data(applications)
+        # Return in legacy format
+        return [
+            {
+                "path": d["path"],
+                "app": d["app"],
+                "type": d["type"],
+                "size_mb": d["size_mb"],
+            }
+            for d in discovered
+        ]
 
     def detect_all(self) -> SystemSnapshot:
         """Detect all services, applications and paths."""
@@ -637,14 +861,40 @@ class SystemDetector:
             pass
         return containers
 
+    # Install commands for apps distributed as .deb (not in apt/snap repos)
+    DEB_INSTALL_COMMANDS = {
+        "windsurf": (
+            "command -v windsurf >/dev/null 2>&1 || ("
+            "curl -fsSL -o /tmp/windsurf.deb 'https://windsurf-stable.codeiumdata.com/linux-x64/stable/latest' && "
+            "DEBIAN_FRONTEND=noninteractive apt-get install -y /tmp/windsurf.deb && rm -f /tmp/windsurf.deb"
+            ") || true"
+        ),
+        "cursor": (
+            "command -v cursor >/dev/null 2>&1 || ("
+            "curl -fsSL -o /tmp/cursor.appimage 'https://downloader.cursor.sh/linux/appImage/x64' && "
+            "chmod +x /tmp/cursor.appimage && "
+            "mv /tmp/cursor.appimage /usr/local/bin/cursor"
+            ") || true"
+        ),
+        "google-chrome": (
+            "command -v google-chrome >/dev/null 2>&1 || ("
+            "curl -fsSL -o /tmp/google-chrome.deb https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb && "
+            "DEBIAN_FRONTEND=noninteractive apt-get install -y /tmp/google-chrome.deb && rm -f /tmp/google-chrome.deb"
+            ") || true"
+        ),
+    }
+
     def suggest_packages_for_apps(self, applications: list) -> dict:
         """Suggest packages based on detected applications.
 
         Returns:
-            dict with 'apt' and 'snap' keys containing lists of packages
+            dict with 'apt', 'snap', and 'deb_commands' keys.
+            'deb_commands' contains shell commands to install .deb/.appimage apps.
         """
         apt_packages = set()
         snap_packages = set()
+        deb_commands = []
+        seen_deb = set()
 
         for app in applications:
             app_name = app.name.lower()
@@ -652,11 +902,19 @@ class SystemDetector:
                 if key in app_name:
                     if install_type == "snap":
                         snap_packages.add(package)
+                    elif install_type == "deb":
+                        if key not in seen_deb and key in self.DEB_INSTALL_COMMANDS:
+                            deb_commands.append(self.DEB_INSTALL_COMMANDS[key])
+                            seen_deb.add(key)
                     else:
                         apt_packages.add(package)
                     break
 
-        return {"apt": sorted(list(apt_packages)), "snap": sorted(list(snap_packages))}
+        return {
+            "apt": sorted(list(apt_packages)),
+            "snap": sorted(list(snap_packages)),
+            "deb_commands": deb_commands,
+        }
 
     def suggest_packages_for_services(self, services: list) -> dict:
         """Suggest packages based on detected services.

@@ -311,10 +311,70 @@ def cmd_open(args):
 
 def cmd_stop(args):
     """Stop a VM."""
-    name = args.name
     user_session = getattr(args, "user", False)
     
-    if not name:
+    # Handle --all flag
+    if getattr(args, "all", False):
+        console.print("[cyan]Stopping all VMs...[/]")
+        
+        # Get all VMs from both sessions
+        all_vms = []
+        
+        # Get user session VMs
+        try:
+            user_cloner = SelectiveVMCloner(user_session=True)
+            user_vms = user_cloner.list_vms()
+            for vm in user_vms:
+                if vm["state"] == "running":
+                    all_vms.append((vm["name"], True))
+        except Exception:
+            pass
+        
+        # Get system session VMs
+        try:
+            system_cloner = SelectiveVMCloner(user_session=False)
+            system_vms = system_cloner.list_vms()
+            for vm in system_vms:
+                if vm["state"] == "running":
+                    all_vms.append((vm["name"], False))
+        except Exception:
+            pass
+        
+        if not all_vms:
+            console.print("[dim]No running VMs found[/]")
+            return
+        
+        # Stop all VMs
+        for vm_name, is_user in all_vms:
+            console.print(f"Stopping {vm_name} ({'user' if is_user else 'system'} session)...")
+            try:
+                cloner = SelectiveVMCloner(user_session=is_user)
+                cloner.stop_vm(vm_name, force=args.force, console=console)
+            except Exception as e:
+                console.print(f"[red]Failed to stop {vm_name}: {e}[/]")
+        
+        console.print("[green]✅ All VMs stopped[/]")
+        return
+    
+    name = args.name
+    
+    # Check if it's a path (contains / or . or ~)
+    if name and (name.startswith(".") or name.startswith("/") or name.startswith("~")):
+        # Treat as path - load .clonebox.yaml
+        target_path = Path(name).expanduser().resolve()
+
+        if target_path.is_dir():
+            config_file = target_path / CLONEBOX_CONFIG_FILE
+        else:
+            config_file = target_path
+
+        if not config_file.exists():
+            console.print(f"[red]❌ Config not found: {config_file}[/]")
+            return
+
+        config = load_clonebox_config(config_file)
+        name = config["vm"]["name"]
+    elif not name:
         config_file = Path.cwd() / ".clonebox.yaml"
         if config_file.exists():
             config = load_clonebox_config(config_file)
@@ -329,10 +389,70 @@ def cmd_stop(args):
 
 def cmd_restart(args):
     """Restart a VM (stop and start)."""
-    name = args.name
     user_session = getattr(args, "user", False)
     
-    if not name:
+    # Handle --all flag
+    if getattr(args, "all", False):
+        console.print("[cyan]Restarting all VMs...[/]")
+        
+        # Get all VMs from both sessions
+        all_vms = []
+        
+        # Get user session VMs
+        try:
+            user_cloner = SelectiveVMCloner(user_session=True)
+            user_vms = user_cloner.list_vms()
+            for vm in user_vms:
+                if vm["state"] in ["running", "shut off"]:
+                    all_vms.append((vm["name"], True))
+        except Exception:
+            pass
+        
+        # Get system session VMs
+        try:
+            system_cloner = SelectiveVMCloner(user_session=False)
+            system_vms = system_cloner.list_vms()
+            for vm in system_vms:
+                if vm["state"] in ["running", "shut off"]:
+                    all_vms.append((vm["name"], False))
+        except Exception:
+            pass
+        
+        if not all_vms:
+            console.print("[dim]No VMs found[/]")
+            return
+        
+        # Restart all VMs
+        for vm_name, is_user in all_vms:
+            console.print(f"Restarting {vm_name} ({'user' if is_user else 'system'} session)...")
+            try:
+                cloner = SelectiveVMCloner(user_session=is_user)
+                cloner.restart_vm(vm_name, force=args.force, open_viewer=args.open, console=console)
+            except Exception as e:
+                console.print(f"[red]Failed to restart {vm_name}: {e}[/]")
+        
+        console.print("[green]✅ All VMs restarted[/]")
+        return
+    
+    name = args.name
+    
+    # Check if it's a path (contains / or . or ~)
+    if name and (name.startswith(".") or name.startswith("/") or name.startswith("~")):
+        # Treat as path - load .clonebox.yaml
+        target_path = Path(name).expanduser().resolve()
+
+        if target_path.is_dir():
+            config_file = target_path / CLONEBOX_CONFIG_FILE
+        else:
+            config_file = target_path
+
+        if not config_file.exists():
+            console.print(f"[red]❌ Config not found: {config_file}[/]")
+            return
+
+        config = load_clonebox_config(config_file)
+        name = config["vm"]["name"]
+    elif not name:
         config_file = Path.cwd() / ".clonebox.yaml"
         if config_file.exists():
             config = load_clonebox_config(config_file)
@@ -350,7 +470,23 @@ def cmd_delete(args):
     name = args.name
     user_session = getattr(args, "user", False)
     
-    if not name:
+    # Check if it's a path (contains / or . or ~)
+    if name and (name.startswith(".") or name.startswith("/") or name.startswith("~")):
+        # Treat as path - load .clonebox.yaml
+        target_path = Path(name).expanduser().resolve()
+
+        if target_path.is_dir():
+            config_file = target_path / CLONEBOX_CONFIG_FILE
+        else:
+            config_file = target_path
+
+        if not config_file.exists():
+            console.print(f"[red]❌ Config not found: {config_file}[/]")
+            return
+
+        config = load_clonebox_config(config_file)
+        name = config["vm"]["name"]
+    elif not name:
         config_file = Path.cwd() / ".clonebox.yaml"
         if config_file.exists():
             config = load_clonebox_config(config_file)
@@ -611,7 +747,23 @@ def cmd_set_password(args):
     name = args.name
     user_session = getattr(args, "user", False)
     
-    if not name:
+    # Check if it's a path (contains / or . or ~)
+    if name and (name.startswith(".") or name.startswith("/") or name.startswith("~")):
+        # Treat as path - load .clonebox.yaml
+        target_path = Path(name).expanduser().resolve()
+
+        if target_path.is_dir():
+            config_file = target_path / CLONEBOX_CONFIG_FILE
+        else:
+            config_file = target_path
+
+        if not config_file.exists():
+            console.print(f"[red]❌ Config not found: {config_file}[/]")
+            return
+
+        config = load_clonebox_config(config_file)
+        name = config["vm"]["name"]
+    elif not name:
         config_file = Path.cwd() / ".clonebox.yaml"
         if config_file.exists():
             config = load_clonebox_config(config_file)

@@ -13,7 +13,7 @@ from typing import Dict, List, Optional, Tuple
 import questionary
 
 from clonebox.detector import SystemDetector
-from clonebox.cli.utils import console, custom_style, load_clonebox_config, CLONEBOX_CONFIG_FILE, _resolve_vm_name_and_config_file
+from clonebox.cli.utils import console, custom_style, load_clonebox_config, CLONEBOX_CONFIG_FILE, _resolve_vm_name_and_config_file, resolve_vm_name
 from clonebox import paths as _paths
 from clonebox.ssh import ssh_exec as _ssh_exec, build_ssh_command as _build_ssh_cmd
 
@@ -479,19 +479,12 @@ def cmd_set_password(args):
     """Set VM password."""
     import subprocess
     
-    vm_name = args.name
+    vm_name = resolve_vm_name(args.name)
     user_session = getattr(args, "user", False)
     username = getattr(args, "username", "ubuntu")
-    
-    # Resolve VM name from config if needed
-    if not vm_name or vm_name == ".":
-        config_file = Path.cwd() / CLONEBOX_CONFIG_FILE
-        if config_file.exists():
-            config = load_clonebox_config(config_file)
-            vm_name = config["vm"]["name"]
-        else:
-            console.print("[red]❌ No VM name specified[/]")
-            return
+    if not vm_name:
+        console.print("[red]❌ No VM name specified[/]")
+        return
     
     # Generate password if not provided
     password = getattr(args, "password", None)

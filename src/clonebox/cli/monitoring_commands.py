@@ -12,25 +12,18 @@ from rich.live import Live
 
 from clonebox.monitor import ResourceMonitor, format_bytes
 from clonebox.health import HealthCheckManager, ProbeConfig, ProbeType
-from clonebox.cli.utils import console, load_clonebox_config, CLONEBOX_CONFIG_FILE, _qga_ping, _qga_exec
+from clonebox.cli.utils import console, load_clonebox_config, CLONEBOX_CONFIG_FILE, _qga_ping, _qga_exec, resolve_vm_name
 from clonebox.validation.validator import VMValidator
 from clonebox import paths as _paths
 
 
 def cmd_monitor(args):
     """Monitor VM resource usage."""
-    vm_name = args.name
+    vm_name = resolve_vm_name(args.name)
     user_session = getattr(args, "user", False)
-    
-    # Resolve VM name from config if needed
-    if not vm_name or vm_name == ".":
-        config_file = Path.cwd() / CLONEBOX_CONFIG_FILE
-        if config_file.exists():
-            config = load_clonebox_config(config_file)
-            vm_name = config["vm"]["name"]
-        else:
-            console.print("[red]❌ No VM name specified[/]")
-            return
+    if not vm_name:
+        console.print("[red]❌ No VM name specified[/]")
+        return
     
     monitor = ResourceMonitor(user_session=user_session)
     
@@ -96,18 +89,11 @@ def cmd_monitor(args):
 
 def cmd_health(args):
     """Run health checks on a VM."""
-    vm_name = args.name
+    vm_name = resolve_vm_name(args.name)
     user_session = getattr(args, "user", False)
-    
-    # Resolve VM name from config if needed
-    if not vm_name or vm_name == ".":
-        config_file = Path.cwd() / CLONEBOX_CONFIG_FILE
-        if config_file.exists():
-            config = load_clonebox_config(config_file)
-            vm_name = config["vm"]["name"]
-        else:
-            console.print("[red]❌ No VM name specified[/]")
-            return
+    if not vm_name:
+        console.print("[red]❌ No VM name specified[/]")
+        return
     
     # Default probes
     probes = [
@@ -178,7 +164,7 @@ def cmd_health(args):
 
 def cmd_validate(args):
     """Validate a running VM (services/apps/smoke tests)."""
-    vm_name = getattr(args, "name", None)
+    vm_name = resolve_vm_name(getattr(args, "name", None))
     user_session = getattr(args, "user", False)
     smoke_test = getattr(args, "smoke_test", False)
     require_running_apps = getattr(args, "require_running_apps", False)
@@ -186,15 +172,9 @@ def cmd_validate(args):
 
     conn_uri = _paths.conn_uri(user_session)
 
-    # Resolve VM name from config if needed
-    if not vm_name or vm_name == ".":
-        config_file = Path.cwd() / CLONEBOX_CONFIG_FILE
-        if config_file.exists():
-            config = load_clonebox_config(config_file)
-            vm_name = config["vm"]["name"]
-        else:
-            console.print("[red]❌ No VM name specified[/]")
-            return
+    if not vm_name:
+        console.print("[red]❌ No VM name specified[/]")
+        return
     else:
         config_file = Path.cwd() / CLONEBOX_CONFIG_FILE
         config = load_clonebox_config(config_file) if config_file.exists() else {"vm": {"name": vm_name}}
@@ -240,19 +220,12 @@ def cmd_validate(args):
 
 def cmd_exec(args):
     """Execute command in VM."""
-    vm_name = args.name
+    vm_name = resolve_vm_name(args.name)
     user_session = getattr(args, "user", False)
     conn_uri = _paths.conn_uri(user_session)
-    
-    # Resolve VM name from config if needed
-    if not vm_name or vm_name == ".":
-        config_file = Path.cwd() / CLONEBOX_CONFIG_FILE
-        if config_file.exists():
-            config = load_clonebox_config(config_file)
-            vm_name = config["vm"]["name"]
-        else:
-            console.print("[red]❌ No VM name specified[/]")
-            return
+    if not vm_name:
+        console.print("[red]❌ No VM name specified[/]")
+        return
     
     if not args.command:
         console.print("[red]❌ No command specified[/]")
@@ -278,19 +251,12 @@ def cmd_exec(args):
 
 def cmd_watch(args):
     """Watch VM logs and status."""
-    vm_name = args.name
+    vm_name = resolve_vm_name(args.name)
     user_session = getattr(args, "user", False)
     conn_uri = _paths.conn_uri(user_session)
-    
-    # Resolve VM name from config if needed
-    if not vm_name or vm_name == ".":
-        config_file = Path.cwd() / CLONEBOX_CONFIG_FILE
-        if config_file.exists():
-            config = load_clonebox_config(config_file)
-            vm_name = config["vm"]["name"]
-        else:
-            console.print("[red]❌ No VM name specified[/]")
-            return
+    if not vm_name:
+        console.print("[red]❌ No VM name specified[/]")
+        return
     
     console.print(f"[cyan]Watching VM '{vm_name}'... Press Ctrl+C to stop[/]")
     
@@ -332,19 +298,12 @@ def cmd_watch(args):
 
 def cmd_repair(args):
     """Attempt to repair VM issues."""
-    vm_name = args.name
+    vm_name = resolve_vm_name(args.name)
     user_session = getattr(args, "user", False)
     conn_uri = _paths.conn_uri(user_session)
-    
-    # Resolve VM name from config if needed
-    if not vm_name or vm_name == ".":
-        config_file = Path.cwd() / CLONEBOX_CONFIG_FILE
-        if config_file.exists():
-            config = load_clonebox_config(config_file)
-            vm_name = config["vm"]["name"]
-        else:
-            console.print("[red]❌ No VM name specified[/]")
-            return
+    if not vm_name:
+        console.print("[red]❌ No VM name specified[/]")
+        return
     
     console.print(f"[cyan]Attempting to repair VM '{vm_name}'...[/]")
     
@@ -397,19 +356,12 @@ def cmd_repair(args):
 
 def cmd_logs(args):
     """Show VM logs."""
-    vm_name = args.name
+    vm_name = resolve_vm_name(args.name)
     user_session = getattr(args, "user", False)
     all_logs = getattr(args, "all", False)
-    
-    # Resolve VM name from config if needed
-    if not vm_name or vm_name == ".":
-        config_file = Path.cwd() / CLONEBOX_CONFIG_FILE
-        if config_file.exists():
-            config = load_clonebox_config(config_file)
-            vm_name = config["vm"]["name"]
-        else:
-            console.print("[red]❌ No VM name specified[/]")
-            return
+    if not vm_name:
+        console.print("[red]❌ No VM name specified[/]")
+        return
     
     # Call clonebox-logs script
     import subprocess

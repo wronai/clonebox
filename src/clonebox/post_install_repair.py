@@ -109,20 +109,24 @@ class _RepairCtx:
 # ═════════════════════════════════════════════════════════════════════════════
 
 
-def _repair_snap_dir_ownership(ctx: _RepairCtx, browsers: List[str]) -> List[RepairResult]:
+def _repair_snap_dir_ownership(ctx: _RepairCtx) -> List[RepairResult]:
     """
     BUG: sudo mkdir -p creates /home/<user>/snap/<app> owned by root.
     Snap runtime refuses to create per-revision dirs (e.g. snap/firefox/7766).
-    FIX: chown -R <user>:<user> /home/<user>/snap/<app>
+    FIX: chown -R <user>:<user> /home/<user>/snap/<app> for ALL snap dirs.
     """
     results = []
-    snap_apps = list(browsers) + ["pycharm-community"]
+    # Discover all snap app dirs that exist in the VM
+    snap_ls = ctx.run(
+        f"ls -1 /home/{ctx.user}/snap/ 2>/dev/null || true"
+    ) or ""
+    snap_apps = [a.strip() for a in snap_ls.splitlines() if a.strip()]
 
     for app in snap_apps:
         snap_dir = f"/home/{ctx.user}/snap/{app}"
         owner = ctx.run(f"stat -c '%U' {shlex.quote(snap_dir)} 2>/dev/null || echo MISSING")
         if owner == "MISSING" or owner is None:
-            continue  # app not installed via snap or dir doesn't exist
+            continue
 
         detected = owner != ctx.user
         repaired = False
@@ -144,22 +148,37 @@ def _repair_snap_dir_ownership(ctx: _RepairCtx, browsers: List[str]) -> List[Rep
     return results
 
 
-def _repair_browser_profile_ownership(ctx: _RepairCtx) -> List[RepairResult]:
+def _repair_copied_data_ownership(ctx: _RepairCtx, copy_paths: Dict[str, str]) -> List[RepairResult]:
     """
-    BUG: tar extract via sudo leaves browser profile dirs owned by root.
-    FIX: chown -R <user> on profile directories.
+    BUG: tar extract via sudo leaves copied dirs owned by root.
+    Affects browsers AND IDEs (VSCode, Windsurf, Cursor, PyCharm, etc.).
+    FIX: chown -R <user> on all destination directories under /home/<user>.
     """
-    results = []
-    profile_dirs = [
+    # Well-known dirs to always check (browsers + IDEs)
+    known_dirs = [
         f"/home/{ctx.user}/.mozilla",
         f"/home/{ctx.user}/.config/google-chrome",
         f"/home/{ctx.user}/.config/chromium",
         f"/home/{ctx.user}/snap/firefox/common/.mozilla",
         f"/home/{ctx.user}/snap/chromium/common/chromium",
+        f"/home/{ctx.user}/.config/Code",
+        f"/home/{ctx.user}/.vscode",
+        f"/home/{ctx.user}/.config/Windsurf",
+        f"/home/{ctx.user}/.windsurf",
+        f"/home/{ctx.user}/Windsurf",
+        f"/home/{ctx.user}/.config/Cursor",
+        f"/home/{ctx.user}/.cursor",
+        f"/home/{ctx.user}/.config/JetBrains",
+        f"/home/{ctx.user}/.local/share/JetBrains",
     ]
+    # Add actual copy_paths destinations
+    for guest_path in (copy_paths or {}).values():
+        if guest_path and guest_path.startswith(f"/home/{ctx.user}/"):
+            if guest_path not in known_dirs:
+                known_dirs.append(guest_path)
 
     bad = []
-    for d in profile_dirs:
+    for d in known_dirs:
         owner = ctx.run(f"stat -c '%U' {shlex.quote(d)} 2>/dev/null || echo MISSING")
         if owner and owner != "MISSING" and owner != ctx.user:
             bad.append((d, owner))
@@ -171,7 +190,6 @@ def _repair_browser_profile_ownership(ctx: _RepairCtx) -> List[RepairResult]:
     if detected:
         for d, _ in bad:
             ctx.run(f"sudo chown -R {ctx.user}:{ctx.user} {shlex.quote(d)}")
-        # verify
         still_bad = 0
         for d, _ in bad:
             owner = ctx.run(f"stat -c '%U' {shlex.quote(d)} 2>/dev/null")
@@ -182,31 +200,53 @@ def _repair_browser_profile_ownership(ctx: _RepairCtx) -> List[RepairResult]:
             f" ({still_bad} still broken)" if still_bad else ""
         )
 
-    results.append(RepairResult(
-        name="browser-profile-ownership",
+    return [RepairResult(
+        name="copied-data-ownership",
         detected=detected,
         repaired=repaired,
-        detail=detail or "All profile dirs owned correctly",
-    ))
-    return results
+        detail=detail or "All copied data dirs owned correctly",
+    )]
 
 
-def _repair_browser_lock_files(ctx: _RepairCtx) -> List[RepairResult]:
+def _repair_app_lock_files(ctx: _RepairCtx) -> List[RepairResult]:
     """
-    BUG: Lock files copied from running browser on host prevent VM browser launch.
-    FIX: Remove lock files.
+    BUG: Lock/socket files copied from running apps on host prevent VM app launch.
+    Affects browsers (parent.lock, SingletonLock) AND Electron IDEs
+    (Windsurf, VSCode, Cursor — SingletonLock, .lock, code.lock).
+    FIX: Remove lock files from all known app dirs.
     """
+    search_dirs = " ".join(shlex.quote(d) for d in [
+        # Browsers
+        f"/home/{ctx.user}/.mozilla",
+        f"/home/{ctx.user}/snap/firefox",
+        f"/home/{ctx.user}/.config/google-chrome",
+        f"/home/{ctx.user}/.config/chromium",
+        f"/home/{ctx.user}/snap/chromium",
+        # IDEs (Electron-based)
+        f"/home/{ctx.user}/.config/Code",
+        f"/home/{ctx.user}/.config/Windsurf",
+        f"/home/{ctx.user}/.config/Cursor",
+        # JetBrains
+        f"/home/{ctx.user}/.config/JetBrains",
+        f"/home/{ctx.user}/snap/pycharm-community",
+    ])
     lock_cmd = (
-        f"find /home/{ctx.user}/.mozilla /home/{ctx.user}/snap/firefox "
-        f"/home/{ctx.user}/.config/google-chrome /home/{ctx.user}/.config/chromium "
-        f"/home/{ctx.user}/snap/chromium "
+        f"find {search_dirs} "
         "-maxdepth 4 -type f "
         "\\( -name 'parent.lock' -o -name '.parentlock' -o -name 'lock' "
         "-o -name 'lockfile' -o -name 'SingletonLock' "
-        "-o -name 'SingletonSocket' -o -name 'SingletonCookie' \\) "
+        "-o -name 'SingletonSocket' -o -name 'SingletonCookie' "
+        "-o -name 'code.lock' -o -name '*.lock' \\) "
         "2>/dev/null"
     )
-    locks_raw = ctx.run(lock_cmd) or ""
+    # Also find stale Unix sockets that block startup
+    socket_cmd = (
+        f"find {search_dirs} "
+        "-maxdepth 4 -type s "
+        "\\( -name 'SingletonSocket' -o -name '*.sock' \\) "
+        "2>/dev/null"
+    )
+    locks_raw = (ctx.run(lock_cmd) or "") + "\n" + (ctx.run(socket_cmd) or "")
     locks = [l for l in locks_raw.strip().splitlines() if l.strip()]
 
     detected = len(locks) > 0
@@ -216,31 +256,36 @@ def _repair_browser_lock_files(ctx: _RepairCtx) -> List[RepairResult]:
     if detected:
         for lf in locks:
             ctx.run(f"sudo rm -f {shlex.quote(lf)}")
-        # verify
         remaining = ctx.run(lock_cmd) or ""
         remaining_count = len([l for l in remaining.strip().splitlines() if l.strip()])
         repaired = remaining_count == 0
-        detail = f"Removed {len(locks)} lock file(s)"
+        detail = f"Removed {len(locks)} lock/socket file(s)"
 
     return [RepairResult(
-        name="browser-lock-files",
+        name="app-lock-files",
         detected=detected,
         repaired=repaired,
         detail=detail or "No lock files found",
     )]
 
 
-def _repair_browser_crash_reports(ctx: _RepairCtx) -> List[RepairResult]:
+def _repair_crash_reports(ctx: _RepairCtx) -> List[RepairResult]:
     """
-    BUG: Stale crash dumps copied from host confuse browsers on first launch.
-    FIX: Remove .dmp and .extra files from Crash Reports dirs.
+    BUG: Stale crash dumps copied from host confuse apps on first launch.
+    Affects browsers AND Electron IDEs (Windsurf, VSCode, Cursor use Crashpad).
+    FIX: Remove .dmp and .extra files from Crash Reports / Crashpad dirs.
     """
     crash_dirs = [
+        # Browsers
         f"/home/{ctx.user}/snap/firefox/common/.mozilla/firefox/Crash Reports",
         f"/home/{ctx.user}/.mozilla/firefox/Crash Reports",
         f"/home/{ctx.user}/.config/google-chrome/Crash Reports",
         f"/home/{ctx.user}/.config/chromium/Crash Reports",
         f"/home/{ctx.user}/snap/chromium/common/chromium/Crash Reports",
+        # Electron IDEs — Crashpad
+        f"/home/{ctx.user}/.config/Code/Crashpad",
+        f"/home/{ctx.user}/.config/Windsurf/Crashpad",
+        f"/home/{ctx.user}/.config/Cursor/Crashpad",
     ]
     count = 0
     for d in crash_dirs:
@@ -272,23 +317,45 @@ def _repair_browser_crash_reports(ctx: _RepairCtx) -> List[RepairResult]:
     )]
 
 
-def _repair_snap_interfaces(ctx: _RepairCtx, browsers: List[str]) -> List[RepairResult]:
+def _repair_snap_interfaces(ctx: _RepairCtx, snap_packages: Optional[List[str]] = None) -> List[RepairResult]:
     """
-    BUG: Snap browser interfaces may not be auto-connected after snap install.
+    BUG: Snap app interfaces may not be auto-connected after install.
+    Affects browsers AND IDEs (pycharm-community, code, etc.).
     FIX: snap connect <snap>:<interface>.
     """
     required = ["desktop", "desktop-legacy", "x11", "wayland", "home", "network"]
     results = []
 
-    snap_map = {"firefox": "firefox", "chromium": "chromium"}
+    # Discover all installed snaps, or use provided list
+    if snap_packages:
+        candidates = list(snap_packages)
+    else:
+        snap_ls = ctx.run("snap list 2>/dev/null | awk 'NR>1{print $1}'") or ""
+        candidates = [s.strip() for s in snap_ls.splitlines() if s.strip()]
 
-    for browser in browsers:
-        snap_name = snap_map.get(browser)
-        if not snap_name:
+    # Only check GUI-relevant snaps
+    gui_snaps = {"firefox", "chromium", "pycharm-community", "code",
+                 "intellij-idea-community", "slack", "discord", "telegram-desktop"}
+
+    for snap_name in candidates:
+        if snap_name not in gui_snaps:
             continue
 
         installed = ctx.run(f"snap list {snap_name} >/dev/null 2>&1 && echo y || echo n")
         if installed != "y":
+            continue
+
+        # Classic snaps have full system access — no interfaces to connect
+        is_classic = ctx.run(
+            f"snap list {snap_name} 2>/dev/null | awk 'NR==2{{print $NF}}'"
+        )
+        if is_classic and "classic" in (is_classic or ""):
+            results.append(RepairResult(
+                name=f"snap-interfaces:{snap_name}",
+                detected=False,
+                repaired=False,
+                detail=f"Classic snap — no interfaces needed",
+            ))
             continue
 
         conns_raw = ctx.run(f"snap connections {snap_name} 2>/dev/null") or ""
@@ -457,6 +524,10 @@ def _repair_home_dir_permissions(ctx: _RepairCtx) -> List[RepairResult]:
         f"/home/{ctx.user}/.config",
         f"/home/{ctx.user}/.local",
         f"/home/{ctx.user}/.mozilla",
+        f"/home/{ctx.user}/.vscode",
+        f"/home/{ctx.user}/.windsurf",
+        f"/home/{ctx.user}/.cursor",
+        f"/home/{ctx.user}/Windsurf",
     ]
     bad = []
     for d in dirs_to_check:
@@ -616,6 +687,85 @@ def _repair_firefox_profiles_ini(ctx: _RepairCtx) -> List[RepairResult]:
     )]
 
 
+def _repair_ide_config_paths(ctx: _RepairCtx, host_username: Optional[str] = None) -> List[RepairResult]:
+    """
+    BUG: Electron IDE settings.json / state files may contain absolute paths
+    referencing the HOST user home (e.g. /home/tom/) instead of VM user (/home/ubuntu/).
+    Affects VSCode, Windsurf, Cursor.
+    FIX: Rewrite /home/<host_user>/ → /home/<vm_user>/ in key config files.
+    """
+    if not host_username or host_username == ctx.user:
+        return [RepairResult(
+            name="ide-config-paths",
+            detected=False,
+            repaired=False,
+            detail="Host user same as VM user or unknown — skipped",
+        )]
+
+    config_files = [
+        f"/home/{ctx.user}/.config/Code/User/settings.json",
+        f"/home/{ctx.user}/.config/Code/User/globalStorage/storage.json",
+        f"/home/{ctx.user}/.config/Windsurf/User/settings.json",
+        f"/home/{ctx.user}/.config/Windsurf/User/globalStorage/storage.json",
+        f"/home/{ctx.user}/.config/Cursor/User/settings.json",
+        f"/home/{ctx.user}/.config/Cursor/User/globalStorage/storage.json",
+    ]
+
+    fixed_files = []
+    for cfg in config_files:
+        content = ctx.run(f"cat {shlex.quote(cfg)} 2>/dev/null") or ""
+        if not content or f"/home/{host_username}/" not in content:
+            continue
+
+        # Replace host home path with VM user home path
+        ctx.run(
+            f"sudo sed -i 's|/home/{shlex.quote(host_username)}/|/home/{ctx.user}/|g' "
+            f"{shlex.quote(cfg)}"
+        )
+        ctx.run(f"sudo chown {ctx.user}:{ctx.user} {shlex.quote(cfg)}")
+        fixed_files.append(cfg.split("/")[-1])
+
+    detected = len(fixed_files) > 0
+    return [RepairResult(
+        name="ide-config-paths",
+        detected=detected,
+        repaired=detected,
+        detail=f"Fixed host paths in: {', '.join(fixed_files)}" if detected else "No stale host paths",
+    )]
+
+
+def _verify_ide_launch(ctx: _RepairCtx) -> List[RepairResult]:
+    """
+    VERIFY: Check if IDE executables exist and can show version info.
+    """
+    results = []
+    ide_checks = {
+        "windsurf": "windsurf --version 2>/dev/null | head -1",
+        "code": "code --version 2>/dev/null | head -1",
+        "cursor": "cursor --version 2>/dev/null | head -1",
+        "pycharm": "snap run pycharm-community --version 2>/dev/null | head -1",
+    }
+
+    for ide, cmd in ide_checks.items():
+        has_ide = ctx.run(f"command -v {ide} >/dev/null 2>&1 && echo y || echo n")
+        if ide == "pycharm":
+            has_ide = ctx.run("snap list pycharm-community >/dev/null 2>&1 && echo y || echo n")
+        if has_ide != "y":
+            continue
+
+        version = ctx.run(cmd, timeout=15)
+        ok = version is not None and len(version.strip()) > 0
+
+        results.append(RepairResult(
+            name=f"ide-verify:{ide}",
+            detected=not ok,
+            repaired=False,
+            detail=f"{version.strip()[:60]}" if ok else f"{ide} found but --version failed",
+        ))
+
+    return results
+
+
 def _verify_headless_browsers(ctx: _RepairCtx, browsers: List[str]) -> List[RepairResult]:
     """
     VERIFY: Run headless smoke test for each browser after all repairs.
@@ -677,6 +827,9 @@ def run_post_install_repairs(
     vm_username: str = "ubuntu",
     browsers: Optional[List[str]] = None,
     gui_mode: bool = False,
+    copy_paths: Optional[Dict[str, str]] = None,
+    snap_packages: Optional[List[str]] = None,
+    host_username: Optional[str] = None,
 ) -> RepairReport:
     """Run all post-install diagnostics and auto-repairs.
 
@@ -686,11 +839,15 @@ def run_post_install_repairs(
         vm_username: Username inside the VM.
         browsers: List of browser names to check (e.g. ["firefox", "chrome", "chromium"]).
         gui_mode: Whether the VM was configured with GUI.
+        copy_paths: Dict of host_path → guest_path that were copied.
+        snap_packages: List of snap package names installed in VM.
+        host_username: Username on the host (for path rewriting).
 
     Returns:
         RepairReport with all results.
     """
     browsers = browsers or []
+    copy_paths = copy_paths or {}
     ctx = _RepairCtx(ssh_port, ssh_key, vm_username)
     report = RepairReport()
 
@@ -699,7 +856,7 @@ def run_post_install_repairs(
     log.info("=" * 60)
 
     # Phase 1: System-level repairs
-    log.info("[Phase 1/4] System checks...")
+    log.info("[Phase 1/5] System checks...")
     report.results.extend(_repair_dns_resolution(ctx))
     report.results.extend(_repair_apt_lock(ctx))
     report.results.extend(_repair_xdg_runtime_dir(ctx))
@@ -707,23 +864,28 @@ def run_post_install_repairs(
     report.results.extend(_repair_dbus_session(ctx))
     report.results.extend(_repair_gdm_running(ctx, gui_mode))
 
-    # Phase 2: File ownership and permissions
-    log.info("[Phase 2/4] File ownership & permissions...")
+    # Phase 2: File ownership and permissions (ALL apps)
+    log.info("[Phase 2/5] File ownership & permissions...")
     report.results.extend(_repair_home_dir_permissions(ctx))
-    report.results.extend(_repair_snap_dir_ownership(ctx, browsers))
-    report.results.extend(_repair_browser_profile_ownership(ctx))
+    report.results.extend(_repair_snap_dir_ownership(ctx))
+    report.results.extend(_repair_copied_data_ownership(ctx, copy_paths))
 
-    # Phase 3: Browser-specific repairs
-    log.info("[Phase 3/4] Browser profile repairs...")
-    report.results.extend(_repair_browser_lock_files(ctx))
-    report.results.extend(_repair_browser_crash_reports(ctx))
+    # Phase 3: App-specific repairs (browsers + IDEs)
+    log.info("[Phase 3/5] App profile repairs (browsers + IDEs)...")
+    report.results.extend(_repair_app_lock_files(ctx))
+    report.results.extend(_repair_crash_reports(ctx))
     report.results.extend(_repair_firefox_profiles_ini(ctx))
-    report.results.extend(_repair_snap_interfaces(ctx, browsers))
+    report.results.extend(_repair_ide_config_paths(ctx, host_username))
+    report.results.extend(_repair_snap_interfaces(ctx, snap_packages))
     report.results.extend(_repair_fontconfig_cache(ctx))
 
-    # Phase 4: Verification
-    log.info("[Phase 4/4] Headless verification...")
+    # Phase 4: Browser verification
+    log.info("[Phase 4/5] Browser headless verification...")
     report.results.extend(_verify_headless_browsers(ctx, browsers))
+
+    # Phase 5: IDE verification
+    log.info("[Phase 5/5] IDE verification...")
+    report.results.extend(_verify_ide_launch(ctx))
 
     report.log_summary()
     return report

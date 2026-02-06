@@ -18,7 +18,6 @@ import tempfile
 import time
 import urllib.request
 import uuid
-import zlib
 import xml.etree.ElementTree as ET
 import signal
 from dataclasses import dataclass, field
@@ -27,7 +26,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 from clonebox import paths as _paths
-from clonebox.ssh import ssh_exec as _ssh_exec_shared
+from clonebox.ssh import ssh_exec as _ssh_exec_shared, build_ssh_command as _build_ssh_cmd
 
 try:
     import libvirt
@@ -348,6 +347,9 @@ class SelectiveVMCloner:
                             vm_username=config.username,
                             browsers=repair_browsers,
                             gui_mode=config.gui,
+                            copy_paths=config.copy_paths or {},
+                            snap_packages=config.snap_packages or [],
+                            host_username=os.getenv("USER"),
                         )
 
                     # Final status message
@@ -387,21 +389,10 @@ class SelectiveVMCloner:
                 return True
             return False
 
-        base_ssh = [
-            "ssh",
-            "-o",
-            "StrictHostKeyChecking=no",
-            "-o",
-            "UserKnownHostsFile=/dev/null",
-            "-o",
-            "BatchMode=yes",
-            "-o",
-            "ConnectTimeout=10",
-            "-p",
-            str(ssh_port),
-        ]
-        if ssh_key is not None:
-            base_ssh.extend(["-i", str(ssh_key)])
+        base_ssh = _build_ssh_cmd(
+            port=ssh_port, key=ssh_key, username=vm_username,
+            host="127.0.0.1", connect_timeout=10,
+        )
 
         copied = 0
         total = 0
@@ -1086,6 +1077,9 @@ class SelectiveVMCloner:
                     vm_username=config.username,
                     browsers=repair_browsers,
                     gui_mode=getattr(config, "gui", False),
+                    copy_paths=getattr(config, "copy_paths", None) or {},
+                    snap_packages=getattr(config, "snap_packages", None) or [],
+                    host_username=os.getenv("USER"),
                 )
 
                 log.info("=" * 50)
@@ -1433,7 +1427,7 @@ class SelectiveVMCloner:
             log.warning(f"Could not check base image size: {e}")
         
         # Create disk path
-        disk_dir = Path("/var/lib/libvirt/images") if not self.user_session else Path.home() / ".local/share/libvirt/images"
+        disk_dir = self.get_images_dir()
         log.debug(f"Disk directory: {disk_dir}")
         
         try:
@@ -1623,7 +1617,7 @@ class SelectiveVMCloner:
             log.debug(f"Created cloud-init ISO: {iso_path} ({os.path.getsize(iso_path)} bytes)")
             
             # Copy to final location
-            iso_dir = Path("/var/lib/libvirt/images") if not self.user_session else Path.home() / ".local/share/libvirt/images"
+            iso_dir = self.get_images_dir()
             try:
                 iso_dir.mkdir(parents=True, exist_ok=True)
             except PermissionError:
@@ -1979,16 +1973,8 @@ class SelectiveVMCloner:
             # Try SSH connection
             try:
                 result = subprocess.run(
-                    [
-                        "ssh", "-o", "StrictHostKeyChecking=no",
-                        "-o", "UserKnownHostsFile=/dev/null",
-                        "-o", "ConnectTimeout=5",
-                        "-o", "BatchMode=yes",
-                        "-o", "LogLevel=ERROR",
-                        "-p", str(ssh_port),
-                        "ubuntu@localhost",
-                        "echo 'SSH_OK'"
-                    ],
+                    _build_ssh_cmd(port=ssh_port, host="localhost",
+                                   connect_timeout=5, log_level="ERROR") + ["echo 'SSH_OK'"],
                     capture_output=True, text=True, timeout=10
                 )
                 if "SSH_OK" in result.stdout:
@@ -2048,17 +2034,10 @@ class SelectiveVMCloner:
             
             try:
                 # Check cloud-init status via SSH
+                _ssh_base = _build_ssh_cmd(port=ssh_port, host="localhost",
+                                           connect_timeout=5, log_level="ERROR")
                 result = subprocess.run(
-                    [
-                        "ssh", "-o", "StrictHostKeyChecking=no",
-                        "-o", "UserKnownHostsFile=/dev/null",
-                        "-o", "ConnectTimeout=5",
-                        "-o", "BatchMode=yes",
-                        "-o", "LogLevel=ERROR",
-                        "-p", str(ssh_port),
-                        "ubuntu@localhost",
-                        "cloud-init status 2>/dev/null || echo 'STATUS_UNKNOWN'"
-                    ],
+                    _ssh_base + ["cloud-init status 2>/dev/null || echo 'STATUS_UNKNOWN'"],
                     capture_output=True, text=True, timeout=15
                 )
                 
@@ -2069,13 +2048,7 @@ class SelectiveVMCloner:
                     if "running" in status_output.lower():
                         # Get detailed progress
                         progress_result = subprocess.run(
-                            [
-                                "ssh", "-o", "StrictHostKeyChecking=no",
-                                "-o", "UserKnownHostsFile=/dev/null",
-                                "-o", "ConnectTimeout=5",
-                                "-o", "BatchMode=yes",
-                                "-p", str(ssh_port),
-                                "ubuntu@localhost",
+                            _ssh_base + [
                                 "tail -10 /var/log/cloud-init-output.log 2>/dev/null | grep -E '(clonebox|Installing|Setting up|Get:|Unpacking|Preparing|Progress|Setting up)' | tail -3 || echo 'No progress info'"
                             ],
                             capture_output=True, text=True, timeout=10
@@ -2101,13 +2074,7 @@ class SelectiveVMCloner:
                         else:
                             # Check if apt is still running
                             apt_check = subprocess.run(
-                                [
-                                    "ssh", "-o", "StrictHostKeyChecking=no",
-                                    "-o", "UserKnownHostsFile=/dev/null",
-                                    "-o", "ConnectTimeout=5",
-                                    "-o", "BatchMode=yes",
-                                    "-p", str(ssh_port),
-                                    "ubuntu@localhost",
+                                _ssh_base + [
                                     "pgrep -f 'apt-get|dpkg' >/dev/null 2>&1 && echo 'APT_RUNNING' || echo 'APT_IDLE'"
                                 ],
                                 capture_output=True, text=True, timeout=5
@@ -2174,16 +2141,11 @@ class SelectiveVMCloner:
             total_checks = 4
             status_details = []
             
+            _ssh_base = _build_ssh_cmd(port=ssh_port, host="localhost", connect_timeout=5)
             try:
                 # Check 1: GDM service status
                 gdm_result = subprocess.run(
-                    [
-                        "ssh", "-o", "StrictHostKeyChecking=no",
-                        "-o", "UserKnownHostsFile=/dev/null",
-                        "-o", "ConnectTimeout=5",
-                        "-o", "BatchMode=yes",
-                        "-p", str(ssh_port),
-                        "ubuntu@localhost",
+                    _ssh_base + [
                         "systemctl is-active gdm3 2>/dev/null || systemctl is-active gdm 2>/dev/null || echo 'inactive'"
                     ],
                     capture_output=True, text=True, timeout=10
@@ -2197,13 +2159,7 @@ class SelectiveVMCloner:
                 
                 # Check 2: Desktop packages installed
                 desktop_result = subprocess.run(
-                    [
-                        "ssh", "-o", "StrictHostKeyChecking=no",
-                        "-o", "UserKnownHostsFile=/dev/null",
-                        "-o", "ConnectTimeout=5",
-                        "-o", "BatchMode=yes",
-                        "-p", str(ssh_port),
-                        "ubuntu@localhost",
+                    _ssh_base + [
                         "dpkg -l ubuntu-desktop-minimal 2>/dev/null | grep -q '^ii' && echo 'installed' || echo 'missing'"
                     ],
                     capture_output=True, text=True, timeout=10
@@ -2218,15 +2174,10 @@ class SelectiveVMCloner:
                 # Check 3: Snap packages installed (detailed check)
                 snap_status = []
                 if config and config.snap_packages:
+                    _ssh_snap = _build_ssh_cmd(port=ssh_port, host="localhost", connect_timeout=3)
                     for snap in config.snap_packages:
                         snap_check = subprocess.run(
-                            [
-                                "ssh", "-o", "StrictHostKeyChecking=no",
-                                "-o", "UserKnownHostsFile=/dev/null",
-                                "-o", "ConnectTimeout=3",
-                                "-o", "BatchMode=yes",
-                                "-p", str(ssh_port),
-                                "ubuntu@localhost",
+                            _ssh_snap + [
                                 f"snap list 2>/dev/null | grep -q '^{snap} ' && echo 'installed' || echo 'missing'"
                             ],
                             capture_output=True, text=True, timeout=5
@@ -2249,13 +2200,7 @@ class SelectiveVMCloner:
                 
                 # Check 4: Graphical target active
                 target_result = subprocess.run(
-                    [
-                        "ssh", "-o", "StrictHostKeyChecking=no",
-                        "-o", "UserKnownHostsFile=/dev/null",
-                        "-o", "ConnectTimeout=5",
-                        "-o", "BatchMode=yes",
-                        "-p", str(ssh_port),
-                        "ubuntu@localhost",
+                    _ssh_base + [
                         "systemctl get-default 2>/dev/null | grep -q graphical && echo 'graphical' || echo 'other'"
                     ],
                     capture_output=True, text=True, timeout=10
@@ -2297,6 +2242,7 @@ class SelectiveVMCloner:
         log.info("  DEPLOYMENT VERIFICATION REPORT")
         log.info("  " + "=" * 58)
         
+        _ssh_base = _build_ssh_cmd(port=ssh_port, host="localhost", connect_timeout=5)
         try:
             # 1. Verify packages from YAML
             log.info("  📦 Package Verification:")
@@ -2304,13 +2250,7 @@ class SelectiveVMCloner:
                 installed_count = 0
                 for pkg in config.packages[:10]:  # Check first 10 packages
                     result = subprocess.run(
-                        [
-                            "ssh", "-o", "StrictHostKeyChecking=no",
-                            "-o", "UserKnownHostsFile=/dev/null",
-                            "-o", "ConnectTimeout=5",
-                            "-o", "BatchMode=yes",
-                            "-p", str(ssh_port),
-                            "ubuntu@localhost",
+                        _ssh_base + [
                             f"dpkg -l {pkg} 2>/dev/null | grep -q '^ii' && echo 'OK' || echo 'MISSING'"
                         ],
                         capture_output=True, text=True, timeout=10
@@ -2328,13 +2268,7 @@ class SelectiveVMCloner:
             log.info("  🧩 Snap Package Verification:")
             if config and config.snap_packages:
                 snap_result = subprocess.run(
-                    [
-                        "ssh", "-o", "StrictHostKeyChecking=no",
-                        "-o", "UserKnownHostsFile=/dev/null",
-                        "-o", "ConnectTimeout=5",
-                        "-o", "BatchMode=yes",
-                        "-p", str(ssh_port),
-                        "ubuntu@localhost",
+                    _ssh_base + [
                         "snap list 2>/dev/null | tail -n +2 | awk '{print $1}'"
                     ],
                     capture_output=True, text=True, timeout=10
@@ -2358,13 +2292,7 @@ class SelectiveVMCloner:
                 active_services = 0
                 for service in config.services[:10]:  # Check first 10 services
                     result = subprocess.run(
-                        [
-                            "ssh", "-o", "StrictHostKeyChecking=no",
-                            "-o", "UserKnownHostsFile=/dev/null",
-                            "-o", "ConnectTimeout=5",
-                            "-o", "BatchMode=yes",
-                            "-p", str(ssh_port),
-                            "ubuntu@localhost",
+                        _ssh_base + [
                             f"systemctl is-active {service} 2>/dev/null || echo 'inactive'"
                         ],
                         capture_output=True, text=True, timeout=10
@@ -2384,13 +2312,7 @@ class SelectiveVMCloner:
                 mounted_paths = 0
                 for host_path, vm_path in config.paths.items():
                     result = subprocess.run(
-                        [
-                            "ssh", "-o", "StrictHostKeyChecking=no",
-                            "-o", "UserKnownHostsFile=/dev/null",
-                            "-o", "ConnectTimeout=5",
-                            "-o", "BatchMode=yes",
-                            "-p", str(ssh_port),
-                            "ubuntu@localhost",
+                        _ssh_base + [
                             f"test -d {vm_path} && echo 'EXISTS' || echo 'MISSING'"
                         ],
                         capture_output=True, text=True, timeout=10
@@ -2410,13 +2332,7 @@ class SelectiveVMCloner:
                 synced_paths = 0
                 for host_path, vm_path in config.copy_paths.items():
                     result = subprocess.run(
-                        [
-                            "ssh", "-o", "StrictHostKeyChecking=no",
-                            "-o", "UserKnownHostsFile=/dev/null",
-                            "-o", "ConnectTimeout=5",
-                            "-o", "BatchMode=yes",
-                            "-p", str(ssh_port),
-                            "ubuntu@localhost",
+                        _ssh_base + [
                             f"test -d {vm_path} && echo 'EXISTS' || echo 'MISSING'"
                         ],
                         capture_output=True, text=True, timeout=10
@@ -2435,13 +2351,7 @@ class SelectiveVMCloner:
             if config and config.post_commands:
                 # Check for markers or results of post-commands
                 result = subprocess.run(
-                    [
-                        "ssh", "-o", "StrictHostKeyChecking=no",
-                        "-o", "UserKnownHostsFile=/dev/null",
-                        "-o", "ConnectTimeout=5",
-                        "-o", "BatchMode=yes",
-                        "-p", str(ssh_port),
-                        "ubuntu@localhost",
+                    _ssh_base + [
                         "test -f /tmp/clonebox-post-commands-done && echo 'DONE' || echo 'UNKNOWN'"
                     ],
                     capture_output=True, text=True, timeout=10
@@ -2457,30 +2367,14 @@ class SelectiveVMCloner:
             log.info("  📊 System Summary:")
             # Disk usage
             disk_result = subprocess.run(
-                [
-                    "ssh", "-o", "StrictHostKeyChecking=no",
-                    "-o", "UserKnownHostsFile=/dev/null",
-                    "-o", "ConnectTimeout=5",
-                    "-o", "BatchMode=yes",
-                    "-p", str(ssh_port),
-                    "ubuntu@localhost",
-                    "df -h / | tail -1 | awk '{print $5}'"
-                ],
+                _ssh_base + ["df -h / | tail -1 | awk '{print $5}'"],
                 capture_output=True, text=True, timeout=10
             )
             disk_usage = disk_result.stdout.strip() if disk_result.stdout.strip() else "Unknown"
             
             # Memory usage
             mem_result = subprocess.run(
-                [
-                    "ssh", "-o", "StrictHostKeyChecking=no",
-                    "-o", "UserKnownHostsFile=/dev/null",
-                    "-o", "ConnectTimeout=5",
-                    "-o", "BatchMode=yes",
-                    "-p", str(ssh_port),
-                    "ubuntu@localhost",
-                    "free -h | grep '^Mem:' | awk '{print $3 \"/\" $2}'"
-                ],
+                _ssh_base + ["free -h | grep '^Mem:' | awk '{print $3 \"/\" $2}'"],
                 capture_output=True, text=True, timeout=10
             )
             mem_usage = mem_result.stdout.strip() if mem_result.stdout.strip() else "Unknown"
@@ -2491,13 +2385,7 @@ class SelectiveVMCloner:
             # 8. Check for any errors in logs
             log.info("  📋 Error Check:")
             error_result = subprocess.run(
-                [
-                    "ssh", "-o", "StrictHostKeyChecking=no",
-                    "-o", "UserKnownHostsFile=/dev/null",
-                    "-o", "ConnectTimeout=5",
-                    "-o", "BatchMode=yes",
-                    "-p", str(ssh_port),
-                    "ubuntu@localhost",
+                _ssh_base + [
                     "sudo journalctl -u cloud-final --no-pager -n 20 | grep -i error | wc -l"
                 ],
                 capture_output=True, text=True, timeout=10
@@ -2685,7 +2573,7 @@ class SelectiveVMCloner:
                 log.debug(f"Existing port {existing_port} is in use, allocating new one")
         
         # Try to allocate a deterministic port based on VM name (for consistency)
-        base_port = 22000 + (zlib.crc32(vm_name.encode()) % 1000)
+        base_port = _paths.fallback_ssh_port(vm_name)
         log.debug(f"Trying deterministic port based on VM name: {base_port}")
         
         try:

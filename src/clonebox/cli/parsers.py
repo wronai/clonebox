@@ -114,6 +114,11 @@ def main():
         action="store_true",
         help="Use user session (qemu:///session) - no root required",
     )
+    stop_parser.add_argument(
+        "--all",
+        action="store_true",
+        help="Stop all VMs",
+    )
     stop_parser.set_defaults(func=cmd_stop)
 
     # Restart command
@@ -137,6 +142,11 @@ def main():
         "--open",
         action="store_true",
         help="Open GUI after restart",
+    )
+    restart_parser.add_argument(
+        "--all",
+        action="store_true",
+        help="Restart all VMs",
     )
     restart_parser.set_defaults(func=cmd_restart)
 

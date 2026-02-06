@@ -7,23 +7,16 @@ from pathlib import Path
 from typing import Optional
 
 from clonebox.snapshots import SnapshotManager, SnapshotType
-from clonebox.cli.utils import console, load_clonebox_config, CLONEBOX_CONFIG_FILE
+from clonebox.cli.utils import console, load_clonebox_config, CLONEBOX_CONFIG_FILE, resolve_vm_name
 
 
 def cmd_snapshot_create(args):
     """Create a VM snapshot."""
-    vm_name = args.name
+    vm_name = resolve_vm_name(args.name)
     user_session = getattr(args, "user", False)
-    
-    # Resolve VM name from config if needed
-    if not vm_name or vm_name == ".":
-        config_file = Path.cwd() / CLONEBOX_CONFIG_FILE
-        if config_file.exists():
-            config = load_clonebox_config(config_file)
-            vm_name = config["vm"]["name"]
-        else:
-            console.print("[red]❌ No VM name specified[/]")
-            return
+    if not vm_name:
+        console.print("[red]❌ No VM name specified[/]")
+        return
     
     snapshot_type = SnapshotType.DISK if args.type == "disk" else SnapshotType.MEMORY
     
@@ -41,18 +34,11 @@ def cmd_snapshot_create(args):
 
 def cmd_snapshot_list(args):
     """List VM snapshots."""
-    vm_name = args.name
+    vm_name = resolve_vm_name(args.name)
     user_session = getattr(args, "user", False)
-    
-    # Resolve VM name from config if needed
-    if not vm_name or vm_name == ".":
-        config_file = Path.cwd() / CLONEBOX_CONFIG_FILE
-        if config_file.exists():
-            config = load_clonebox_config(config_file)
-            vm_name = config["vm"]["name"]
-        else:
-            console.print("[red]❌ No VM name specified[/]")
-            return
+    if not vm_name:
+        console.print("[red]❌ No VM name specified[/]")
+        return
     
     manager = SnapshotManager(user_session=user_session)
     snapshots = manager.list_snapshots(vm_name)

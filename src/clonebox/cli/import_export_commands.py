@@ -11,24 +11,17 @@ import questionary
 
 from clonebox.exporter import SecureExporter, VMExporter
 from clonebox.importer import SecureImporter, VMImporter
-from clonebox.cli.utils import console, custom_style, load_clonebox_config, CLONEBOX_CONFIG_FILE
+from clonebox.cli.utils import console, custom_style, load_clonebox_config, CLONEBOX_CONFIG_FILE, resolve_vm_name
 
 
 def cmd_export(args):
     """Export VM configuration and data."""
-    vm_name = args.name
+    vm_name = resolve_vm_name(args.name)
     output_path = Path(args.output)
     user_session = getattr(args, "user", False)
-    
-    # Resolve VM name from config if needed
-    if not vm_name or vm_name == ".":
-        config_file = Path.cwd() / CLONEBOX_CONFIG_FILE
-        if config_file.exists():
-            config = load_clonebox_config(config_file)
-            vm_name = config["vm"]["name"]
-        else:
-            console.print("[red]❌ No VM name specified[/]")
-            return
+    if not vm_name:
+        console.print("[red]❌ No VM name specified[/]")
+        return
     
     # Check if VM exists
     from clonebox.cloner import SelectiveVMCloner
@@ -80,16 +73,10 @@ def cmd_export_encrypted(args):
     vm_name = args.name
     output_path = Path(args.output)
     user_session = getattr(args, "user", False)
-    
-    # Resolve VM name from config if needed
-    if not vm_name or vm_name == ".":
-        config_file = Path.cwd() / CLONEBOX_CONFIG_FILE
-        if config_file.exists():
-            config = load_clonebox_config(config_file)
-            vm_name = config["vm"]["name"]
-        else:
-            console.print("[red]❌ No VM name specified[/]")
-            return
+    vm_name = resolve_vm_name(vm_name)
+    if not vm_name:
+        console.print("[red]❌ No VM name specified[/]")
+        return
     
     # Get encryption password
     if args.password:
@@ -161,15 +148,10 @@ def cmd_export_remote(args):
     remote_path = args.remote_path
     user_session = getattr(args, "user", False)
     
-    # Resolve VM name from config if needed
-    if not vm_name or vm_name == ".":
-        config_file = Path.cwd() / CLONEBOX_CONFIG_FILE
-        if config_file.exists():
-            config = load_clonebox_config(config_file)
-            vm_name = config["vm"]["name"]
-        else:
-            console.print("[red]❌ No VM name specified[/]")
-            return
+    vm_name = resolve_vm_name(vm_name)
+    if not vm_name:
+        console.print("[red]❌ No VM name specified[/]")
+        return
     
     # Export locally first
     from clonebox.exporter import VMExporter
@@ -237,15 +219,10 @@ def cmd_sync_key(args):
     from clonebox import paths as _paths
     conn_uri = _paths.conn_uri(user_session)
     
-    # Resolve VM name from config if needed
-    if not vm_name or vm_name == ".":
-        config_file = Path.cwd() / CLONEBOX_CONFIG_FILE
-        if config_file.exists():
-            config = load_clonebox_config(config_file)
-            vm_name = config["vm"]["name"]
-        else:
-            console.print("[red]❌ No VM name specified[/]")
-            return
+    vm_name = resolve_vm_name(vm_name)
+    if not vm_name:
+        console.print("[red]❌ No VM name specified[/]")
+        return
     
     # Get public key
     ssh_dir = Path.home() / ".ssh"
