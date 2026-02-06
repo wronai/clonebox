@@ -329,7 +329,16 @@ clonebox clone . --user --run --replace --browser-profiles chrome firefox
 # Lub automatycznie (dla GUI VM wykryje i skopiuje wszystkie profile)
 clonebox clone . --user --run --replace
 
+# health check (runs all diagnostics)
+bash scripts/clonebox-health-check.sh
+
 clonebox logs . --user --all
+
+# Enhanced logs with detailed diagnostics
+bash scripts/clonebox-logs-enhanced.sh . --user --all
+
+# Comprehensive VM diagnostics
+bash scripts/diagnose-vm-enhanced.sh
 
 clonebox open . --user
 
@@ -1219,6 +1228,222 @@ If shared directories appear empty after VM restart:
 3. **Verify access mode:**
    - VMs created with `accessmode="mapped"` allow any user to access mounts
    - Mount options include `uid=1000,gid=1000` for user access
+
+## Enhanced Logging and Diagnostics
+
+CloneBox provides enhanced logging and diagnostic tools for deep troubleshooting and monitoring.
+
+### Quick Health Check (Recommended First Step)
+
+For a comprehensive analysis of your VM's health, run the unified health check:
+
+```bash
+# Run complete health check (recommended)
+clonebox-health-check.sh
+
+# With specific VM name
+clonebox-health-check.sh my-vm-name
+
+# Health check generates:
+# - Summary report with overall status
+# - Detailed issues list with solutions
+# - Full diagnostic output
+# - All logs collected in one place
+```
+
+The health check automatically:
+- ✅ Verifies VM is running and responsive
+- ✅ Tests network connectivity (SSH, display ports)
+- ✅ Checks QEMU Guest Agent functionality
+- ✅ Analyzes service status (SSH, Docker, GDM, etc.)
+- ✅ Monitors cloud-init progress
+- ✅ Evaluates resource usage (CPU, memory, disk)
+- ✅ Runs all enhanced diagnostic tools
+- ✅ Collects and analyzes logs for errors
+- ✅ Generates actionable recommendations
+
+### Understanding Health Check Output
+
+```
+HEALTH CHECK COMPLETE
+=====================
+
+✓ VM is HEALTHY - No issues detected!      # All good
+⚠ VM is operational with 2 warning(s)     # Minor issues
+✗ VM has 1 critical issue(s) and 2 warning(s)  # Problems found
+
+Report saved to: ~/.local/share/clonebox/reports/clone-clonebox-health-20240206-112233
+Summary: ~/.local/share/clonebox/reports/clone-clonebox-health-20240206-112233/summary.txt
+Issues: ~/.local/share/clonebox/reports/clone-clonebox-health-20240206-112233/issues.txt
+```
+
+### Enhanced Log Viewer
+
+The enhanced log viewer provides comprehensive log access with additional diagnostics:
+
+```bash
+# Interactive enhanced log viewer
+clonebox-logs-enhanced.sh . --user
+
+# Show all logs at once
+clonebox-logs-enhanced.sh . --user --all
+
+# Follow live logs (like tail -f)
+clonebox-logs-enhanced.sh . --user --follow
+```
+
+Features:
+- **Multiple log sources**: Boot logs, monitor logs, cloud-init logs, system logs
+- **Service status**: Real-time status of key services (SSH, Docker, GDM, QEMU Guest Agent)
+- **Error filtering**: View only error messages from all logs
+- **Performance metrics**: CPU, memory, and disk usage statistics
+- **Network diagnostics**: Interface configuration, routing, DNS
+- **Export capability**: Save all logs to a compressed archive
+- **Live monitoring**: Follow logs in real-time
+
+### Comprehensive VM Diagnostics
+
+The enhanced diagnostic script performs a thorough VM health check:
+
+```bash
+# Run comprehensive diagnostics
+bash scripts/diagnose-vm-enhanced.sh
+
+# Diagnostic report is saved to: <vm-name>-diagnostic-<timestamp>.txt
+```
+
+Diagnostic categories:
+- **VM Status**: State, CPU, memory, autostart settings
+- **Network Analysis**: Port forwarding, passt process, connectivity tests
+- **SSH Configuration**: Key permissions, port status, connection testing
+- **QEMU Guest Agent**: Responsiveness, guest OS info, time sync
+- **Serial Log Analysis**: Boot timeline, cloud-init progress, errors
+- **Performance**: Host and VM resource utilization
+- **GUI Environment**: Desktop status, display server, graphics ports
+- **Security**: SSH key encryption, network isolation
+
+### Log Sources
+
+The enhanced logging system collects from multiple sources:
+
+#### VM Internal Logs
+- `/var/log/clonebox-boot.log` - CloneBox boot process
+- `/var/log/clonebox-monitor.log` - Service monitoring
+- `/var/log/cloud-init-output.log` - Cloud-init installation output
+- `/var/log/cloud-init.log` - Detailed cloud-init logs
+- `/var/log/syslog` - System logs
+
+#### Diagnostic Information
+- Cloud-init status (JSON format)
+- Service status for critical components
+- Recent error messages from journalctl
+- Disk usage and large directories
+- Network configuration and routes
+- Performance metrics (load, memory, processes)
+
+### Using Logs for Troubleshooting
+
+#### Check Cloud-init Progress
+```bash
+# Quick check
+clonebox-logs-enhanced.sh . --user | grep -E "(running|done|error)"
+
+# Detailed cloud-init status
+clonebox-logs-enhanced.sh . --user
+# Select option 3 for cloud-init output log
+```
+
+#### Identify Service Failures
+```bash
+# View service status
+clonebox-logs-enhanced.sh . --user
+# Select option 6 for service status
+
+# View only errors
+clonebox-logs-enhanced.sh . --user
+# Select option 7 for recent errors
+```
+
+#### Performance Issues
+```bash
+# Check performance metrics
+clonebox-logs-enhanced.sh . --user
+# Select option 8 for performance metrics
+
+# Full diagnostic report
+bash scripts/diagnose-vm-enhanced.sh
+# Check the "Performance Analysis" section
+```
+
+#### Network Problems
+```bash
+# Network diagnostics
+clonebox-logs-enhanced.sh . --user
+# Select option 9 for network configuration
+
+# Full network analysis
+bash scripts/diagnose-vm-enhanced.sh
+# Check the "Network Deep Analysis" section
+```
+
+### Exporting Logs
+
+For sharing or offline analysis:
+
+```bash
+# Export all logs to archive
+clonebox-logs-enhanced.sh . --user
+# Select option 12 to export
+
+# Export diagnostic report
+bash scripts/diagnose-vm-enhanced.sh
+# Report automatically saved to <vm-name>-diagnostic-<timestamp>.txt
+```
+
+### Integration with CloneBox Commands
+
+The enhanced logging integrates with standard CloneBox commands. Recommended workflow:
+
+```bash
+# 1. After VM creation, run health check
+clonebox-health-check.sh
+
+# 2. If issues found, review them
+cat ~/.local/share/clonebox/reports/*/issues.txt
+
+# 3. Auto-repair if needed
+clonebox repair . --user --auto
+
+# 4. Re-check health
+clonebox-health-check.sh
+
+# 5. For ongoing monitoring
+clonebox watch . --user
+
+# 6. For detailed log analysis
+clonebox-logs-enhanced.sh . --user --all
+
+# 7. Full validation test
+clonebox test . --user --validate --smoke-test
+```
+
+Quick reference:
+```bash
+# Standard logs (basic)
+clonebox logs . --user --all
+
+# Enhanced logs (detailed)
+clonebox-logs-enhanced.sh . --user --all
+
+# Complete health analysis
+clonebox-health-check.sh
+
+# Live monitoring
+clonebox watch . --user
+
+# Health check with diagnostics
+bash scripts/diagnose-vm-enhanced.sh
+```
 
 ## Advanced Usage
 

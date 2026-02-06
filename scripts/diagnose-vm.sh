@@ -364,3 +364,72 @@ ${BOLD}Manual network fix (via console):${NC}
 EOF
 
 echo -e "\n${BOLD}Diagnostic complete${NC}"
+
+# Browser Deep Check section
+section "Browser Deep Check"
+
+# Check if SSH is available for browser diagnostics
+if [ -f "$SSH_KEY" ] && [ -f "$SSH_PORT_FILE" ]; then
+    SSH_PORT=$(cat "$SSH_PORT_FILE")
+    
+    # Check browser installation
+    log "Browser installation status:"
+    ssh -o ConnectTimeout=5 -o StrictHostKeyChecking=no -o BatchMode=yes \
+        -i "$SSH_KEY" -p "$SSH_PORT" ubuntu@127.0.0.1 \
+        "which firefox chromium google-chrome google-chrome-stable 2>/dev/null" 2>/dev/null | sed 's/^/  /' || warn "Cannot check browser binaries"
+    
+    # Check snap packages
+    log "Snap browser packages:"
+    ssh -o ConnectTimeout=5 -o StrictHostKeyChecking=no -o BatchMode=yes \
+        -i "$SSH_KEY" -p "$SSH_PORT" ubuntu@127.0.0.1 \
+        "snap list 2>/dev/null | grep -E '(firefox|chromium)'" 2>/dev/null | sed 's/^/  /' || warn "Cannot check snap list"
+    
+    # Check browser profile paths
+    log "Chrome profile:"
+    ssh -o ConnectTimeout=5 -o StrictHostKeyChecking=no -o BatchMode=yes \
+        -i "$SSH_KEY" -p "$SSH_PORT" ubuntu@127.0.0.1 \
+        "ls -la ~/.config/google-chrome/ 2>/dev/null | head -5" 2>/dev/null | sed 's/^/  /' || warn "Chrome profile not found"
+    
+    log "Chromium profile (snap):"
+    ssh -o ConnectTimeout=5 -o StrictHostKeyChecking=no -o BatchMode=yes \
+        -i "$SSH_KEY" -p "$SSH_PORT" ubuntu@127.0.0.1 \
+        "ls -la ~/snap/chromium/common/chromium/ 2>/dev/null | head -5" 2>/dev/null | sed 's/^/  /' || warn "Chromium profile not found"
+    
+    log "Firefox profile (snap):"
+    ssh -o ConnectTimeout=5 -o StrictHostKeyChecking=no -o BatchMode=yes \
+        -i "$SSH_KEY" -p "$SSH_PORT" ubuntu@127.0.0.1 \
+        "ls -la ~/snap/firefox/common/.mozilla/firefox/ 2>/dev/null | head -5" 2>/dev/null | sed 's/^/  /' || warn "Firefox profile not found"
+    
+    # Check browser processes
+    log "Running browser processes:"
+    ssh -o ConnectTimeout=5 -o StrictHostKeyChecking=no -o BatchMode=yes \
+        -i "$SSH_KEY" -p "$SSH_PORT" ubuntu@127.0.0.1 \
+        "pgrep -a -f 'chrome|chromium|firefox' 2>/dev/null | head -5" 2>/dev/null | sed 's/^/  /' || log "No browser processes running"
+    
+    # Test headless chrome
+    log "Testing Chrome headless:"
+    CHROME_TEST=$(ssh -o ConnectTimeout=5 -o StrictHostKeyChecking=no -o BatchMode=yes \
+        -i "$SSH_KEY" -p "$SSH_PORT" ubuntu@127.0.0.1 \
+        "timeout 5 google-chrome --headless --disable-gpu --dump-dom https://example.com 2>&1 | head -1" 2>/dev/null || echo "FAILED")
+    if echo "$CHROME_TEST" | grep -q "<!doctype\|<html"; then
+        ok "Chrome headless working"
+    else
+        warn "Chrome headless test: $CHROME_TEST"
+    fi
+    
+    # Browser logs from journalctl
+    log "Recent browser logs (journalctl):"
+    ssh -o ConnectTimeout=5 -o StrictHostKeyChecking=no -o BatchMode=yes \
+        -i "$SSH_KEY" -p "$SSH_PORT" ubuntu@127.0.0.1 \
+        "journalctl -n 10 --no-pager 2>/dev/null | grep -iE 'chrome|chromium|firefox|snap' | tail -5" 2>/dev/null | sed 's/^/  /' || log "No browser logs found"
+    
+    # Snap browser service status
+    log "Snap browser services:"
+    ssh -o ConnectTimeout=5 -o StrictHostKeyChecking=no -o BatchMode=yes \
+        -i "$SSH_KEY" -p "$SSH_PORT" ubuntu@127.0.0.1 \
+        "systemctl --user list-units --type=service 2>/dev/null | grep -E 'snap.*(chrome|chromium|firefox)'" 2>/dev/null | sed 's/^/  /' || log "No snap browser services"
+    
+else
+    warn "SSH not available for browser diagnostics"
+    log "Browser check requires working SSH connection"
+fi

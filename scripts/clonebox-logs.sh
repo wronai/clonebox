@@ -40,6 +40,24 @@ if [ "$USE_QGA" = "true" ]; then
     SCRIPT_DIR="$(dirname "$(readlink -f "$0")")"
     python3 "$SCRIPT_DIR/fetch-logs.py" "$VM_NAME" "$CONNECT" "$TEMP_DIR"
     
+    # Fetch browser-specific logs
+    log "Fetching browser logs..."
+    ssh -o ConnectTimeout=5 -o StrictHostKeyChecking=no -o BatchMode=yes \
+        -i "$VM_DIR/ssh_key" -p "$(cat "$VM_DIR/ssh_port")" ubuntu@127.0.0.1 \
+        "journalctl -n 50 --no-pager 2>/dev/null | grep -iE 'chrome|chromium|firefox|snap'" > "$TEMP_DIR/browser-journal.log" 2>/dev/null || true
+    
+    ssh -o ConnectTimeout=5 -o StrictHostKeyChecking=no -o BatchMode=yes \
+        -i "$VM_DIR/ssh_key" -p "$(cat "$VM_DIR/ssh_port")" ubuntu@127.0.0.1 \
+        "snap list 2>/dev/null | grep -E '(firefox|chromium)'" > "$TEMP_DIR/snap-list.log" 2>/dev/null || true
+    
+    ssh -o ConnectTimeout=5 -o StrictHostKeyChecking=no -o BatchMode=yes \
+        -i "$VM_DIR/ssh_key" -p "$(cat "$VM_DIR/ssh_port")" ubuntu@127.0.0.1 \
+        "ls -la ~/.config/google-chrome/ ~/snap/chromium/common/chromium/ ~/snap/firefox/common/.mozilla/firefox/ 2>&1" > "$TEMP_DIR/browser-profiles.log" 2>/dev/null || true
+    
+    ssh -o ConnectTimeout=5 -o StrictHostKeyChecking=no -o BatchMode=yes \
+        -i "$VM_DIR/ssh_key" -p "$(cat "$VM_DIR/ssh_port")" ubuntu@127.0.0.1 \
+        "pgrep -a -f 'chrome|chromium|firefox' 2>/dev/null" > "$TEMP_DIR/browser-processes.log" 2>/dev/null || true
+    
     echo ""
     echo "📋 Available logs:"
     echo "-------------------"
@@ -62,6 +80,19 @@ if [ "$USE_QGA" = "true" ]; then
         echo ""
         echo "--- Cloud-init log (last 100 lines) ---"
         cat "$TEMP_DIR/cloud-init.log"
+        echo ""
+        echo "--- Browser logs ---"
+        echo "Browser journal logs:"
+        cat "$TEMP_DIR/browser-journal.log" 2>/dev/null || echo "No browser journal logs"
+        echo ""
+        echo "Snap packages:"
+        cat "$TEMP_DIR/snap-list.log" 2>/dev/null || echo "No snap list"
+        echo ""
+        echo "Browser profiles:"
+        cat "$TEMP_DIR/browser-profiles.log" 2>/dev/null || echo "No browser profiles"
+        echo ""
+        echo "Browser processes:"
+        cat "$TEMP_DIR/browser-processes.log" 2>/dev/null || echo "No browser processes"
         exit 0
     fi
     
@@ -73,7 +104,8 @@ if [ "$USE_QGA" = "true" ]; then
     echo "4) Cloud-init log"
     echo "5) All logs summary"
     echo "6) Show all logs at once"
-    echo "7) Exit"
+    echo "7) Browser logs (Chrome/Chromium/Firefox)"
+    echo "8) Exit"
     echo ""
     
     read -p "Select option: " choice
@@ -127,8 +159,37 @@ if [ "$USE_QGA" = "true" ]; then
             echo ""
             echo "--- Cloud-init log (last 100 lines) ---"
             cat "$TEMP_DIR/cloud-init.log"
+            echo ""
+            echo "--- Browser logs ---"
+            echo "Browser journal logs:"
+            cat "$TEMP_DIR/browser-journal.log" 2>/dev/null || echo "No browser journal logs"
+            echo ""
+            echo "Snap packages:"
+            cat "$TEMP_DIR/snap-list.log" 2>/dev/null || echo "No snap list"
+            echo ""
+            echo "Browser profiles:"
+            cat "$TEMP_DIR/browser-profiles.log" 2>/dev/null || echo "No browser profiles"
+            echo ""
+            echo "Browser processes:"
+            cat "$TEMP_DIR/browser-processes.log" 2>/dev/null || echo "No browser processes"
             ;;
         7)
+            echo "🌐 Browser logs:"
+            echo "================"
+            echo ""
+            echo "Browser journal logs ($(wc -l < "$TEMP_DIR/browser-journal.log" 2>/dev/null || echo 0) lines):"
+            cat "$TEMP_DIR/browser-journal.log" 2>/dev/null || echo "No browser journal logs"
+            echo ""
+            echo "Snap browser packages:"
+            cat "$TEMP_DIR/snap-list.log" 2>/dev/null || echo "No snap list"
+            echo ""
+            echo "Browser profile paths:"
+            cat "$TEMP_DIR/browser-profiles.log" 2>/dev/null || echo "No browser profiles"
+            echo ""
+            echo "Running browser processes:"
+            cat "$TEMP_DIR/browser-processes.log" 2>/dev/null || echo "No browser processes running"
+            ;;
+        8)
             echo "👋 Exiting..."
             exit 0
             ;;
