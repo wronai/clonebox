@@ -1,3 +1,31 @@
+## [1.1.44] - 2026-02-06
+
+### Summary
+
+refactor(goal): configuration management system
+
+### Core
+
+- update src/clonebox/cli/import_export_commands.py
+- update src/clonebox/cli/misc_commands.py
+- update src/clonebox/cli/monitoring_commands.py
+- update src/clonebox/cli/parsers.py
+- update src/clonebox/cli/snapshot_commands.py
+- update src/clonebox/cli/utils.py
+- update src/clonebox/cli/vm_commands.py
+- update src/clonebox/cloner.py
+- update src/clonebox/detector.py
+- update src/clonebox/post_install_repair.py
+
+### Test
+
+- update tests/test_post_install_repair.py
+
+### Other
+
+- scripts: update stop-all.sh
+
+
 ## [1.1.43] - 2026-02-06
 
 ### Summary
@@ -17,6 +45,11 @@ refactor(goal): configuration management system
 - update src/clonebox/cloner_utils.py
 - update src/clonebox/cloud_init.py
 - ... and 7 more
+
+### Features
+
+- feat: Add `--all` flag to `stop` and `restart` commands to manage all VMs at once
+- fix: Properly resolve VM names from `.clonebox.yaml` when using `.` argument in stop, restart, delete, and set-password commands
 
 ### Docs
 
