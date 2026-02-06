@@ -334,6 +334,12 @@ bash scripts/clonebox-health-check.sh
 
 clonebox logs . --user --all
 
+# Validate VM internals (services/apps/smoke tests)
+clonebox validate . --user
+
+# Validate browsers with headless smoke tests + extra logs if launch fails
+clonebox validate . --user --browsers-only --smoke-test
+
 # Enhanced logs with detailed diagnostics
 bash scripts/clonebox-logs-enhanced.sh . --user --all
 

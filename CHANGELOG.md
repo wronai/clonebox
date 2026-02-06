@@ -1,3 +1,43 @@
+## [1.1.43] - 2026-02-06
+
+### Summary
+
+refactor(goal): configuration management system
+
+### Core
+
+- update src/clonebox/browser_profiles.py
+- update src/clonebox/cli/import_export_commands.py
+- update src/clonebox/cli/misc_commands.py
+- update src/clonebox/cli/monitoring_commands.py
+- update src/clonebox/cli/parsers.py
+- update src/clonebox/cli/utils.py
+- update src/clonebox/cli/vm_commands.py
+- update src/clonebox/cloner.py
+- update src/clonebox/cloner_utils.py
+- update src/clonebox/cloud_init.py
+- ... and 7 more
+
+### Docs
+
+- docs: update README
+- docs: update README
+
+### Other
+
+- scripts: update clonebox-logs.sh
+- update scripts/deprecated/advanced_vm_diagnostic.py
+- scripts: update clonebox-health-check.sh
+- scripts: update clonebox-logs-enhanced.sh
+- scripts: update diagnose-vm-enhanced.sh
+- update scripts/deprecated/fetch-logs-enhanced.py
+- scripts: update monitor-vm-clone.sh
+- scripts: update diagnose-vm.sh
+- update scripts/fetch-logs.py
+- update scripts/vm_state_diagnostic.py
+- ... and 1 more
+
+
 ## [1.1.42] - 2026-02-06
 
 ### Summary

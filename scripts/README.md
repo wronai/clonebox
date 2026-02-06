@@ -1,120 +1,116 @@
-# CloneBox Monitoring and Self-Healing
+# CloneBox Scripts
 
-This directory contains scripts and configuration for continuous monitoring and self-healing of CloneBox VMs.
+Helper scripts for diagnostics, monitoring, and maintenance of CloneBox VMs.
 
-## Components
+## Main Scripts
 
-### 1. clonebox-monitor.sh
-The main monitoring script that:
-- Monitors GUI apps (PyCharm, Firefox, Chromium, Chrome)
-- Monitors system services (docker, nginx, containerd, etc.)
-- Monitors web services (uvicorn)
-- Auto-restarts failed apps and services
-- Logs all activities to `/var/log/clonebox-monitor.log`
-- Updates status in `/var/run/clonebox-monitor-status`
+### diagnose-vm.sh — VM Diagnostic (primary)
 
-### 2. clonebox-monitor.service
-Systemd user service that runs the monitor:
-- Starts after GUI login
-- Restarts automatically if it crashes
-- Runs as the ubuntu user
-- Logs to systemd journal
-
-### 3. clonebox-monitor.default
-Configuration file for environment variables:
-- `CLONEBOX_MONITOR_INTERVAL`: Check interval (default: 30s)
-- `CLONEBOX_AUTO_REPAIR`: Enable auto-repair (default: true)
-- `CLONEBOX_WATCH_APPS`: Monitor GUI apps (default: true)
-- `CLONEBOX_WATCH_SERVICES`: Monitor services (default: true)
-
-## Installation
-
-The scripts are automatically installed during VM creation. For manual installation:
+One-stop diagnostic for a running VM.
+By default shows **only errors and warnings**; pass `--verbose` for full output.
 
 ```bash
-# Copy scripts to VM
-sudo cp clonebox-monitor.sh /usr/local/bin/clonebox-monitor
-sudo cp clonebox-monitor.service /etc/systemd/user/clonebox-monitor.service
-sudo cp clonebox-monitor.default /etc/default/clonebox-monitor
-
-# Set permissions
-sudo chmod +x /usr/local/bin/clonebox-monitor
-
-# Enable and start service (as ubuntu user)
-systemctl --user enable clonebox-monitor
-systemctl --user start clonebox-monitor
+bash scripts/diagnose-vm.sh                     # quick error scan
+bash scripts/diagnose-vm.sh my-vm               # specific VM
+bash scripts/diagnose-vm.sh --verbose            # full details
+bash scripts/diagnose-vm.sh --quiet              # only FAIL
+bash scripts/diagnose-vm.sh --help               # usage
 ```
 
-## Usage
+Checks performed (8 sections):
 
-### Check monitor status
+1. **VM status** — exists, running
+2. **Network & SSH** — passt, port resolution (file → QEMU hostfwd fallback), TCP connect, SSH auth
+3. **Cloud-init** — completion, errors in serial log (filters kernel noise)
+4. **QEMU Guest Agent** — ping, OS info, interfaces, users
+5. **GUI & Display** — SPICE, GDM, session type, wayland sessions
+6. **Browsers** — detection (`command -v`), profile presence & `profiles.ini`, permissions, lock files, crash dumps, snap interface validation, headless smoke tests (Firefox, Chrome, Chromium)
+7. **Resources & filesystem** — CPU, memory, disk images (verbose)
+8. **Quick actions** — SSH/SPICE/console commands (verbose)
+
+Exit code = number of FAILs.
+
+### vm_state_diagnostic.py — Advanced Python Diagnostic
+
+Comprehensive Python-based diagnostic with structured Q&A output and root-cause analysis.
+Runs tests as a decision tree — if a blocking test fails, dependents are skipped.
+
 ```bash
-# Check if service is running
+python3 scripts/vm_state_diagnostic.py <vm-name>            # text report
+python3 scripts/vm_state_diagnostic.py <vm-name> --json      # JSON output
+python3 scripts/vm_state_diagnostic.py <vm-name> --verbose   # show details
+```
+
+Tests performed (22 tests):
+- **Infrastructure** — VM exists, running, directory, passt, SSH port, TCP, QGA, SSH, network, cloud-init, serial log, services
+- **Browser detection** — Firefox, Chrome, Chromium, Edge, Brave + versions
+- **Browser profiles** — Firefox (snap + classic), Chrome, Chromium — presence, `profiles.ini`, size
+- **Browser permissions** — ownership validation (`ubuntu`)
+- **Lock files** — detects stale `parent.lock` / `SingletonLock` from copied profiles
+- **Crash reports** — recent `.dmp` / `.extra` files since last VM boot
+- **Snap interfaces** — validates `desktop`, `x11`, `wayland`, `home`, `network` connections
+- **Headless smoke test** — `firefox --headless --version` with proper `XDG_RUNTIME_DIR`
+- **Browser logs** — snap logs and journal analysis for errors
+
+### clonebox-logs.sh — Log Viewer
+
+Fetches and displays VM logs via QEMU Guest Agent or SSH.
+Used by `clonebox logs` CLI command.
+
+```bash
+bash scripts/clonebox-logs.sh <vm-name> [true|false] [true|false]
+#                              ^name     ^user-mode   ^show-all
+```
+
+### test-user-vm.sh — VM Creation Test
+
+End-to-end test: creates a VM from `.clonebox.yaml`, waits for boot, validates.
+
+```bash
+bash scripts/test-user-vm.sh . --base-image /path/to/image.qcow2
+```
+
+## Monitoring (runs inside VM)
+
+### clonebox-monitor.sh + .service + .default
+
+Systemd user service that monitors GUI apps and services inside the VM,
+auto-restarts them if needed.
+
+```bash
 systemctl --user status clonebox-monitor
-
-# View logs
 journalctl --user -u clonebox-monitor -f
-
-# View monitor log file
-tail -f /var/log/clonebox-monitor.log
-
-# Check last status
-cat /var/run/clonebox-monitor-status
 ```
 
-### Manual control
-```bash
-# Stop monitoring
-systemctl --user stop clonebox-monitor
+Config: `clonebox-monitor.default`
+- `CLONEBOX_MONITOR_INTERVAL` — check interval (default: 30s)
+- `CLONEBOX_AUTO_REPAIR` — auto-restart (default: true)
 
-# Start monitoring
-systemctl --user start clonebox-monitor
+## Utilities
 
-# Restart monitoring
-systemctl --user restart clonebox-monitor
-```
+| Script | Purpose |
+|---|---|
+| `fetch-logs.py` | Fetch logs from VM via QGA or SSH |
+| `set-vm-password.sh` | Set/reset VM user password |
+| `vm_console_interact.py` | Interactive VM console |
+| `clonebox-completion.bash` | Bash tab completion |
+| `clonebox-completion.zsh` | Zsh tab completion |
 
-## Monitoring Details
+## Fix Scripts (one-time repairs)
 
-### GUI Apps Monitored
-- **PyCharm Community**: `/snap/bin/pycharm-community`
-- **Firefox**: `/snap/bin/firefox`
-- **Chromium**: `/snap/bin/chromium`
-- **Google Chrome**: `google-chrome-stable` (if installed)
+| Script | Purpose |
+|---|---|
+| `fix_interface_name.py` | Fix network interface naming |
+| `fix_network_config.py` | Fix network configuration |
+| `fix_ssh_keys.py` | Fix SSH key permissions/setup |
+| `fix_yaml_bootcmd.py` | Fix cloud-init bootcmd YAML |
+| `fix_yaml_quotes.py` | Fix YAML quoting issues |
 
-### Services Monitored
-- **System Services**: docker, nginx, containerd, qemu-guest-agent, snapd
-- **Web Services**: uvicorn (and any others defined in web_services)
+## Recent Fixes
 
-### Self-Healing Actions
-1. **Service down**: `systemctl restart <service>`
-2. **App not running**: Start app with `nohup` in background
-3. **Display detection**: Automatically sets `DISPLAY=:1` for VM
+Bugs found and fixed via `diagnose-vm.sh`:
 
-## Troubleshooting
-
-### Monitor not starting
-```bash
-# Check if login is enabled for lingering
-loginctl enable-linger ubuntu
-
-# Check user session
-echo $XDG_RUNTIME_DIR
-```
-
-### Apps not starting
-```bash
-# Check display
-echo $DISPLAY
-
-# Check X11 socket
-ls -la /tmp/.X11-unix/
-
-# Manual test
-sudo -u ubuntu DISPLAY=:1 /snap/bin/firefox &
-```
-
-### Logs location
-- Monitor log: `/var/log/clonebox-monitor.log`
-- Systemd journal: `journalctl --user -u clonebox-monitor`
-- Status file: `/var/run/clonebox-monitor-status`
+- **`vm_xml.py`** — hardcoded `/home/tom/` path for serial.log → uses `Path.home()` dynamically
+- **`cloud_init.py`** — classic snaps (`pycharm-community`, `code`) attempted `snap connect` which fails → skipped for classic snaps; non-classic snaps probe for plug existence before connecting
+- **`diagnose-vm.sh`** — `grep` treated serial.log as binary (CR/CR/LF) → added `--text` flag; false-positive errors filtered (RAS, EXT4, GPT, snap plugs); network detection distinguishes passt vs hostfwd
+- **`clonebox-logs.sh`** — missing `VM_DIR` variable, undefined `log()` function, duplicated SSH flags → added `_ssh()` helper and proper variable definitions

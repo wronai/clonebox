@@ -12,6 +12,8 @@ import threading
 import time
 import yaml
 
+from clonebox import paths as _paths
+
 
 class VMOrchestrationState(Enum):
     """State of a VM within orchestration."""
@@ -305,7 +307,7 @@ class Orchestrator:
             elif check_timeout.endswith("m"):
                 timeout = int(check_timeout[:-1]) * 60
 
-        conn_uri = "qemu:///session" if self.user_session else "qemu:///system"
+        conn_uri = _paths.conn_uri(self.user_session)
         start = time.time()
 
         while time.time() - start < timeout:
@@ -530,7 +532,7 @@ class Orchestrator:
         if vm_name not in self.plan.vms:
             raise ValueError(f"Unknown VM: {vm_name}")
 
-        conn_uri = "qemu:///session" if self.user_session else "qemu:///system"
+        conn_uri = _paths.conn_uri(self.user_session)
 
         try:
             from clonebox.cli import _qga_exec
@@ -544,7 +546,7 @@ class Orchestrator:
         if vm_name not in self.plan.vms:
             raise ValueError(f"Unknown VM: {vm_name}")
 
-        conn_uri = "qemu:///session" if self.user_session else "qemu:///system"
+        conn_uri = _paths.conn_uri(self.user_session)
 
         try:
             from clonebox.cli import _qga_exec

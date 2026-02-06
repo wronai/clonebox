@@ -13,7 +13,9 @@ from typing import Dict, List, Optional, Tuple
 import questionary
 
 from clonebox.detector import SystemDetector
-from clonebox.cli.utils import console, custom_style, load_clonebox_config, CLONEBOX_CONFIG_FILE
+from clonebox.cli.utils import console, custom_style, load_clonebox_config, CLONEBOX_CONFIG_FILE, _resolve_vm_name_and_config_file
+from clonebox import paths as _paths
+from clonebox.ssh import ssh_exec as _ssh_exec, build_ssh_command as _build_ssh_cmd
 
 
 def cmd_clone(args):
@@ -517,31 +519,6 @@ def generate_password(length=12):
     return ''.join(secrets.choice(alphabet) for _ in range(length))
 
 
-def _resolve_vm_name_and_config_file(name: Optional[str]) -> Tuple[str, Optional[Path]]:
-    """Resolve VM name and find its config file."""
-    if name and name != ".":
-        # Use provided VM name
-        vm_name = name
-        config_file = Path.cwd() / CLONEBOX_CONFIG_FILE
-        if not config_file.exists():
-            # Try to find config in VM directory
-            vm_dir = Path.cwd() / vm_name
-            config_file = vm_dir / CLONEBOX_CONFIG_FILE
-    else:
-        # Use current directory
-        config_file = Path.cwd() / CLONEBOX_CONFIG_FILE
-        if not config_file.exists():
-            raise FileNotFoundError(
-                f"No {CLONEBOX_CONFIG_FILE} found in current directory. "
-                "Run 'clonebox init' first or specify a VM name."
-            )
-        # Load config to get VM name
-        config = load_clonebox_config(config_file)
-        vm_name = config["vm"]["name"]
-    
-    return vm_name, config_file
-
-
 def run_vm_diagnostics(
     vm_name: str,
     conn_uri: str,
@@ -688,7 +665,7 @@ def cmd_diagnose(args):
     """Run detailed VM diagnostics (standalone)."""
     name = args.name
     user_session = getattr(args, "user", False)
-    conn_uri = "qemu:///session" if user_session else "qemu:///system"
+    conn_uri = _paths.conn_uri(user_session)
 
     try:
         vm_name, config_file = _resolve_vm_name_and_config_file(name)
@@ -711,7 +688,7 @@ def cmd_status(args):
 
     name = args.name
     user_session = getattr(args, "user", False)
-    conn_uri = "qemu:///session" if user_session else "qemu:///system"
+    conn_uri = _paths.conn_uri(user_session)
 
     try:
         vm_name, config_file = _resolve_vm_name_and_config_file(name)
@@ -751,7 +728,7 @@ def cmd_watch(args):
 
     name = args.name
     user_session = getattr(args, "user", False)
-    conn_uri = "qemu:///session" if user_session else "qemu:///system"
+    conn_uri = _paths.conn_uri(user_session)
 
     try:
         vm_name, _ = _resolve_vm_name_and_config_file(name)
@@ -797,7 +774,7 @@ def cmd_logs(args):
     name = args.name
     user_session = getattr(args, "user", False)
     show_all = getattr(args, "all", False)
-    conn_uri = "qemu:///session" if user_session else "qemu:///system"
+    conn_uri = _paths.conn_uri(user_session)
 
     try:
         vm_name, _ = _resolve_vm_name_and_config_file(name)
@@ -806,8 +783,7 @@ def cmd_logs(args):
         return
 
     # Try serial log first
-    vm_dir = Path.home() / ".local/share/libvirt/images" / vm_name
-    serial_log = vm_dir / "serial.log"
+    serial_log = _paths.serial_log_path(vm_name, user_session)
 
     console.print(f"[bold cyan]📜 Logs for VM: {vm_name}[/]\n")
 
@@ -835,7 +811,7 @@ def cmd_repair(args):
 
     name = args.name
     user_session = getattr(args, "user", False)
-    conn_uri = "qemu:///session" if user_session else "qemu:///system"
+    conn_uri = _paths.conn_uri(user_session)
 
     try:
         vm_name, config_file = _resolve_vm_name_and_config_file(name)
@@ -879,11 +855,11 @@ def cmd_repair(args):
             repairs_made.append(f"Started VM (was {state})")
 
     # Repair 3: Check SSH port forwarding
-    vm_dir = Path.home() / ".local/share/libvirt/images" / vm_name
-    ssh_port_file = vm_dir / "ssh_port"
+    ssh_port = _paths.resolve_ssh_port(vm_name, user_session)
+    ssh_pf = _paths.ssh_port_file(vm_name, user_session)
+    ssh_key = _paths.ssh_key_path(vm_name, user_session)
 
-    if ssh_port_file.exists():
-        ssh_port = ssh_port_file.read_text().strip()
+    if ssh_pf.exists():
         result = subprocess.run(
             ["ss", "-tlnp"],
             capture_output=True,
@@ -894,32 +870,20 @@ def cmd_repair(args):
             repairs_made.append(f"SSH port {ssh_port} not listening - may need VM restart")
 
     # Repair 4: Check GDM/GUI
-    if ssh_port_file.exists():
-        ssh_port = ssh_port_file.read_text().strip()
-        ssh_key = vm_dir / "ssh_key"
-
+    if ssh_key:
         console.print("[dim]Checking GUI status via SSH...[/]")
-        result = subprocess.run(
-            [
-                "ssh", "-o", "ConnectTimeout=3", "-o", "StrictHostKeyChecking=no",
-                "-o", "BatchMode=yes", "-p", ssh_port,
-                "-i", str(ssh_key), "ubuntu@127.0.0.1",
-                "systemctl is-active gdm3 gdm 2>/dev/null | head -1"
-            ],
-            capture_output=True,
-            text=True,
+        gdm_out = _ssh_exec(
+            port=ssh_port, key=ssh_key,
+            command="systemctl is-active gdm3 gdm 2>/dev/null | head -1",
+            connect_timeout=3, timeout=10,
         )
 
-        if "active" not in result.stdout:
+        if not gdm_out or "active" not in gdm_out:
             console.print("[yellow]Display Manager not running, attempting to start...[/]")
-            subprocess.run(
-                [
-                    "ssh", "-o", "ConnectTimeout=3", "-o", "StrictHostKeyChecking=no",
-                    "-o", "BatchMode=yes", "-p", ssh_port,
-                    "-i", str(ssh_key), "ubuntu@127.0.0.1",
-                    "sudo systemctl start gdm3 2>/dev/null || sudo systemctl start gdm"
-                ],
-                capture_output=True,
+            _ssh_exec(
+                port=ssh_port, key=ssh_key,
+                command="sudo systemctl start gdm3 2>/dev/null || sudo systemctl start gdm",
+                connect_timeout=3, timeout=10,
             )
             repairs_made.append("Started Display Manager (GDM)")
         else:

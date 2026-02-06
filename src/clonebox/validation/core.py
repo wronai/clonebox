@@ -1,14 +1,15 @@
 import base64
 import json
 import logging
-import shutil
 import subprocess
 import time
-import zlib
 from pathlib import Path
 from typing import Dict, Optional
 
 from rich.console import Console
+
+from clonebox.paths import ssh_key_path as _ssh_key_path, resolve_ssh_port
+from clonebox.ssh import ssh_exec as _shared_ssh_exec
 
 log = logging.getLogger(__name__)
 
@@ -49,107 +50,29 @@ class VMValidatorCore:
         self._setup_in_progress_cache: Optional[bool] = None
         self._exec_transport: str = "qga"  # qga|ssh
 
+    @property
+    def _user_session(self) -> bool:
+        return self.conn_uri.endswith("/session")
+
     def _get_ssh_key_path(self) -> Optional[Path]:
         """Return path to the SSH key generated for this VM (if present)."""
-        try:
-            if self.conn_uri.endswith("/session"):
-                images_dir = Path.home() / ".local/share/libvirt/images"
-            else:
-                images_dir = Path("/var/lib/libvirt/images")
-            key_path = images_dir / self.vm_name / "ssh_key"
-            return key_path if key_path.exists() else None
-        except Exception:
-            return None
+        return _ssh_key_path(self.vm_name, self._user_session)
 
     def _get_ssh_port(self) -> int:
         """Host-side SSH port for passt port forwarding."""
-        log.debug(f"Looking up SSH port for VM '{self.vm_name}'...")
-        
-        # Try primary location
-        try:
-            if self.conn_uri.endswith("/session"):
-                images_dir = Path.home() / ".local/share/libvirt/images"
-            else:
-                images_dir = Path("/var/lib/libvirt/images")
-            port_file = images_dir / self.vm_name / "ssh_port"
-            log.debug(f"Checking port file: {port_file}")
-            if port_file.exists():
-                port = int(port_file.read_text().strip())
-                if 1 <= port <= 65535:
-                    log.debug(f"Found SSH port {port} in primary location")
-                    return port
-                else:
-                    log.warning(f"Invalid port value in {port_file}: {port}")
-        except Exception as e:
-            log.debug(f"Failed to read SSH port from primary location: {e}")
-        
-        # Try alternative location
-        try:
-            alt_port_file = Path.home() / ".local/share/clonebox" / f"{self.vm_name}.ssh_port"
-            log.debug(f"Checking alternative port file: {alt_port_file}")
-            if alt_port_file.exists():
-                port = int(alt_port_file.read_text().strip())
-                if 1 <= port <= 65535:
-                    log.debug(f"Found SSH port {port} in alternative location")
-                    return port
-        except Exception as e:
-            log.debug(f"Failed to read SSH port from alternative location: {e}")
-        
-        # Fallback to computed port
-        fallback_port = 22000 + (zlib.crc32(self.vm_name.encode("utf-8")) % 1000)
-        log.debug(f"Using fallback computed SSH port: {fallback_port}")
-        return fallback_port
+        return resolve_ssh_port(self.vm_name, self._user_session)
 
     def _ssh_exec(self, command: str, timeout: int = 10) -> Optional[str]:
-        """Execute command via SSH with detailed logging."""
-        log.debug(f"SSH exec: {command[:50]}..." if len(command) > 50 else f"SSH exec: {command}")
-        
-        if shutil.which("ssh") is None:
-            log.warning("SSH client not found in PATH")
-            return None
-        
-        key_path = self._get_ssh_key_path()
-        ssh_port = self._get_ssh_port()
+        """Execute command via SSH."""
         user = (self.config.get("vm") or {}).get("username") or "ubuntu"
-        
-        # Try with key first, then without (for password auth)
-        ssh_args = [
-            "ssh",
-            "-p", str(ssh_port),
-            "-o", "StrictHostKeyChecking=no",
-            "-o", "UserKnownHostsFile=/dev/null",
-            "-o", "ConnectTimeout=5",
-            "-o", "BatchMode=yes",
-            "-o", "LogLevel=ERROR",
-        ]
-        
-        if key_path is not None:
-            log.debug(f"Using SSH key: {key_path}")
-            ssh_args.extend(["-i", str(key_path)])
-        else:
-            log.debug("No SSH key found, using password auth")
-        
-        ssh_args.extend([f"{user}@127.0.0.1", command])
-        
-        try:
-            log.debug(f"Running SSH on port {ssh_port} as {user}")
-            result = subprocess.run(
-                ssh_args,
-                capture_output=True,
-                text=True,
-                timeout=timeout,
-            )
-            if result.returncode != 0:
-                log.debug(f"SSH command failed (exit {result.returncode}): {result.stderr.strip()[:100]}")
-                return None
-            log.debug(f"SSH command succeeded")
-            return (result.stdout or "").strip()
-        except subprocess.TimeoutExpired:
-            log.debug(f"SSH command timed out after {timeout}s")
-            return None
-        except Exception as e:
-            log.debug(f"SSH exec failed: {e}")
-            return None
+        return _shared_ssh_exec(
+            port=self._get_ssh_port(),
+            key=self._get_ssh_key_path(),
+            command=command,
+            username=user,
+            timeout=timeout,
+            connect_timeout=5,
+        )
 
     def _exec_in_vm(self, command: str, timeout: int = 10) -> Optional[str]:
         """Execute command in VM using QEMU guest agent, with SSH fallback."""

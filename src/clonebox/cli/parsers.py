@@ -374,6 +374,34 @@ def main():
     test_parser.add_argument("--base-image", help="Path to base image to test")
     test_parser.set_defaults(func=cmd_test)
 
+    # Validate command
+    validate_parser = subparsers.add_parser("validate", help="Validate a running VM (services/apps/smoke tests)")
+    validate_parser.add_argument(
+        "name", nargs="?", default=None, help="VM name or '.' to use .clonebox.yaml"
+    )
+    validate_parser.add_argument(
+        "-u",
+        "--user",
+        action="store_true",
+        help="Use user session (qemu:///session) - no root required",
+    )
+    validate_parser.add_argument(
+        "--smoke-test",
+        action="store_true",
+        help="Run smoke tests (installed ≠ works) - headless best-effort",
+    )
+    validate_parser.add_argument(
+        "--require-running-apps",
+        action="store_true",
+        help="Fail app checks if apps are not running (useful for GUI sessions)",
+    )
+    validate_parser.add_argument(
+        "--browsers-only",
+        action="store_true",
+        help="Validate browsers only (firefox/chromium/chrome) + related logs",
+    )
+    validate_parser.set_defaults(func=cmd_validate)
+
     # Clone command
     clone_parser = subparsers.add_parser("clone", help="Clone current environment")
     clone_parser.add_argument("path", nargs="?", default=".", help="Path to clone")

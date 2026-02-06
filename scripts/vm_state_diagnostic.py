@@ -15,9 +15,23 @@ import json
 import time
 import socket
 import base64
+import os
+import sys
 from pathlib import Path
 from typing import Optional, List, Dict, Any
 from datetime import datetime
+
+# Allow importing from the clonebox package
+_src = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "src")
+if os.path.isdir(_src):
+    sys.path.insert(0, _src)
+
+try:
+    from clonebox.ssh import ssh_exec as _pkg_ssh_exec
+    from clonebox.paths import resolve_ssh_port, ssh_key_path as _ssh_key_path, vm_dir as _vm_dir
+    _HAS_PKG = True
+except ImportError:
+    _HAS_PKG = False
 
 from vm_state_diagnostic_models import DiagnosticContext, TestResult, TestStatus
 
@@ -88,6 +102,11 @@ class VMDiagnostic:
         """Execute command via SSH."""
         if not self.ctx.ssh_key_path or not self.ctx.ssh_port:
             return None
+        if _HAS_PKG:
+            return _pkg_ssh_exec(
+                port=self.ctx.ssh_port, key=self.ctx.ssh_key_path,
+                command=command, timeout=timeout, connect_timeout=5,
+            )
         try:
             result = subprocess.run([
                 "ssh", "-i", str(self.ctx.ssh_key_path),
@@ -250,24 +269,27 @@ class VMDiagnostic:
             )
 
     def test_passt_process(self) -> TestResult:
-        """Check if passt process is running for this VM."""
+        """Check if passt/QEMU port-forwarding is active for this VM."""
         if not self.ctx.vm_running:
             return TestResult(
                 name="Passt Process",
-                question="Czy proces passt działa dla tej VM?",
+                question="Czy port-forwarding SSH działa dla tej VM?",
                 status=TestStatus.SKIP,
                 answer="Pominięto - VM nie jest uruchomiona"
             )
         
-        rc, out, _ = self.run_cmd(["pgrep", "-af", "passt"])
+        import re
+        details = {}
         
-        passt_lines = [l for l in out.split('\n') if self.ctx.vm_name in l and l.strip()]
+        # 1. Check for dedicated passt process
+        rc, out, _ = self.run_cmd(["pgrep", "-af", "passt"])
+        passt_lines = [l for l in out.split('\n')
+                       if self.ctx.vm_name in l and l.strip()
+                       and "pgrep" not in l]
         
         if passt_lines:
-            # Extract port from passt command
             for line in passt_lines:
                 if "--tcp-ports" in line:
-                    import re
                     match = re.search(r'--tcp-ports\s+[\d\.]+/(\d+):22', line)
                     if match:
                         port = int(match.group(1))
@@ -275,22 +297,44 @@ class VMDiagnostic:
                             self.ctx.ssh_port = port
                         self.ctx.passt_active = True
             
+            if self.ctx.passt_active:
+                details["method"] = "passt"
+                details["ssh_port"] = self.ctx.ssh_port
+                return TestResult(
+                    name="Passt Process",
+                    question="Czy port-forwarding SSH działa dla tej VM?",
+                    status=TestStatus.PASS,
+                    answer=f"Tak, passt aktywny (port {self.ctx.ssh_port})",
+                    details=details
+                )
+        
+        # 2. Fallback: check QEMU hostfwd (built-in user-mode networking)
+        rc2, qemu_out, _ = self.run_cmd(["bash", "-c",
+            f"ps aux | grep '[q]emu.*{self.ctx.vm_name}' | grep -oP 'hostfwd=tcp::\\K\\d+(?=-:22)' | head -1"])
+        fwd_port = qemu_out.strip()
+        if fwd_port and fwd_port.isdigit():
+            port = int(fwd_port)
+            if self.ctx.ssh_port is None:
+                self.ctx.ssh_port = port
+            self.ctx.passt_active = True
+            details["method"] = "qemu-hostfwd"
+            details["ssh_port"] = port
             return TestResult(
                 name="Passt Process",
-                question="Czy proces passt działa dla tej VM?",
+                question="Czy port-forwarding SSH działa dla tej VM?",
                 status=TestStatus.PASS,
-                answer=f"Tak, znaleziono {len(passt_lines)} proces(y) passt",
-                details={"processes": passt_lines[:3], "ssh_port": self.ctx.ssh_port}
+                answer=f"Tak, QEMU hostfwd aktywny (port {port})",
+                details=details
             )
-        else:
-            return TestResult(
-                name="Passt Process",
-                question="Czy proces passt działa dla tej VM?",
-                status=TestStatus.FAIL,
-                answer="Nie znaleziono procesu passt dla tej VM",
-                diagnosis="Passt nie działa - port forwarding SSH nie będzie działać",
-                suggestion="Zrestartuj VM lub sprawdź konfigurację sieci"
-            )
+        
+        return TestResult(
+            name="Passt Process",
+            question="Czy port-forwarding SSH działa dla tej VM?",
+            status=TestStatus.FAIL,
+            answer="Nie znaleziono port-forwarding dla SSH",
+            diagnosis="Ani passt ani QEMU hostfwd nie przekierowują portu SSH",
+            suggestion="Zrestartuj VM lub sprawdź konfigurację sieci"
+        )
 
     def test_port_listening(self) -> TestResult:
         """Check if SSH port is listening."""
@@ -791,6 +835,569 @@ class VMDiagnostic:
                 suggestion="Sprawdź: systemctl status <usługa>"
             )
 
+    # ============== BROWSER DIAGNOSTIC TESTS ==============
+
+    def test_browser_detection(self) -> TestResult:
+        """Detect installed browsers in VM."""
+        if not self.ctx.qga_responding and not self.ctx.ssh_works:
+            return TestResult(
+                name="Browser Detection",
+                question="Czy przeglądarki są zainstalowane w VM?",
+                status=TestStatus.SKIP,
+                answer="Pominięto - brak dostępu do VM"
+            )
+        
+        browsers = {
+            "firefox": "command -v firefox >/dev/null 2>&1 && echo yes || echo no",
+            "chrome": "(command -v google-chrome >/dev/null 2>&1 || command -v google-chrome-stable >/dev/null 2>&1) && echo yes || echo no",
+            "chromium": "command -v chromium >/dev/null 2>&1 && echo yes || echo no",
+            "edge": "command -v microsoft-edge >/dev/null 2>&1 && echo yes || echo no",
+            "brave": "command -v brave-browser >/dev/null 2>&1 && echo yes || echo no",
+        }
+        
+        details = {}
+        detected = []
+        
+        for browser, cmd in browsers.items():
+            result = self.exec_in_vm(cmd)
+            is_installed = result == "yes"
+            details[browser] = "installed" if is_installed else "not found"
+            if is_installed:
+                detected.append(browser)
+                # Get version
+                version_cmd = f"{browser} --version 2>/dev/null || echo 'unknown'"
+                if browser == "chrome":
+                    version_cmd = "(google-chrome --version || google-chrome-stable --version) 2>/dev/null || echo 'unknown'"
+                version = self.exec_in_vm(version_cmd) or "unknown"
+                details[f"{browser}_version"] = version[:50]
+        
+        self.ctx.browsers_detected = {b: {} for b in detected}
+        
+        if detected:
+            return TestResult(
+                name="Browser Detection",
+                question="Czy przeglądarki są zainstalowane w VM?",
+                status=TestStatus.PASS,
+                answer=f"Wykryto: {', '.join(detected)}",
+                details=details
+            )
+        else:
+            return TestResult(
+                name="Browser Detection",
+                question="Czy przeglądarki są zainstalowane w VM?",
+                status=TestStatus.INFO,
+                answer="Nie wykryto żadnych przeglądarek",
+                details=details,
+                suggestion="Zainstaluj przeglądarkę: snap install firefox / apt install firefox"
+            )
+
+    def test_firefox_profile(self) -> TestResult:
+        """Check Firefox profile integrity."""
+        if not self.ctx.qga_responding and not self.ctx.ssh_works:
+            return TestResult(
+                name="Firefox Profile",
+                question="Czy profil Firefox jest poprawnie skonfigurowany?",
+                status=TestStatus.SKIP,
+                answer="Pominięto - brak dostępu do VM"
+            )
+        
+        # Check if firefox is installed
+        ff_check = self.exec_in_vm("command -v firefox >/dev/null 2>&1 && echo yes || echo no")
+        if ff_check != "yes":
+            return TestResult(
+                name="Firefox Profile",
+                question="Czy profil Firefox jest poprawnie skonfigurowany?",
+                status=TestStatus.SKIP,
+                answer="Firefox nie jest zainstalowany"
+            )
+        
+        # Check profile paths
+        profile_paths = [
+            "/home/ubuntu/.mozilla/firefox",
+            "/home/ubuntu/snap/firefox/common/.mozilla/firefox"
+        ]
+        
+        details = {}
+        found_profile = False
+        profile_location = None
+        
+        for path in profile_paths:
+            # Check if directory exists and is non-empty
+            cmd = f"test -d {path} && [ $(ls -A {path} 2>/dev/null | wc -l) -gt 0 ] && echo yes || echo no"
+            result = self.exec_in_vm(cmd)
+            details[f"path_{path.replace('/', '_')}"] = "exists" if result == "yes" else "missing/empty"
+            
+            if result == "yes":
+                found_profile = True
+                profile_location = path
+                # Get profile size
+                size_cmd = f"du -sb {path} 2>/dev/null | cut -f1 || echo '0'"
+                size = self.exec_in_vm(size_cmd) or "0"
+                details[f"{path}_size_bytes"] = size
+                
+                # Check for profiles.ini
+                profiles_ini = f"{path}/profiles.ini"
+                ini_exists = self.exec_in_vm(f"test -f {profiles_ini} && echo yes || echo no")
+                details["profiles_ini"] = "exists" if ini_exists == "yes" else "missing"
+                
+                # List profile directories
+                profiles_cmd = f"ls -la {path}/ 2>/dev/null | grep '^d' | awk '{{print $9}}' | grep -v '^\\.$\\|^\\.\\.$' || echo ''"
+                profiles = self.exec_in_vm(profiles_cmd)
+                if profiles:
+                    details["profile_dirs"] = profiles.replace('\n', ', ')[:100]
+        
+        self.ctx.firefox_profile_ok = found_profile
+        
+        if found_profile:
+            return TestResult(
+                name="Firefox Profile",
+                question="Czy profil Firefox jest poprawnie skonfigurowany?",
+                status=TestStatus.PASS,
+                answer=f"Tak, profil znaleziony w {profile_location}",
+                details=details
+            )
+        else:
+            return TestResult(
+                name="Firefox Profile",
+                question="Czy profil Firefox jest poprawnie skonfigurowany?",
+                status=TestStatus.WARN,
+                answer="Nie znaleziono profilu Firefox",
+                details=details,
+                diagnosis="Profil Firefox nie istnieje lub jest pusty - przeglądarka uruchomi się z domyślnym/czystym profilem",
+                suggestion="Zaimportuj profil lub uruchom Firefox ręcznie w VM aby utworzyć nowy profil"
+            )
+
+    def test_chrome_profile(self) -> TestResult:
+        """Check Chrome/Chromium profile integrity."""
+        if not self.ctx.qga_responding and not self.ctx.ssh_works:
+            return TestResult(
+                name="Chrome Profile",
+                question="Czy profil Chrome/Chromium jest poprawnie skonfigurowany?",
+                status=TestStatus.SKIP,
+                answer="Pominięto - brak dostępu do VM"
+            )
+        
+        # Check if chrome is installed
+        chrome_check = self.exec_in_vm("(command -v google-chrome >/dev/null 2>&1 || command -v google-chrome-stable >/dev/null 2>&1) && echo yes || echo no")
+        chromium_check = self.exec_in_vm("command -v chromium >/dev/null 2>&1 && echo yes || echo no")
+        
+        details = {}
+        
+        if chrome_check != "yes" and chromium_check != "yes":
+            return TestResult(
+                name="Chrome Profile",
+                question="Czy profil Chrome/Chromium jest poprawnie skonfigurowany?",
+                status=TestStatus.SKIP,
+                answer="Chrome/Chromium nie jest zainstalowany"
+            )
+        
+        # Check Chrome profile
+        chrome_paths = [
+            "/home/ubuntu/.config/google-chrome",
+            "/home/ubuntu/snap/google-chrome/common/.config/google-chrome"
+        ]
+        
+        # Check Chromium profile
+        chromium_paths = [
+            "/home/ubuntu/.config/chromium",
+            "/home/ubuntu/snap/chromium/common/chromium"
+        ]
+        
+        chrome_found = False
+        chromium_found = False
+        
+        for path in chrome_paths:
+            cmd = f"test -d {path} && [ $(ls -A {path} 2>/dev/null | wc -l) -gt 0 ] && echo yes || echo no"
+            result = self.exec_in_vm(cmd)
+            if result == "yes":
+                chrome_found = True
+                size = self.exec_in_vm(f"du -sb {path} 2>/dev/null | cut -f1 || echo '0'") or "0"
+                details["chrome_profile_size"] = size
+                details["chrome_profile_path"] = path
+                # Check for Default directory
+                default_dir = f"{path}/Default"
+                default_exists = self.exec_in_vm(f"test -d {default_dir} && echo yes || echo no")
+                details["chrome_default_dir"] = "exists" if default_exists == "yes" else "missing"
+                break
+        
+        for path in chromium_paths:
+            cmd = f"test -d {path} && [ $(ls -A {path} 2>/dev/null | wc -l) -gt 0 ] && echo yes || echo no"
+            result = self.exec_in_vm(cmd)
+            if result == "yes":
+                chromium_found = True
+                size = self.exec_in_vm(f"du -sb {path} 2>/dev/null | cut -f1 || echo '0'") or "0"
+                details["chromium_profile_size"] = size
+                details["chromium_profile_path"] = path
+                break
+        
+        self.ctx.chrome_profile_ok = chrome_found
+        self.ctx.chromium_profile_ok = chromium_found
+        
+        if chrome_found or chromium_found:
+            browsers = []
+            if chrome_found:
+                browsers.append("Chrome")
+            if chromium_found:
+                browsers.append("Chromium")
+            return TestResult(
+                name="Chrome Profile",
+                question="Czy profil Chrome/Chromium jest poprawnie skonfigurowany?",
+                status=TestStatus.PASS,
+                answer=f"Tak, profil znaleziony dla: {', '.join(browsers)}",
+                details=details
+            )
+        else:
+            return TestResult(
+                name="Chrome Profile",
+                question="Czy profil Chrome/Chromium jest poprawnie skonfigurowany?",
+                status=TestStatus.WARN,
+                answer="Nie znaleziono profilu Chrome/Chromium",
+                details=details,
+                diagnosis="Profil Chrome/Chromium nie istnieje - przeglądarka uruchomi się z domyślnym profilem",
+                suggestion="Uruchom Chrome/Chromium ręcznie w VM aby utworzyć profil"
+            )
+
+    def test_firefox_headless(self) -> TestResult:
+        """Test Firefox headless launch."""
+        if not self.ctx.qga_responding and not self.ctx.ssh_works:
+            return TestResult(
+                name="Firefox Headless Test",
+                question="Czy Firefox uruchamia się w trybie headless?",
+                status=TestStatus.SKIP,
+                answer="Pominięto - brak dostępu do VM"
+            )
+        
+        # Check if firefox is installed
+        ff_check = self.exec_in_vm("command -v firefox >/dev/null 2>&1 && echo yes || echo no")
+        if ff_check != "yes":
+            return TestResult(
+                name="Firefox Headless Test",
+                question="Czy Firefox uruchamia się w trybie headless?",
+                status=TestStatus.SKIP,
+                answer="Firefox nie jest zainstalowany"
+            )
+        
+        # Get UID for ubuntu user
+        uid_out = self.exec_in_vm("id -u ubuntu 2>/dev/null || echo '1000'")
+        vm_uid = uid_out.strip() if uid_out else "1000"
+        runtime_dir = f"/run/user/{vm_uid}"
+        
+        # Setup runtime directory
+        self.exec_in_vm(f"sudo mkdir -p {runtime_dir} && sudo chown {vm_uid}:{vm_uid} {runtime_dir} && sudo chmod 700 {runtime_dir}")
+        
+        # Test headless launch
+        user_env = f"sudo -u ubuntu env HOME=/home/ubuntu USER=ubuntu LOGNAME=ubuntu XDG_RUNTIME_DIR={runtime_dir}"
+        cmd = f"{user_env} timeout 25 firefox --headless --version >/dev/null 2>&1 && echo yes || echo no"
+        result = self.exec_in_vm(cmd, timeout=35)
+        
+        details = {
+            "runtime_dir": runtime_dir,
+            "headless_test": "passed" if result == "yes" else "failed"
+        }
+        
+        if result == "yes":
+            return TestResult(
+                name="Firefox Headless Test",
+                question="Czy Firefox uruchamia się w trybie headless?",
+                status=TestStatus.PASS,
+                answer="Tak, Firefox uruchamia się poprawnie w trybie headless",
+                details=details
+            )
+        else:
+            # Try to get error logs
+            error_cmd = f"{user_env} timeout 25 firefox --headless --version 2>&1 | head -20 || echo ''"
+            error_output = self.exec_in_vm(error_cmd, timeout=35)
+            if error_output:
+                details["error_output"] = error_output[:200]
+            
+            return TestResult(
+                name="Firefox Headless Test",
+                question="Czy Firefox uruchamia się w trybie headless?",
+                status=TestStatus.FAIL,
+                answer="Nie, Firefox nie uruchamia się w trybie headless",
+                details=details,
+                diagnosis="Firefox ma problem z uruchomieniem - może być uszkodzony profil lub brakujące zależności",
+                suggestion="Sprawdź logi: journalctl -u firefox || snap logs firefox"
+            )
+
+    def test_browser_permissions(self) -> TestResult:
+        """Check browser profile permissions."""
+        if not self.ctx.qga_responding and not self.ctx.ssh_works:
+            return TestResult(
+                name="Browser Permissions",
+                question="Czy uprawnienia do profili przeglądarek są poprawne?",
+                status=TestStatus.SKIP,
+                answer="Pominięto - brak dostępu do VM"
+            )
+        
+        details = {}
+        issues = []
+        
+        # Check Firefox permissions
+        firefox_paths = [
+            "/home/ubuntu/.mozilla",
+            "/home/ubuntu/snap/firefox/common/.mozilla"
+        ]
+        
+        for path in firefox_paths:
+            exists = self.exec_in_vm(f"test -d {path} && echo yes || echo no")
+            if exists == "yes":
+                owner = self.exec_in_vm(f"stat -c '%U' {path} 2>/dev/null || echo 'unknown'")
+                perms = self.exec_in_vm(f"stat -c '%a' {path} 2>/dev/null || echo 'unknown'")
+                details[f"firefox_{path.replace('/', '_')}_owner"] = owner
+                details[f"firefox_{path.replace('/', '_')}_perms"] = perms
+                
+                if owner != "ubuntu":
+                    issues.append(f"{path} owned by {owner}, expected ubuntu")
+        
+        # Check Chrome permissions
+        chrome_paths = [
+            "/home/ubuntu/.config/google-chrome",
+            "/home/ubuntu/.config/chromium"
+        ]
+        
+        for path in chrome_paths:
+            exists = self.exec_in_vm(f"test -d {path} && echo yes || echo no")
+            if exists == "yes":
+                owner = self.exec_in_vm(f"stat -c '%U' {path} 2>/dev/null || echo 'unknown'")
+                perms = self.exec_in_vm(f"stat -c '%a' {path} 2>/dev/null || echo 'unknown'")
+                details[f"chrome_{path.replace('/', '_')}_owner"] = owner
+                details[f"chrome_{path.replace('/', '_')}_perms"] = perms
+                
+                if owner != "ubuntu":
+                    issues.append(f"{path} owned by {owner}, expected ubuntu")
+        
+        if not issues:
+            return TestResult(
+                name="Browser Permissions",
+                question="Czy uprawnienia do profili przeglądarek są poprawne?",
+                status=TestStatus.PASS,
+                answer="Tak, wszystkie uprawnienia są poprawne",
+                details=details
+            )
+        else:
+            return TestResult(
+                name="Browser Permissions",
+                question="Czy uprawnienia do profili przeglądarek są poprawne?",
+                status=TestStatus.WARN,
+                answer=f"Znaleziono problemy z uprawnieniami: {len(issues)}",
+                details=details,
+                diagnosis=f"Problemy: {'; '.join(issues[:3])}",
+                suggestion="Napraw uprawnienia: sudo chown -R ubuntu:ubuntu /home/ubuntu/.mozilla /home/ubuntu/.config"
+            )
+
+    def test_browser_lock_files(self) -> TestResult:
+        """Check for stale browser lock files from copied profiles."""
+        if not self.ctx.qga_responding and not self.ctx.ssh_works:
+            return TestResult(
+                name="Browser Lock Files",
+                question="Czy są pozostałe pliki blokady w profilach przeglądarek?",
+                status=TestStatus.SKIP,
+                answer="Pominięto - brak dostępu do VM"
+            )
+
+        lock_cmd = (
+            "find /home/ubuntu/.mozilla /home/ubuntu/snap/firefox "
+            "/home/ubuntu/.config/google-chrome /home/ubuntu/.config/chromium "
+            "/home/ubuntu/snap/chromium "
+            "-maxdepth 4 -type f "
+            "\\( -name 'parent.lock' -o -name '.parentlock' -o -name 'lock' "
+            "-o -name 'lockfile' -o -name 'SingletonLock' \\) "
+            "2>/dev/null | head -10 || echo ''"
+        )
+        locks = self.exec_in_vm(lock_cmd)
+        lock_list = [l for l in (locks or "").strip().splitlines() if l.strip()]
+
+        details = {"lock_files": lock_list}
+
+        if lock_list:
+            return TestResult(
+                name="Browser Lock Files",
+                question="Czy są pozostałe pliki blokady w profilach przeglądarek?",
+                status=TestStatus.WARN,
+                answer=f"Znaleziono {len(lock_list)} plik(ów) blokady",
+                details=details,
+                diagnosis="Pliki blokady mogą uniemożliwiać uruchomienie przeglądarki (skopiowane z działającej instancji)",
+                suggestion="Usuń pliki blokady: rm -f " + " ".join(lock_list[:3])
+            )
+        else:
+            return TestResult(
+                name="Browser Lock Files",
+                question="Czy są pozostałe pliki blokady w profilach przeglądarek?",
+                status=TestStatus.PASS,
+                answer="Brak plików blokady",
+                details=details
+            )
+
+    def test_browser_crash_reports(self) -> TestResult:
+        """Check for recent browser crash dumps."""
+        if not self.ctx.qga_responding and not self.ctx.ssh_works:
+            return TestResult(
+                name="Browser Crash Reports",
+                question="Czy są ostatnie zrzuty awarii przeglądarek?",
+                status=TestStatus.SKIP,
+                answer="Pominięto - brak dostępu do VM"
+            )
+
+        crash_cmd = (
+            "find /home/ubuntu/.mozilla /home/ubuntu/snap/firefox "
+            "/home/ubuntu/.config/google-chrome /home/ubuntu/.config/chromium "
+            "/home/ubuntu/snap/chromium "
+            "-maxdepth 4 -type f "
+            "\\( -name '*.dmp' -o -name '*.extra' \\) "
+            "-newer /proc/1/status 2>/dev/null | wc -l || echo '0'"
+        )
+        count_str = self.exec_in_vm(crash_cmd)
+        try:
+            count = int((count_str or "0").strip())
+        except ValueError:
+            count = 0
+
+        details = {"recent_crash_dumps": count}
+
+        if count > 0:
+            return TestResult(
+                name="Browser Crash Reports",
+                question="Czy są ostatnie zrzuty awarii przeglądarek?",
+                status=TestStatus.WARN,
+                answer=f"Znaleziono {count} zrzut(ów) awarii od ostatniego restartu VM",
+                details=details,
+                diagnosis="Przeglądarki się crashują - sprawdź profil i zależności",
+                suggestion="Sprawdź katalogi Crash Reports w profilach przeglądarek"
+            )
+        else:
+            return TestResult(
+                name="Browser Crash Reports",
+                question="Czy są ostatnie zrzuty awarii przeglądarek?",
+                status=TestStatus.PASS,
+                answer="Brak ostatnich zrzutów awarii",
+                details=details
+            )
+
+    def test_snap_browser_interfaces(self) -> TestResult:
+        """Check snap browser interface connections."""
+        if not self.ctx.qga_responding and not self.ctx.ssh_works:
+            return TestResult(
+                name="Snap Browser Interfaces",
+                question="Czy interfejsy snap przeglądarek są poprawnie podłączone?",
+                status=TestStatus.SKIP,
+                answer="Pominięto - brak dostępu do VM"
+            )
+
+        required_ifaces = ["desktop", "desktop-legacy", "x11", "wayland", "home", "network"]
+        details = {}
+        issues = []
+
+        for snap_name in ["firefox", "chromium"]:
+            installed = self.exec_in_vm(f"snap list {snap_name} >/dev/null 2>&1 && echo yes || echo no")
+            if installed != "yes":
+                continue
+
+            conns = self.exec_in_vm(
+                f"snap connections {snap_name} 2>/dev/null | awk 'NR>1{{print $1, $3}}'"
+            )
+            if conns is None:
+                details[snap_name] = "cannot read connections"
+                continue
+
+            connected = set()
+            for line in (conns or "").splitlines():
+                parts = line.split()
+                if len(parts) >= 2 and parts[1] != "-":
+                    connected.add(parts[0])
+
+            missing = [i for i in required_ifaces if i not in connected]
+            details[f"{snap_name}_connected"] = sorted(connected)
+            details[f"{snap_name}_missing"] = missing
+
+            if missing:
+                issues.append(f"{snap_name}: brak {', '.join(missing)}")
+
+        if not details:
+            return TestResult(
+                name="Snap Browser Interfaces",
+                question="Czy interfejsy snap przeglądarek są poprawnie podłączone?",
+                status=TestStatus.SKIP,
+                answer="Brak snap przeglądarek"
+            )
+
+        if issues:
+            return TestResult(
+                name="Snap Browser Interfaces",
+                question="Czy interfejsy snap przeglądarek są poprawnie podłączone?",
+                status=TestStatus.WARN,
+                answer=f"Brakujące interfejsy: {'; '.join(issues)}",
+                details=details,
+                diagnosis="Brakujące interfejsy snap mogą uniemożliwiać uruchomienie przeglądarki GUI",
+                suggestion="Podłącz interfejsy: snap connect <browser>:<interface>"
+            )
+        else:
+            return TestResult(
+                name="Snap Browser Interfaces",
+                question="Czy interfejsy snap przeglądarek są poprawnie podłączone?",
+                status=TestStatus.PASS,
+                answer="Wszystkie wymagane interfejsy podłączone",
+                details=details
+            )
+
+    def test_browser_logs(self) -> TestResult:
+        """Check browser error logs."""
+        if not self.ctx.qga_responding and not self.ctx.ssh_works:
+            return TestResult(
+                name="Browser Logs",
+                question="Czy są błędy w logach przeglądarek?",
+                status=TestStatus.SKIP,
+                answer="Pominięto - brak dostępu do VM"
+            )
+        
+        details = {}
+        errors_found = []
+        
+        # Check Firefox snap logs
+        snap_ff_logs = self.exec_in_vm("snap logs firefox -n 50 2>/dev/null || echo ''")
+        if snap_ff_logs:
+            details["firefox_snap_logs"] = snap_ff_logs[:300]
+            if any(err in snap_ff_logs.lower() for err in ["error", "fail", "denied"]):
+                errors_found.append("Firefox snap logs contain errors")
+        
+        # Check journal for firefox errors
+        journal_ff = self.exec_in_vm("journalctl -n 100 --no-pager 2>/dev/null | grep -i firefox | tail -20 || echo ''")
+        if journal_ff:
+            details["firefox_journal"] = journal_ff[:300]
+            if any(err in journal_ff.lower() for err in ["error", "fail", "denied", "crash"]):
+                errors_found.append("Journal contains Firefox errors")
+        
+        # Check Chrome snap logs
+        snap_chrome_logs = self.exec_in_vm("snap logs google-chrome -n 50 2>/dev/null || echo ''")
+        if snap_chrome_logs:
+            details["chrome_snap_logs"] = snap_chrome_logs[:300]
+            if any(err in snap_chrome_logs.lower() for err in ["error", "fail", "denied"]):
+                errors_found.append("Chrome snap logs contain errors")
+        
+        # Check Chromium snap logs
+        snap_chromium_logs = self.exec_in_vm("snap logs chromium -n 50 2>/dev/null || echo ''")
+        if snap_chromium_logs:
+            details["chromium_snap_logs"] = snap_chromium_logs[:300]
+        
+        if not errors_found:
+            return TestResult(
+                name="Browser Logs",
+                question="Czy są błędy w logach przeglądarek?",
+                status=TestStatus.PASS,
+                answer="Nie znaleziono błędów w logach",
+                details=details
+            )
+        else:
+            return TestResult(
+                name="Browser Logs",
+                question="Czy są błędy w logach przeglądarek?",
+                status=TestStatus.WARN,
+                answer=f"Znaleziono błędy: {'; '.join(errors_found[:2])}",
+                details=details,
+                diagnosis="Przeglądarki raportują błędy w logach - mogą wskazywać na problemy z profilem, uprawnieniami lub konfiguracją",
+                suggestion="Przejrzyj szczegóły w logach powyżej lub sprawdź: snap logs <browser>"
+            )
+
     def run_all_tests(self) -> List[TestResult]:
         """Run all diagnostic tests in order."""
         # Test sequence with dependencies
@@ -808,6 +1415,16 @@ class VMDiagnostic:
             self.test_serial_log_analysis,
             self.test_cloud_init_config,
             self.test_vm_services,
+            # Browser diagnostic tests
+            self.test_browser_detection,
+            self.test_firefox_profile,
+            self.test_chrome_profile,
+            self.test_browser_permissions,
+            self.test_browser_lock_files,
+            self.test_browser_crash_reports,
+            self.test_snap_browser_interfaces,
+            self.test_firefox_headless,
+            self.test_browser_logs,
         ]
         
         for test_func in tests:
@@ -890,8 +1507,8 @@ class VMDiagnostic:
             causes.append("VM nie jest uruchomiona")
             return causes
         
-        if not self.ctx.passt_active:
-            causes.append("Passt nie działa - brak port-forwarding dla SSH")
+        if not self.ctx.passt_active and not self.ctx.ssh_works:
+            causes.append("Port-forwarding SSH nie działa (ani passt ani QEMU hostfwd)")
         
         if not self.ctx.qga_responding and not self.ctx.ssh_works:
             causes.append("Brak dostępu do VM (ani QGA ani SSH nie działają)")
@@ -903,6 +1520,14 @@ class VMDiagnostic:
         
         if self.ctx.qga_responding and self.ctx.has_ipv4 and not self.ctx.ssh_works:
             causes.append("VM ma IPv4 ale SSH nie działa - sprawdź usługę SSH w VM")
+        
+        # Browser-specific root causes
+        if "firefox" in self.ctx.browsers_detected and not self.ctx.firefox_profile_ok:
+            causes.append("Firefox jest zainstalowany ale brak profilu - przeglądarka uruchomi się z czystym profilem")
+        
+        if ("chrome" in self.ctx.browsers_detected or "chromium" in self.ctx.browsers_detected) and \
+           not self.ctx.chrome_profile_ok and not self.ctx.chromium_profile_ok:
+            causes.append("Chrome/Chromium jest zainstalowany ale brak profilu - przeglądarka uruchomi się z czystym profilem")
         
         if not causes:
             causes.append("Nie zidentyfikowano krytycznych problemów")
@@ -936,6 +1561,20 @@ class VMDiagnostic:
             steps.append("SSH działa - możesz połączyć się z VM:")
             steps.append(f"  ssh -i {self.ctx.ssh_key_path} -p {self.ctx.ssh_port} ubuntu@127.0.0.1")
         
+        # Browser-specific next steps
+        if "firefox" in self.ctx.browsers_detected and not self.ctx.firefox_profile_ok:
+            steps.append("\n🔧 Firefox bez profilu - aby zaimportować profil:")
+            steps.append("  1. Uruchom Firefox w VM ręcznie przez virt-viewer")
+            steps.append("  2. Lub skopiuj profil przez SSH:")
+            steps.append("     scp -r -i ~/.local/share/libvirt/images/<vm>/ssh_key -P <port> ~/.mozilla/firefox/* ubuntu@127.0.0.1:/home/ubuntu/.mozilla/firefox/")
+        
+        if ("chrome" in self.ctx.browsers_detected or "chromium" in self.ctx.browsers_detected) and \
+           not self.ctx.chrome_profile_ok and not self.ctx.chromium_profile_ok:
+            steps.append("\n🔧 Chrome/Chromium bez profilu - aby zaimportować profil:")
+            steps.append("  1. Uruchom Chrome w VM ręcznie przez virt-viewer")
+            steps.append("  2. Lub skopiuj profil przez SSH:")
+            steps.append("     scp -r -i ~/.local/share/libvirt/images/<vm>/ssh_key -P <port> ~/.config/google-chrome/* ubuntu@127.0.0.1:/home/ubuntu/.config/google-chrome/")
+        
         if not steps:
             steps.append("Uruchom ponownie diagnostykę za kilka minut")
         
@@ -955,6 +1594,12 @@ class VMDiagnostic:
                 "ssh_works": self.ctx.ssh_works,
                 "has_ipv4": self.ctx.has_ipv4,
                 "cloud_init_done": self.ctx.cloud_init_done,
+                "browsers": {
+                    "detected": list(self.ctx.browsers_detected.keys()),
+                    "firefox_profile_ok": self.ctx.firefox_profile_ok,
+                    "chrome_profile_ok": self.ctx.chrome_profile_ok,
+                    "chromium_profile_ok": self.ctx.chromium_profile_ok,
+                }
             },
             "results": [
                 {

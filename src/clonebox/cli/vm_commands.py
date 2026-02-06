@@ -18,6 +18,7 @@ from clonebox.cloner import SelectiveVMCloner
 from clonebox.models import VMConfig
 from clonebox.detector import SystemDetector
 from clonebox.cli.utils import console, custom_style, CLONEBOX_CONFIG_FILE, load_clonebox_config, create_vm_from_config, _resolve_vm_name_and_config_file
+from clonebox import paths as _paths
 
 
 def cmd_init(args):
@@ -251,7 +252,7 @@ def cmd_open(args):
     """Open VM viewer window."""
     name = args.name
     user_session = getattr(args, "user", False)
-    conn_uri = "qemu:///session" if user_session else "qemu:///system"
+    conn_uri = _paths.conn_uri(user_session)
 
     # If name is a path, load config
     if name and (name.startswith(".") or name.startswith("/") or name.startswith("~")):

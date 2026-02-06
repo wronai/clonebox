@@ -11,6 +11,8 @@ import subprocess
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
+from clonebox.ssh import ssh_run as _ssh_run, build_ssh_command as _build_ssh_cmd
+
 log = logging.getLogger(__name__)
 
 # Browser profile paths on Linux (host)
@@ -52,6 +54,21 @@ VM_BROWSER_PROFILE_PATHS = {
 }
 
 
+def _resolve_host_profile_paths(browser: str) -> Dict[str, Path]:
+    paths = BROWSER_PROFILE_PATHS[browser].copy()
+    if browser == "chromium":
+        # Snap stores user data under ~/snap/<name>/common/...
+        snap_path = Path.home() / "snap" / "chromium" / "common" / "chromium"
+        if snap_path.exists():
+            paths["config"] = snap_path
+    elif browser == "firefox":
+        # Snap stores user data under ~/snap/<name>/common/...
+        snap_path = Path.home() / "snap" / "firefox" / "common" / ".mozilla" / "firefox"
+        if snap_path.exists():
+            paths["config"] = snap_path
+    return paths
+
+
 def detect_browser_profiles() -> Dict[str, Dict[str, Path]]:
     """Detect available browser profiles on the host system.
     
@@ -60,6 +77,7 @@ def detect_browser_profiles() -> Dict[str, Dict[str, Path]]:
     """
     detected = {}
     for browser, paths in BROWSER_PROFILE_PATHS.items():
+        paths = _resolve_host_profile_paths(browser)
         existing_paths = {}
         for key, path in paths.items():
             if path.exists():
@@ -127,7 +145,9 @@ def copy_browser_profile(
     if browser not in BROWSER_PROFILE_PATHS:
         return None
     
-    paths = BROWSER_PROFILE_PATHS[browser]
+    paths = _resolve_host_profile_paths(browser)
+    if not paths:
+        return None
     
     # Check if profile exists
     if not paths["config"].exists():
@@ -272,24 +292,8 @@ def copy_profiles_to_vm_via_ssh(
     import subprocess
 
     def _ssh(cmd: str) -> subprocess.CompletedProcess:
-        base = [
-            "ssh",
-            "-o",
-            "StrictHostKeyChecking=no",
-            "-o",
-            "UserKnownHostsFile=/dev/null",
-            "-o",
-            "BatchMode=yes",
-            "-o",
-            "ConnectTimeout=10",
-            "-p",
-            str(ssh_port),
-            "-i",
-            str(ssh_key),
-            f"{vm_username}@127.0.0.1",
-            cmd,
-        ]
-        return subprocess.run(base, capture_output=True, text=True)
+        return _ssh_run(port=ssh_port, key=ssh_key, command=cmd,
+                        username=vm_username, connect_timeout=10)
 
     def _resolve_dest(browser: str) -> str:
         if browser == "chromium":
@@ -324,6 +328,18 @@ def copy_profiles_to_vm_via_ssh(
             all_success = False
             continue
 
+        # Fix ownership of snap parent directories (snap runtime needs them
+        # owned by the user, not root).  e.g. /home/ubuntu/snap/firefox
+        if f"/home/{vm_username}/snap/" in dest_path:
+            import re as _re
+            m = _re.match(
+                rf"(/home/{_re.escape(vm_username)}/snap/[^/]+)", dest_path
+            )
+            if m:
+                _ssh(
+                    f"sudo chown -R {vm_username}:{vm_username} '{m.group(1)}'"
+                )
+
         tar_cmd = [
             "tar",
             "-C",
@@ -344,23 +360,10 @@ def copy_profiles_to_vm_via_ssh(
             f"sudo chown -R {vm_username}:{vm_username} '{dest_path}' || true"
         )
 
-        ssh_cmd = [
-            "ssh",
-            "-o",
-            "StrictHostKeyChecking=no",
-            "-o",
-            "UserKnownHostsFile=/dev/null",
-            "-o",
-            "BatchMode=yes",
-            "-o",
-            "ConnectTimeout=10",
-            "-p",
-            str(ssh_port),
-            "-i",
-            str(ssh_key),
-            f"{vm_username}@127.0.0.1",
-            remote_cmd,
-        ]
+        ssh_cmd = _build_ssh_cmd(
+            port=ssh_port, key=ssh_key,
+            username=vm_username, connect_timeout=10,
+        ) + [remote_cmd]
 
         try:
             tar_proc = subprocess.Popen(tar_cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)

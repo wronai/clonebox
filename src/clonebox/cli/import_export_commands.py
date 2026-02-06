@@ -234,7 +234,8 @@ def cmd_sync_key(args):
     """Sync SSH keys with VM."""
     vm_name = args.name
     user_session = getattr(args, "user", False)
-    conn_uri = "qemu:///session" if user_session else "qemu:///system"
+    from clonebox import paths as _paths
+    conn_uri = _paths.conn_uri(user_session)
     
     # Resolve VM name from config if needed
     if not vm_name or vm_name == ".":

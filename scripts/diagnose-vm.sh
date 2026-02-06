@@ -1,435 +1,507 @@
 #!/bin/bash
-# CloneBox VM Diagnostic Script
-# Helps identify connectivity and configuration issues
+# CloneBox Unified VM Diagnostic Script
+#
+# Usage:
+#   diagnose-vm.sh [VM_NAME] [OPTIONS]
+#
+# Options:
+#   --verbose, -v   Show all checks (INFO, OK, WARN, FAIL)
+#   --quiet, -q     Show only FAIL (critical errors)
+#   --help, -h      Show this help
+#
+# Default mode: shows WARN and FAIL only.
+# Exit code = number of FAILs.
 
-set -e
+set -euo pipefail
 
-VM_NAME="${1:-clone-clonebox}"
+# ── parse arguments ──────────────────────────────────────────────────────────
+VERBOSE=false
+QUIET=false
+VM_NAME="clone-clonebox"
+
+for arg in "$@"; do
+    case "$arg" in
+        --verbose|-v) VERBOSE=true ;;
+        --quiet|-q)   QUIET=true ;;
+        --help|-h)
+            sed -n '2,/^$/s/^# \?//p' "$0"
+            exit 0 ;;
+        -*) echo "Unknown flag: $arg (use --help)"; exit 1 ;;
+        *)  VM_NAME="$arg" ;;
+    esac
+done
+
 VM_DIR="${HOME}/.local/share/libvirt/images/${VM_NAME}"
 CONN_URI="qemu:///session"
-
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-CYAN='\033[0;36m'
-NC='\033[0m'
-BOLD='\033[1m'
-
-log() { echo -e "${CYAN}[INFO]${NC} $1"; }
-ok() { echo -e "${GREEN}[OK]${NC} $1"; }
-warn() { echo -e "${YELLOW}[WARN]${NC} $1"; }
-fail() { echo -e "${RED}[FAIL]${NC} $1"; }
-section() { echo -e "\n${BOLD}=== $1 ===${NC}"; }
-
-section "VM Detailed Status"
-
-# VM info
-virsh --connect "$CONN_URI" dominfo "$VM_NAME" 2>/dev/null | grep -E "(CPU|Memory|State|Autostart)" | sed 's/^/  /'
-
-# QEMU command line
-log "QEMU network config:"
-ps aux | grep qemu | grep "$VM_NAME" | grep -o "netdev[^ ]*" | head -1 | sed 's/^/  /'
-
-section "Network Deep Check"
-
-# All network info
-log "All listening ports:"
-ss -tlnp 2>/dev/null | grep -E "(5900|22)" | sed 's/^/  /'
-
-log "SSH forwarding rules:"
-ps aux | grep qemu | grep "$VM_NAME" | grep -o "hostfwd[^ ]*" | sed 's/,/\n    /g' | sed 's/^/  /'
-
-# Check if VM exists
-if virsh --connect "$CONN_URI" dominfo "$VM_NAME" &>/dev/null; then
-    STATE=$(virsh --connect "$CONN_URI" domstate "$VM_NAME" 2>/dev/null)
-    ok "VM '$VM_NAME' exists (state: $STATE)"
-else
-    fail "VM '$VM_NAME' not found"
-    exit 1
-fi
-
-section "Network Configuration"
-
-# Check passt process
-PASST_PROCS=$(pgrep -a passt | grep "$VM_NAME" || true)
-if [ -n "$PASST_PROCS" ]; then
-    ok "passt process found for VM"
-    echo "$PASST_PROCS" | head -2
-else
-    warn "No passt process found for VM"
-fi
-
-# Check SSH port
-if [ -f "$VM_DIR/ssh_port" ]; then
-    SSH_PORT=$(cat "$VM_DIR/ssh_port")
-    ok "SSH port: $SSH_PORT"
-    
-    # Check if port is listening
-    if ss -tlnp 2>/dev/null | grep -q ":${SSH_PORT}"; then
-        ok "Port $SSH_PORT is listening (passt forwarding active)"
-    else
-        warn "Port $SSH_PORT not listening"
-    fi
-    
-    # Test TCP connection
-    if nc -zw2 127.0.0.1 "$SSH_PORT" 2>/dev/null; then
-        ok "TCP connection to port $SSH_PORT successful"
-    else
-        fail "TCP connection to port $SSH_PORT failed"
-    fi
-else
-    warn "SSH port file not found at $VM_DIR/ssh_port"
-fi
-
-section "Cloud-Init Deep Analysis"
-
-# Check cloud-init status in serial log
-if [ -f "$SERIAL_LOG" ]; then
-    log "Cloud-init phases detected:"
-    grep -E "Cloud-init.*running" "$SERIAL_LOG" | tail -10 | sed 's/^/  /'
-    
-    log "Cloud-init progress:"
-    grep -E "(Step [0-9]+|Starting VM setup|runcmd phase)" "$SERIAL_LOG" | tail -20 | sed 's/^/  /'
-    
-    log "Package installation status:"
-    grep -E "(apt-get|Installing|packages installed)" "$SERIAL_LOG" | tail -5 | sed 's/^/  /'
-    
-    log "Services status from cloud-init:"
-    grep -E "(systemctl.*enable|Service.*Started)" "$SERIAL_LOG" | tail -10 | sed 's/^/  /'
-    
-    log "Cloud-init errors:"
-    grep -E "(ERROR|Failed|error:)" "$SERIAL_LOG" | tail -10 | sed 's/^/  /' || warn "No errors found"
-else
-    warn "No serial log available"
-fi
-
-section "QEMU Guest Agent Deep Check"
-
-if virsh --connect "$CONN_URI" qemu-agent-command "$VM_NAME" '{"execute":"guest-ping"}' &>/dev/null; then
-    ok "QEMU guest agent responding"
-    
-    log "Guest OS info:"
-    virsh --connect "$CONN_URI" qemu-agent-command "$VM_NAME" '{"execute":"guest-get-osinfo"}' 2>/dev/null | \
-        python3 -c "import sys,json; d=json.load(sys.stdin); print(f\"  Name: {d.get('return',{}).get('name','unknown')}\")" 2>/dev/null
-    
-    log "Guest network interfaces:"
-    virsh --connect "$CONN_URI" qemu-agent-command "$VM_NAME" '{"execute":"guest-network-get-interfaces"}' 2>/dev/null | \
-        python3 -c "import sys,json; d=json.load(sys.stdin); 
-[print(f\"  {i['name']}: {', '.join([a.get('ip-address','') + '/' + str(a.get('prefix',0)) for a in i.get('ip-addresses',[]) if a.get('ip-address')])}\") for i in d.get('return',[])]" 2>/dev/null || true
-    
-    log "Active users:"
-    virsh --connect "$CONN_URI" qemu-agent-command "$VM_NAME" '{"execute":"guest-get-users"}' 2>/dev/null | \
-        python3 -c "import sys,json; d=json.load(sys.stdin); [print(f\"  {u.get('user','unknown')}\") for u in d.get('return',[])]" 2>/dev/null || true
-    
-    log "Running processes (top 10):"
-    virsh --connect "$CONN_URI" qemu-agent-command "$VM_NAME" '{"execute":"guest-get-processes"}' 2>/dev/null | \
-        python3 -c "import sys,json; d=json.load(sys.stdin); [print(f\"  {p.get('name',p.get('cmd',p.get('pid','?')))}\") for p in d.get('return',[])[:10]]" 2>/dev/null || true
-else
-    warn "QEMU guest agent not responding"
-    log "Possible reasons:"
-    log "  - VM still booting (cloud-init installing qemu-guest-agent)"
-    log "  - qemu-guest-agent not installed yet"
-    log "  - VM crashed or frozen"
-fi
-
-section "SSH Full Diagnostics"
-
 SSH_KEY="$VM_DIR/ssh_key"
 SSH_PORT_FILE="$VM_DIR/ssh_port"
+SERIAL_LOG="$VM_DIR/serial.log"
 
-if [ -f "$SSH_PORT_FILE" ]; then
-    SSH_PORT=$(cat "$SSH_PORT_FILE")
-    log "SSH port configured: $SSH_PORT"
-    
-    # Detailed port check
-    log "Port listening status:"
-    ss -tlnp | grep ":$SSH_PORT" | sed 's/^/  /'
-    
-    # SSH banner grab
-    log "SSH banner:"
-    timeout 3 bash -c "echo '' | nc -w2 127.0.0.1 $SSH_PORT 2>&1" | head -2 | sed 's/^/  /' || warn "Cannot get SSH banner"
-    
-    # Test SSH with full verbose
-    if [ -f "$SSH_KEY" ]; then
-        log "Testing SSH connection with key $SSH_KEY..."
-        SSH_OUTPUT=$(ssh -vvv -o ConnectTimeout=10 -o StrictHostKeyChecking=no -o BatchMode=yes \
-            -i "$SSH_KEY" -p "$SSH_PORT" ubuntu@127.0.0.1 "echo '===SSH_OK==='; whoami; uptime" 2>&1 || true)
-        
-        if echo "$SSH_OUTPUT" | grep -q "===SSH_OK==="; then
-            ok "SSH connection successful!"
-            log "SSH output:"
-            echo "$SSH_OUTPUT" | grep -E "(===SSH_OK===|whoami|uptime)" | sed 's/^/  /'
-        else
-            fail "SSH connection failed"
-            log "SSH debug output (last 20 lines):"
-            echo "$SSH_OUTPUT" | tail -20 | sed 's/^/  /'
-        fi
-    else
-        warn "SSH key not found at $SSH_KEY"
-        log "Attempting password auth..."
-        SSH_OUTPUT=$(sshpass -p "ubuntu" ssh -v -o ConnectTimeout=5 -o StrictHostKeyChecking=no \
-            -p "$SSH_PORT" ubuntu@127.0.0.1 "echo connected" 2>&1 || true)
-        if echo "$SSH_OUTPUT" | grep -q "connected"; then
-            ok "SSH with password works!"
-        else
-            fail "Both key and password auth failed"
-        fi
-    fi
+FAILS=0
+WARNS=0
+
+# resolved once for SSH helper and all subsequent sections
+SSH_PORT=""
+
+# ── colours ──────────────────────────────────────────────────────────────────
+if [ -t 1 ]; then
+    RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'
+    CYAN='\033[0;36m'; BOLD='\033[1m'; NC='\033[0m'
 else
-    warn "SSH port file not found"
+    RED=''; GREEN=''; YELLOW=''; CYAN=''; BOLD=''; NC=''
 fi
 
-section "Serial Log Deep Analysis"
+# ── output helpers (respect verbosity) ───────────────────────────────────────
+fail()    { echo -e "${RED}[FAIL]${NC} $1"; ((FAILS++)) || true; }
+warn()    { ((WARNS++)) || true; $QUIET || echo -e "${YELLOW}[WARN]${NC} $1"; }
+ok()      { $VERBOSE && echo -e "${GREEN}[OK]${NC}   $1" || true; }
+log()     { $VERBOSE && echo -e "${CYAN}[INFO]${NC} $1" || true; }
+section() { $VERBOSE && echo -e "\n${BOLD}=== $1 ===${NC}" || true; }
 
-SERIAL_LOG="$VM_DIR/serial.log"
-if [ -f "$SERIAL_LOG" ] && [ -s "$SERIAL_LOG" ]; then
-    LOG_LINES=$(wc -l < "$SERIAL_LOG")
-    LOG_SIZE=$(du -h "$SERIAL_LOG" | cut -f1)
-    log "Serial log: $LOG_LINES lines, $LOG_SIZE"
-    
-    log "=== Last 50 lines ==="
-    tail -50 "$SERIAL_LOG" | sed 's/^/  /'
-    
-    log "=== Boot timeline ==="
-    grep -E "(Linux version|Welcome to|cloud-init.*running|Reached target)" "$SERIAL_LOG" | tail -15 | sed 's/^/  /'
-    
-    log "=== Network status ==="
-    grep -E "(ens|eth|enp).*True.*10\.0\.2" "$SERIAL_LOG" | tail -5 | sed 's/^/  /'
-    
-    log "=== Service status ==="
-    grep -E "(Started|Finished).*ssh|openssh" "$SERIAL_LOG" | tail -5 | sed 's/^/  /' || warn "No SSH service messages"
-    
-    log "=== Errors/Warnings ==="
-    grep -iE "(error|fail|warn|timeout)" "$SERIAL_LOG" | tail -10 | sed 's/^/  /' || ok "No errors found"
-    
-    # Check if cloud-init completed
-    if grep -q "Finished.*Cloud-init.*Final" "$SERIAL_LOG"; then
-        ok "Cloud-init final stage completed"
+# ── resolve SSH port (file → QEMU hostfwd → skip) ───────────────────────────
+_resolve_ssh_port() {
+    # 1. Persisted port file
+    if [ -f "$SSH_PORT_FILE" ]; then
+        SSH_PORT=$(cat "$SSH_PORT_FILE")
+        [ -n "$SSH_PORT" ] && return 0
+    fi
+    # 2. Extract from QEMU hostfwd rule
+    local fwd
+    fwd=$(ps aux 2>/dev/null | grep "[q]emu.*$VM_NAME" \
+        | grep -oP 'hostfwd=tcp::\K\d+(?=-:22)' | head -1 || true)
+    if [ -n "$fwd" ]; then
+        SSH_PORT="$fwd"
+        return 0
+    fi
+    return 1
+}
+
+# ── SSH helper (uses resolved $SSH_PORT) ─────────────────────────────────────
+_ssh() {
+    [ -n "$SSH_PORT" ] && [ -f "$SSH_KEY" ] || return 1
+    ssh -o ConnectTimeout=5 -o StrictHostKeyChecking=no \
+        -o UserKnownHostsFile=/dev/null -o BatchMode=yes \
+        -o LogLevel=ERROR \
+        -i "$SSH_KEY" -p "$SSH_PORT" ubuntu@127.0.0.1 "$@" 2>/dev/null
+}
+
+# Track whether SSH is available for later sections
+SSH_OK=false
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#  1. VM existence & state
+# ═══════════════════════════════════════════════════════════════════════════════
+section "VM Status"
+
+if ! virsh --connect "$CONN_URI" dominfo "$VM_NAME" &>/dev/null; then
+    fail "VM '$VM_NAME' does not exist"
+    echo -e "\n${BOLD}Summary:${NC} ${RED}Fails: $FAILS${NC}"
+    exit $FAILS
+fi
+
+STATE=$(virsh --connect "$CONN_URI" domstate "$VM_NAME" 2>/dev/null)
+if [ "$STATE" = "running" ]; then
+    ok "VM '$VM_NAME' running"
+else
+    fail "VM '$VM_NAME' not running (state: $STATE)"
+    echo -e "\n${BOLD}Summary:${NC} ${RED}Fails: $FAILS${NC}"
+    exit $FAILS
+fi
+
+if $VERBOSE; then
+    virsh --connect "$CONN_URI" dominfo "$VM_NAME" 2>/dev/null \
+        | grep -E "(CPU|Memory|State|Autostart)" | sed 's/^/  /'
+fi
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#  2. Network / SSH
+# ═══════════════════════════════════════════════════════════════════════════════
+section "Network & SSH"
+
+# passt
+if pgrep -a passt 2>/dev/null | grep -q "$VM_NAME"; then
+    ok "passt process found"
+else
+    warn "No passt process for VM (may use different networking)"
+fi
+
+if $VERBOSE; then
+    log "QEMU network config:"
+    ps aux | grep "[q]emu.*$VM_NAME" | grep -oP 'netdev\S+' | head -1 | sed 's/^/  /' || true
+    log "SSH forwarding rules:"
+    ps aux | grep "[q]emu.*$VM_NAME" | grep -oP 'hostfwd\S+' | sed 's/,/\n    /g' | sed 's/^/  /' || true
+    log "Listening ports (5900/SSH):"
+    ss -tlnp 2>/dev/null | grep -E ":(5900|22[0-9]{3})\b" | sed 's/^/  /' || true
+fi
+
+# Resolve SSH port once
+if _resolve_ssh_port; then
+    if ! ss -tlnp 2>/dev/null | grep -q ":${SSH_PORT}\b"; then
+        fail "SSH port $SSH_PORT not listening"
+    else
+        ok "SSH port $SSH_PORT listening"
+    fi
+
+    if ! nc -zw2 127.0.0.1 "$SSH_PORT" 2>/dev/null; then
+        fail "TCP connect to port $SSH_PORT failed"
+    else
+        ok "TCP connect to $SSH_PORT OK"
+    fi
+else
+    fail "Cannot determine SSH port (no port file, no QEMU hostfwd)"
+fi
+
+# SSH auth test
+if [ -n "$SSH_PORT" ] && [ -f "$SSH_KEY" ]; then
+    if _ssh "echo OK" | grep -q OK; then
+        ok "SSH authentication OK"
+        SSH_OK=true
+    else
+        fail "SSH authentication failed"
+    fi
+
+    if $VERBOSE; then
+        log "SSH banner:"
+        timeout 3 bash -c "echo '' | nc -w2 127.0.0.1 $SSH_PORT 2>&1" | head -2 | sed 's/^/  /' || true
+    fi
+else
+    [ ! -f "$SSH_KEY" ] && fail "SSH key missing: $SSH_KEY"
+fi
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#  3. Cloud-init
+# ═══════════════════════════════════════════════════════════════════════════════
+section "Cloud-init"
+
+if [ ! -f "$SERIAL_LOG" ] || [ ! -s "$SERIAL_LOG" ]; then
+    warn "Serial log not found or empty"
+else
+    if grep --text -q "Finished.*Cloud-init.*Final" "$SERIAL_LOG"; then
+        ok "Cloud-init completed"
     else
         warn "Cloud-init may still be running or failed"
     fi
-else
-    warn "Serial log empty or not found"
-    log "Try: virsh --connect $CONN_URI console $VM_NAME"
+
+    # Always show cloud-init errors (even without --verbose)
+    CI_ERRORS=$(grep --text -iE "(ERROR|error:)" "$SERIAL_LOG" \
+        | grep -v "aspell\|node-\|RAS:\|EXT4-fs\|remount-ro\|Correctable Errors\|ACPI Error\|has no plug\|error-pages\|GPT:.*error\|Enabling conf" \
+        | tail -5 || true)
+    if [ -n "$CI_ERRORS" ]; then
+        warn "Cloud-init errors found:"
+        echo "$CI_ERRORS" | sed 's/^/  /'
+    fi
 fi
 
-section "VM XML Configuration"
+# ═══════════════════════════════════════════════════════════════════════════════
+#  4. QEMU Guest Agent
+# ═══════════════════════════════════════════════════════════════════════════════
+section "QEMU Guest Agent"
 
-log "Network interface type:"
-virsh --connect "$CONN_URI" dumpxml "$VM_NAME" 2>/dev/null | grep -A2 "interface type" | sed 's/^/  /'
+if virsh --connect "$CONN_URI" qemu-agent-command "$VM_NAME" \
+    '{"execute":"guest-ping"}' &>/dev/null; then
+    ok "QEMU Guest Agent responding"
 
-log "Forwarded ports:"
-virsh --connect "$CONN_URI" dumpxml "$VM_NAME" 2>/dev/null | grep -o "hostfwd[^ ]*" | sed 's/,/\n    /g' | sed 's/^/  /'
+    if $VERBOSE; then
+        log "Guest OS:"
+        virsh --connect "$CONN_URI" qemu-agent-command "$VM_NAME" \
+            '{"execute":"guest-get-osinfo"}' 2>/dev/null | \
+            python3 -c "import sys,json; d=json.load(sys.stdin); print(f\"  {d.get('return',{}).get('name','?')} {d.get('return',{}).get('version-id','')}\")" 2>/dev/null || true
 
-log "Graphics (SPICE/VNC):"
-virsh --connect "$CONN_URI" dumpxml "$VM_NAME" 2>/dev/null | grep -E "(spice|vnc|graphics)" | head -3 | sed 's/^/  /'
+        log "Network interfaces:"
+        virsh --connect "$CONN_URI" qemu-agent-command "$VM_NAME" \
+            '{"execute":"guest-network-get-interfaces"}' 2>/dev/null | \
+            python3 -c "
+import sys,json; d=json.load(sys.stdin)
+for i in d.get('return',[]):
+    ips=', '.join(a.get('ip-address','')+'/'+str(a.get('prefix',0)) for a in i.get('ip-addresses',[]) if a.get('ip-address'))
+    if ips: print(f\"  {i['name']}: {ips}\")" 2>/dev/null || true
 
-section "GUI Deep Check"
-
-# Check if SSH is available for GUI diagnostics
-if [ -f "$SSH_KEY" ] && [ -f "$SSH_PORT_FILE" ]; then
-    SSH_PORT=$(cat "$SSH_PORT_FILE")
-    
-    # Check GDM/display manager status
-    log "Display Manager status:"
-    GDM_STATUS=$(ssh -o ConnectTimeout=5 -o StrictHostKeyChecking=no -o BatchMode=yes \
-        -i "$SSH_KEY" -p "$SSH_PORT" ubuntu@127.0.0.1 \
-        "systemctl is-active gdm3 gdm sddm lightdm 2>/dev/null | head -1" 2>/dev/null || echo "unknown")
-    
-    if [ "$GDM_STATUS" = "active" ]; then
-        ok "Display Manager is running"
-    else
-        warn "Display Manager status: $GDM_STATUS"
+        log "Active users:"
+        virsh --connect "$CONN_URI" qemu-agent-command "$VM_NAME" \
+            '{"execute":"guest-get-users"}' 2>/dev/null | \
+            python3 -c "import sys,json; [print(f\"  {u.get('user','?')}\") for u in json.load(sys.stdin).get('return',[])]" 2>/dev/null || true
     fi
-    
-    # Check session type (Xorg vs Wayland)
-    log "GUI Session Type:"
-    SESSION_INFO=$(ssh -o ConnectTimeout=5 -o StrictHostKeyChecking=no -o BatchMode=yes \
-        -i "$SSH_KEY" -p "$SSH_PORT" ubuntu@127.0.0.1 \
-        "loginctl show-session \$(loginctl | grep ubuntu | awk '{print \$1}' | head -1) 2>/dev/null | grep -E 'Type|Desktop'" 2>/dev/null || echo "")
-    
-    if [ -n "$SESSION_INFO" ]; then
-        echo "$SESSION_INFO" | sed 's/^/  /'
-        if echo "$SESSION_INFO" | grep -qi "x11\|xorg"; then
-            log "Session type: X11 (Xorg)"
-        elif echo "$SESSION_INFO" | grep -qi "wayland"; then
-            log "Session type: Wayland"
-        fi
-    else
-        warn "No active GUI session detected"
-    fi
-    
-    # Check available session types
-    log "Available desktop sessions:"
-    ssh -o ConnectTimeout=5 -o StrictHostKeyChecking=no -o BatchMode=yes \
-        -i "$SSH_KEY" -p "$SSH_PORT" ubuntu@127.0.0.1 \
-        "ls /usr/share/xsessions/ 2>/dev/null | sed 's/.desktop//'" 2>/dev/null | sed 's/^/  /' || warn "Cannot list sessions"
-    
-    # Check GDM logs for errors
-    log "GDM recent logs:"
-    GDM_LOGS=$(ssh -o ConnectTimeout=5 -o StrictHostKeyChecking=no -o BatchMode=yes \
-        -i "$SSH_KEY" -p "$SSH_PORT" ubuntu@127.0.0.1 \
-        "journalctl -u gdm -n 5 --no-pager 2>/dev/null | grep -E '(session opened|session closed|failing|error)'" 2>/dev/null || echo "")
-    
-    if [ -n "$GDM_LOGS" ]; then
-        echo "$GDM_LOGS" | sed 's/^/  /'
-    else
-        log "No recent GDM issues"
-    fi
-    
-    # Check current user display
-    log "Active display:"
-    ssh -o ConnectTimeout=5 -o StrictHostKeyChecking=no -o BatchMode=yes \
-        -i "$SSH_KEY" -p "$SSH_PORT" ubuntu@127.0.0.1 \
-        "loginctl show-user ubuntu 2>/dev/null | grep -E 'Display|State'" 2>/dev/null | sed 's/^/  /' || warn "No display info"
-    
 else
-    warn "SSH not available for GUI diagnostics"
-    log "GUI check requires working SSH connection"
+    warn "QEMU Guest Agent not responding"
 fi
 
-# Check SPICE port connectivity
-log "SPICE port check:"
+# ═══════════════════════════════════════════════════════════════════════════════
+#  5. GUI / Display
+# ═══════════════════════════════════════════════════════════════════════════════
+section "GUI & Display"
+
+# SPICE
 if ss -tlnp 2>/dev/null | grep -q ":5900"; then
-    ok "SPICE port 5900 is listening"
-    if nc -zw2 127.0.0.1 5900 2>/dev/null; then
-        ok "SPICE TCP connection successful"
-    else
-        warn "SPICE TCP connection failed"
-    fi
+    ok "SPICE port 5900 listening"
 else
     warn "SPICE port 5900 not listening"
 fi
 
-log "VM resource usage:"
-virsh --connect "$CONN_URI" dominfo "$VM_NAME" 2>/dev/null | grep -E "(CPU time|Max memory|Used memory)" | sed 's/^/  /'
-
-log "Host resource usage:"
-echo "  CPU: $(top -bn1 | grep "Cpu(s)" | awk '{print $2}' | cut -d'%' -f1)% idle"
-echo "  Memory: $(free -h | grep Mem | awk '{print $3"/"$2}')"
-echo "  Disk: $(df -h $VM_DIR | tail -1 | awk '{print $3"/"$2 " ("$5")"}')"
-
-log "QEMU process info:"
-ps aux | grep qemu | grep "$VM_NAME" | awk '{print "  PID: " $2 ", CPU: " $3 "%, MEM: " $4 "%, Time: " $10}'
-
-section "File System & Mounts"
-
-log "VM directory structure:"
-ls -la "$VM_DIR/" 2>/dev/null | head -10 | sed 's/^/  /'
-
-log "Disk image info:"
-for img in "$VM_DIR"/*.qcow2; do
-    if [ -f "$img" ]; then
-        echo "  $img:"
-        qemu-img info "$img" 2>/dev/null | grep -E "(virtual size|disk size|backing file)" | sed 's/^/    /'
-    fi
-done
-
-section "Quick Actions Summary"
-
-echo ""
-echo "  ${BOLD}Connect to VM:${NC}"
-if [ -f "$VM_DIR/ssh_port" ]; then
-    echo "    SSH:     ssh -p $(cat "$VM_DIR/ssh_port") ubuntu@localhost"
-else
-    echo "    SSH:     (port not configured)"
-fi
-echo "    SPICE:   remote-viewer spice://localhost:5900"
-echo "    Console: virsh --connect $CONN_URI console $VM_NAME"
-echo ""
-echo "  ${BOLD}Useful commands:${NC}"
-echo "    Reboot:  virsh --connect $CONN_URI reboot $VM_NAME"
-echo "    Stop:    virsh --connect $CONN_URI shutdown $VM_NAME"
-echo "    Destroy: virsh --connect $CONN_URI destroy $VM_NAME"
-echo "    Logs:    tail -f $VM_DIR/serial.log"
-echo ""
-
-section "Recommendations"
-cat << EOF
-  1. Wait for cloud-init to complete (can take 2-3 minutes)
-  2. Check VM console: virsh --connect $CONN_URI console $VM_NAME
-  3. Look for network issues in console output
-  4. Check if VM has IPv4 address (should be 10.0.2.x with passt)
-
-${BOLD}If network is not configured:${NC}
-  1. passt provides DHCP on 10.0.2.0/24 network
-  2. Default gateway: 10.0.2.2
-  3. DNS: 10.0.2.3
-  4. VM should get 10.0.2.15 via DHCP
-
-${BOLD}Manual network fix (via console):${NC}
-  sudo ip addr add 10.0.2.15/24 dev enp*s0
-  sudo ip route add default via 10.0.2.2
-  echo 'nameserver 10.0.2.3' | sudo tee /etc/resolv.conf
-EOF
-
-echo -e "\n${BOLD}Diagnostic complete${NC}"
-
-# Browser Deep Check section
-section "Browser Deep Check"
-
-# Check if SSH is available for browser diagnostics
-if [ -f "$SSH_KEY" ] && [ -f "$SSH_PORT_FILE" ]; then
-    SSH_PORT=$(cat "$SSH_PORT_FILE")
-    
-    # Check browser installation
-    log "Browser installation status:"
-    ssh -o ConnectTimeout=5 -o StrictHostKeyChecking=no -o BatchMode=yes \
-        -i "$SSH_KEY" -p "$SSH_PORT" ubuntu@127.0.0.1 \
-        "which firefox chromium google-chrome google-chrome-stable 2>/dev/null" 2>/dev/null | sed 's/^/  /' || warn "Cannot check browser binaries"
-    
-    # Check snap packages
-    log "Snap browser packages:"
-    ssh -o ConnectTimeout=5 -o StrictHostKeyChecking=no -o BatchMode=yes \
-        -i "$SSH_KEY" -p "$SSH_PORT" ubuntu@127.0.0.1 \
-        "snap list 2>/dev/null | grep -E '(firefox|chromium)'" 2>/dev/null | sed 's/^/  /' || warn "Cannot check snap list"
-    
-    # Check browser profile paths
-    log "Chrome profile:"
-    ssh -o ConnectTimeout=5 -o StrictHostKeyChecking=no -o BatchMode=yes \
-        -i "$SSH_KEY" -p "$SSH_PORT" ubuntu@127.0.0.1 \
-        "ls -la ~/.config/google-chrome/ 2>/dev/null | head -5" 2>/dev/null | sed 's/^/  /' || warn "Chrome profile not found"
-    
-    log "Chromium profile (snap):"
-    ssh -o ConnectTimeout=5 -o StrictHostKeyChecking=no -o BatchMode=yes \
-        -i "$SSH_KEY" -p "$SSH_PORT" ubuntu@127.0.0.1 \
-        "ls -la ~/snap/chromium/common/chromium/ 2>/dev/null | head -5" 2>/dev/null | sed 's/^/  /' || warn "Chromium profile not found"
-    
-    log "Firefox profile (snap):"
-    ssh -o ConnectTimeout=5 -o StrictHostKeyChecking=no -o BatchMode=yes \
-        -i "$SSH_KEY" -p "$SSH_PORT" ubuntu@127.0.0.1 \
-        "ls -la ~/snap/firefox/common/.mozilla/firefox/ 2>/dev/null | head -5" 2>/dev/null | sed 's/^/  /' || warn "Firefox profile not found"
-    
-    # Check browser processes
-    log "Running browser processes:"
-    ssh -o ConnectTimeout=5 -o StrictHostKeyChecking=no -o BatchMode=yes \
-        -i "$SSH_KEY" -p "$SSH_PORT" ubuntu@127.0.0.1 \
-        "pgrep -a -f 'chrome|chromium|firefox' 2>/dev/null | head -5" 2>/dev/null | sed 's/^/  /' || log "No browser processes running"
-    
-    # Test headless chrome
-    log "Testing Chrome headless:"
-    CHROME_TEST=$(ssh -o ConnectTimeout=5 -o StrictHostKeyChecking=no -o BatchMode=yes \
-        -i "$SSH_KEY" -p "$SSH_PORT" ubuntu@127.0.0.1 \
-        "timeout 5 google-chrome --headless --disable-gpu --dump-dom https://example.com 2>&1 | head -1" 2>/dev/null || echo "FAILED")
-    if echo "$CHROME_TEST" | grep -q "<!doctype\|<html"; then
-        ok "Chrome headless working"
+if $SSH_OK; then
+    GDM_STATUS=$(_ssh "systemctl is-active gdm3 2>/dev/null" || echo "inactive")
+    if [ "$GDM_STATUS" = "active" ]; then
+        ok "Display Manager (gdm3) running"
     else
-        warn "Chrome headless test: $CHROME_TEST"
+        warn "Display Manager status: $GDM_STATUS"
     fi
-    
-    # Browser logs from journalctl
-    log "Recent browser logs (journalctl):"
-    ssh -o ConnectTimeout=5 -o StrictHostKeyChecking=no -o BatchMode=yes \
-        -i "$SSH_KEY" -p "$SSH_PORT" ubuntu@127.0.0.1 \
-        "journalctl -n 10 --no-pager 2>/dev/null | grep -iE 'chrome|chromium|firefox|snap' | tail -5" 2>/dev/null | sed 's/^/  /' || log "No browser logs found"
-    
-    # Snap browser service status
-    log "Snap browser services:"
-    ssh -o ConnectTimeout=5 -o StrictHostKeyChecking=no -o BatchMode=yes \
-        -i "$SSH_KEY" -p "$SSH_PORT" ubuntu@127.0.0.1 \
-        "systemctl --user list-units --type=service 2>/dev/null | grep -E 'snap.*(chrome|chromium|firefox)'" 2>/dev/null | sed 's/^/  /' || log "No snap browser services"
-    
-else
-    warn "SSH not available for browser diagnostics"
-    log "Browser check requires working SSH connection"
+
+    if $VERBOSE; then
+        log "Session type:"
+        _ssh "loginctl show-session \$(loginctl 2>/dev/null | grep ubuntu | awk '{print \$1}' | head -1) 2>/dev/null | grep -E 'Type|Desktop'" | sed 's/^/  /' || true
+        log "Available desktop sessions:"
+        _ssh "ls /usr/share/xsessions/ /usr/share/wayland-sessions/ 2>/dev/null | sed 's/.desktop//'" | sed 's/^/  /' || true
+        log "Active display:"
+        _ssh "loginctl show-user ubuntu 2>/dev/null | grep -E 'Display|State'" | sed 's/^/  /' || true
+        log "GDM recent logs:"
+        _ssh "journalctl -u gdm -n 5 --no-pager 2>/dev/null | grep -E '(session opened|session closed|failing|error)'" | sed 's/^/  /' || true
+    fi
 fi
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#  6. Browser validation
+# ═══════════════════════════════════════════════════════════════════════════════
+section "Browsers"
+
+if $SSH_OK; then
+
+    # ── 6a. Detection (command -v, not which) ────────────────────────────────
+    HAS_FIREFOX=$(_ssh  "command -v firefox >/dev/null 2>&1 && echo y || echo n")
+    HAS_CHROME=$(_ssh   "(command -v google-chrome >/dev/null 2>&1 || command -v google-chrome-stable >/dev/null 2>&1) && echo y || echo n")
+    HAS_CHROMIUM=$(_ssh "command -v chromium >/dev/null 2>&1 && echo y || echo n")
+
+    N=0
+    [ "$HAS_FIREFOX"  = "y" ] && ((N++)) || true
+    [ "$HAS_CHROME"   = "y" ] && ((N++)) || true
+    [ "$HAS_CHROMIUM" = "y" ] && ((N++)) || true
+
+    if [ "$N" -gt 0 ]; then
+        ok "$N browser(s) installed"
+    else
+        warn "No browsers found in VM"
+    fi
+
+    # ── 6b. Profile checks ───────────────────────────────────────────────────
+    _dir_nonempty() {
+        # Returns "y" if directory exists and has at least one entry
+        _ssh "test -d '$1' && [ \$(ls -A '$1' 2>/dev/null | wc -l) -gt 0 ] && echo y || echo n"
+    }
+
+    # Firefox profile
+    if [ "$HAS_FIREFOX" = "y" ]; then
+        FF_SNAP_PROF=$(_dir_nonempty "/home/ubuntu/snap/firefox/common/.mozilla/firefox")
+        FF_CLASSIC_PROF=$(_dir_nonempty "/home/ubuntu/.mozilla/firefox")
+        if [ "$FF_SNAP_PROF" = "y" ] || [ "$FF_CLASSIC_PROF" = "y" ]; then
+            ok "Firefox profile present"
+        else
+            warn "Firefox installed but profile is missing/empty"
+        fi
+
+        # profiles.ini check
+        FF_INI=$(_ssh "cat /home/ubuntu/snap/firefox/common/.mozilla/firefox/profiles.ini 2>/dev/null || cat /home/ubuntu/.mozilla/firefox/profiles.ini 2>/dev/null || echo ''" || echo "")
+        if [ -n "$FF_INI" ] && echo "$FF_INI" | grep -q "\[Profile"; then
+            ok "Firefox profiles.ini valid"
+        elif [ "$FF_SNAP_PROF" = "y" ] || [ "$FF_CLASSIC_PROF" = "y" ]; then
+            warn "Firefox profiles.ini missing or invalid"
+        fi
+    fi
+
+    # Chrome profile
+    if [ "$HAS_CHROME" = "y" ]; then
+        CHROME_PROF=$(_dir_nonempty "/home/ubuntu/.config/google-chrome")
+        if [ "$CHROME_PROF" = "y" ]; then
+            ok "Chrome profile present"
+        else
+            warn "Chrome installed but profile is missing/empty"
+        fi
+    fi
+
+    # Chromium profile
+    if [ "$HAS_CHROMIUM" = "y" ]; then
+        CR_SNAP=$(_dir_nonempty "/home/ubuntu/snap/chromium/common/chromium")
+        CR_CLASSIC=$(_dir_nonempty "/home/ubuntu/.config/chromium")
+        if [ "$CR_SNAP" = "y" ] || [ "$CR_CLASSIC" = "y" ]; then
+            ok "Chromium profile present"
+        else
+            warn "Chromium installed but profile is missing/empty"
+        fi
+    fi
+
+    # ── 6c. Profile permissions ──────────────────────────────────────────────
+    BAD_PERMS=$(_ssh "find /home/ubuntu/.mozilla /home/ubuntu/.config/google-chrome \
+        /home/ubuntu/.config/chromium /home/ubuntu/snap/firefox \
+        /home/ubuntu/snap/chromium -maxdepth 0 -not -user ubuntu 2>/dev/null" || echo "")
+    if [ -n "$BAD_PERMS" ]; then
+        warn "Browser profile ownership wrong (not ubuntu): $BAD_PERMS"
+    else
+        ok "Browser profile permissions OK"
+    fi
+
+    # ── 6d. Lock files (leftover from copied running profile) ────────────────
+    LOCKS=$(_ssh "find /home/ubuntu/.mozilla /home/ubuntu/snap/firefox \
+        /home/ubuntu/.config/google-chrome /home/ubuntu/.config/chromium \
+        /home/ubuntu/snap/chromium \
+        -maxdepth 4 -type f \( -name 'parent.lock' -o -name '.parentlock' \
+        -o -name 'lock' -o -name 'lockfile' -o -name 'SingletonLock' \) \
+        2>/dev/null | head -5" || echo "")
+    if [ -n "$LOCKS" ]; then
+        warn "Browser lock files found (stale profile copy?):"
+        echo "$LOCKS" | sed 's/^/  /'
+    else
+        ok "No stale browser lock files"
+    fi
+
+    # ── 6e. Crash reports ────────────────────────────────────────────────────
+    CRASHES=$(_ssh "find /home/ubuntu/.mozilla /home/ubuntu/snap/firefox \
+        /home/ubuntu/.config/google-chrome /home/ubuntu/.config/chromium \
+        /home/ubuntu/snap/chromium \
+        -maxdepth 4 -type f \( -name '*.dmp' -o -name '*.extra' \) \
+        -newer /proc/1/status 2>/dev/null | wc -l" || echo "0")
+    if [ "${CRASHES:-0}" -gt 0 ]; then
+        warn "$CRASHES recent crash dump(s) found in browser profiles"
+    else
+        ok "No recent browser crash dumps"
+    fi
+
+    # ── 6f. Snap interface validation ────────────────────────────────────────
+    REQUIRED_IFACES="desktop desktop-legacy x11 wayland home network"
+    for snap_browser in firefox chromium; do
+        _ssh "snap list $snap_browser >/dev/null 2>&1" || continue
+        MISSING=""
+        CONNS=$(_ssh "snap connections $snap_browser 2>/dev/null | awk 'NR>1{print \$1, \$3}'" || echo "")
+        for iface in $REQUIRED_IFACES; do
+            if ! echo "$CONNS" | grep -q "$iface.*[^-]$"; then
+                MISSING="${MISSING:+$MISSING, }$iface"
+            fi
+        done
+        if [ -n "$MISSING" ]; then
+            warn "snap $snap_browser missing interfaces: $MISSING"
+        else
+            ok "snap $snap_browser interfaces connected"
+        fi
+    done
+
+    # ── 6g. Headless smoke tests ─────────────────────────────────────────────
+    # Resolve UID and runtime dir for headless tests
+    VM_UID=$(_ssh "id -u ubuntu 2>/dev/null" || echo "1000")
+    RUNTIME_DIR="/run/user/${VM_UID}"
+    _ssh "sudo mkdir -p $RUNTIME_DIR && sudo chown $VM_UID:$VM_UID $RUNTIME_DIR && sudo chmod 700 $RUNTIME_DIR" >/dev/null 2>&1 || true
+    USER_ENV="sudo -u ubuntu env HOME=/home/ubuntu USER=ubuntu LOGNAME=ubuntu XDG_RUNTIME_DIR=$RUNTIME_DIR"
+
+    if [ "$HAS_FIREFOX" = "y" ]; then
+        FF_HL=$(_ssh "timeout 25 $USER_ENV firefox --headless --version >/dev/null 2>&1 && echo y || echo n" || echo "n")
+        if [ "$FF_HL" = "y" ]; then
+            ok "Firefox headless OK"
+        else
+            warn "Firefox headless test failed"
+            if $VERBOSE; then
+                log "Firefox headless stderr:"
+                _ssh "timeout 10 $USER_ENV firefox --headless --version 2>&1 | tail -5" | sed 's/^/  /' || true
+            fi
+        fi
+    fi
+
+    if [ "$HAS_CHROME" = "y" ]; then
+        CH_HL=$(_ssh "timeout 15 $USER_ENV google-chrome --headless=new --no-sandbox --disable-gpu --dump-dom about:blank 2>&1" || echo "")
+        if echo "$CH_HL" | grep -qi "<html"; then
+            ok "Chrome headless OK"
+        else
+            warn "Chrome headless test failed"
+        fi
+    fi
+
+    if [ "$HAS_CHROMIUM" = "y" ]; then
+        CR_HL=$(_ssh "timeout 15 $USER_ENV chromium --headless=new --no-sandbox --disable-gpu --dump-dom about:blank 2>&1" || echo "")
+        if echo "$CR_HL" | grep -qi "<html"; then
+            ok "Chromium headless OK"
+        else
+            warn "Chromium headless test failed"
+        fi
+    fi
+
+    # ── 6h. Verbose browser details ──────────────────────────────────────────
+    if $VERBOSE; then
+        log "Browser binaries:"
+        _ssh "command -v firefox chromium google-chrome google-chrome-stable 2>/dev/null" | sed 's/^/  /' || true
+        log "Snap browser packages:"
+        _ssh "snap list 2>/dev/null | grep -E '(firefox|chromium|chrome)'" | sed 's/^/  /' || true
+        log "Chrome profile:"
+        _ssh "ls -la ~/.config/google-chrome/ 2>/dev/null | head -5" | sed 's/^/  /' || true
+        log "Chromium profile (snap):"
+        _ssh "ls -la ~/snap/chromium/common/chromium/ 2>/dev/null | head -5" | sed 's/^/  /' || true
+        log "Firefox profile (snap):"
+        _ssh "ls -la ~/snap/firefox/common/.mozilla/firefox/ 2>/dev/null | head -5" | sed 's/^/  /' || true
+        log "Firefox profile (classic):"
+        _ssh "ls -la ~/.mozilla/firefox/ 2>/dev/null | head -5" | sed 's/^/  /' || true
+        log "Browser processes:"
+        _ssh "pgrep -a -f 'chrome|chromium|firefox' 2>/dev/null | head -5" | sed 's/^/  /' || log "  (none running)"
+        log "Browser journal logs:"
+        _ssh "journalctl -n 20 --no-pager 2>/dev/null | grep -iE 'chrome|chromium|firefox' | tail -5" | sed 's/^/  /' || true
+    fi
+else
+    warn "SSH not available — cannot check browsers"
+fi
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#  7. Resources & filesystem (verbose only)
+# ═══════════════════════════════════════════════════════════════════════════════
+if $VERBOSE; then
+    section "VM XML"
+    log "Network interface:"
+    virsh --connect "$CONN_URI" dumpxml "$VM_NAME" 2>/dev/null | grep -A2 "interface type" | sed 's/^/  /' || true
+    log "Forwarded ports:"
+    virsh --connect "$CONN_URI" dumpxml "$VM_NAME" 2>/dev/null | grep -oP "hostfwd\S+" | sed 's/,/\n    /g' | sed 's/^/  /' || true
+    log "Graphics:"
+    virsh --connect "$CONN_URI" dumpxml "$VM_NAME" 2>/dev/null | grep -E "(spice|vnc|graphics)" | head -3 | sed 's/^/  /' || true
+
+    section "Resources"
+    log "VM resources:"
+    virsh --connect "$CONN_URI" dominfo "$VM_NAME" 2>/dev/null | grep -E "(CPU time|Max memory|Used memory)" | sed 's/^/  /'
+    log "Host resources:"
+    echo "  CPU idle: $(top -bn1 | grep 'Cpu(s)' | awk '{print $2}' | cut -d'%' -f1)%"
+    echo "  Memory: $(free -h | grep Mem | awk '{print $3"/"$2}')"
+    echo "  Disk: $(df -h "$VM_DIR" | tail -1 | awk '{print $3"/"$2 " ("$5")"}')"
+    log "QEMU process:"
+    ps aux | grep "[q]emu.*$VM_NAME" | awk '{print "  PID:" $2 " CPU:" $3 "% MEM:" $4 "%"}' || true
+
+    section "Filesystem"
+    log "VM directory:"
+    ls -la "$VM_DIR/" 2>/dev/null | head -10 | sed 's/^/  /'
+    log "Disk images:"
+    for search_dir in "$VM_DIR" "${HOME}/.local/share/libvirt/images"; do
+        for img in "$search_dir"/*.qcow2 "$search_dir"/${VM_NAME}*.qcow2; do
+            [ -f "$img" ] || continue
+            echo "  $(basename "$img"):"
+            qemu-img info "$img" 2>/dev/null | grep -E "(virtual size|disk size|backing file)" | sed 's/^/    /'
+        done
+    done
+fi
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#  8. Quick Actions (verbose only)
+# ═══════════════════════════════════════════════════════════════════════════════
+if $VERBOSE; then
+    section "Quick Actions"
+    echo ""
+    echo -e "  ${BOLD}Connect:${NC}"
+    [ -n "$SSH_PORT" ] && echo "    ssh -i $SSH_KEY -p $SSH_PORT ubuntu@127.0.0.1"
+    echo "    remote-viewer spice://localhost:5900"
+    echo "    virsh --connect $CONN_URI console $VM_NAME"
+    echo ""
+    echo -e "  ${BOLD}Manage:${NC}"
+    echo "    virsh --connect $CONN_URI reboot $VM_NAME"
+    echo "    virsh --connect $CONN_URI shutdown $VM_NAME"
+    echo "    virsh --connect $CONN_URI destroy $VM_NAME"
+    echo "    tail -f $VM_DIR/serial.log"
+fi
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#  Summary
+# ═══════════════════════════════════════════════════════════════════════════════
+echo ""
+if [ $FAILS -eq 0 ] && [ $WARNS -eq 0 ]; then
+    echo -e "${GREEN}${BOLD}All checks passed.${NC}"
+else
+    echo -e "${BOLD}Summary:${NC}  ${RED}Fails: $FAILS${NC}  ${YELLOW}Warns: $WARNS${NC}"
+fi
+
+exit $FAILS

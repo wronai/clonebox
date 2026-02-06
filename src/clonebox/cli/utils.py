@@ -522,7 +522,8 @@ def _exec_in_vm_qga(vm_name: str, conn_uri: str, command: str) -> Optional[str]:
 
 def monitor_cloud_init_status(vm_name: str, user_session: bool = False, timeout: int = 1800):
     """Monitor cloud-init status in the VM."""
-    conn_uri = "qemu:///session" if user_session else "qemu:///system"
+    from clonebox import paths as _paths
+    conn_uri = _paths.conn_uri(user_session)
     start_time = time.time()
     
     with Progress(

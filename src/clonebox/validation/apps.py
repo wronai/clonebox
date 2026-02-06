@@ -152,6 +152,42 @@ class AppValidationMixin:
                     "journalctl -n 200 --no-pager 2>/dev/null | grep -i firefox | tail -n 60 || true",
                     "Journal (firefox)",
                 )
+                add(
+                    "ls -la /home/ubuntu/.mozilla/firefox 2>/dev/null | head -n 50 || true",
+                    "Profile dir (classic)",
+                )
+                add(
+                    "ls -la /home/ubuntu/snap/firefox/common/.mozilla/firefox 2>/dev/null | head -n 50 || true",
+                    "Profile dir (snap)",
+                )
+                add(
+                    "test -f /home/ubuntu/.mozilla/firefox/profiles.ini && head -n 50 /home/ubuntu/.mozilla/firefox/profiles.ini 2>/dev/null || true",
+                    "profiles.ini (classic)",
+                )
+                add(
+                    "test -f /home/ubuntu/snap/firefox/common/.mozilla/firefox/profiles.ini && head -n 50 /home/ubuntu/snap/firefox/common/.mozilla/firefox/profiles.ini 2>/dev/null || true",
+                    "profiles.ini (snap)",
+                )
+                add(
+                    "find /home/ubuntu/.mozilla/firefox /home/ubuntu/snap/firefox/common/.mozilla/firefox -maxdepth 2 -type f -name '*.sqlite' 2>/dev/null | head -n 20 || true",
+                    "Profile sqlite quick check",
+                )
+                add(
+                    "find /home/ubuntu/snap/firefox/common/.mozilla/firefox -maxdepth 3 -type f -name 'parent.lock' -o -name '.parentlock' -o -name 'lock' 2>/dev/null | head -n 50 || true",
+                    "Lock files (snap)",
+                )
+                add(
+                    "find /home/ubuntu/.mozilla/firefox -maxdepth 3 -type f -name 'parent.lock' -o -name '.parentlock' -o -name 'lock' 2>/dev/null | head -n 50 || true",
+                    "Lock files (classic)",
+                )
+                add(
+                    "ls -la '/home/ubuntu/snap/firefox/common/.mozilla/firefox/Crash Reports' 2>/dev/null | tail -n 30 || true",
+                    "Crash Reports (snap)",
+                )
+                add(
+                    "find '/home/ubuntu/snap/firefox/common/.mozilla/firefox/Crash Reports' -maxdepth 1 -type f -name '*.dmp' -o -name '*.extra' 2>/dev/null | tail -n 20 || true",
+                    "Crash dumps list (snap)",
+                )
 
             return "\n\n".join(chunks)
 
@@ -203,6 +239,34 @@ class AppValidationMixin:
                 if installed:
                     running = _check_any_process_running(["firefox"])
                     pid = _find_first_pid(["firefox"]) if running else ""
+
+                    if running is False:
+                        # Heuristics / hints
+                        missing_ifaces = _snap_missing_interfaces(
+                            "firefox",
+                            snap_app_specs.get("firefox", {}).get("required_interfaces", []),
+                        )
+                        if missing_ifaces:
+                            note = note or f"missing interfaces: {', '.join(missing_ifaces)}"
+                        else:
+                            # profile path hint
+                            snap_prof = _check_dir_nonempty(
+                                "/home/ubuntu/snap/firefox/common/.mozilla/firefox"
+                            )
+                            classic_prof = _check_dir_nonempty("/home/ubuntu/.mozilla/firefox")
+                            if not (snap_prof or classic_prof):
+                                note = note or "profile not present"
+                            else:
+                                # If profile exists, check for lock files (common after copying from a running browser)
+                                has_locks = self._exec_in_vm(
+                                    "find /home/ubuntu/snap/firefox/common/.mozilla/firefox /home/ubuntu/.mozilla/firefox"
+                                    " -maxdepth 3 -type f"
+                                    " \\( -name parent.lock -o -name .parentlock -o -name lock \\)"
+                                    " 2>/dev/null | head -n 1 | wc -l",
+                                    timeout=15,
+                                )
+                                if (has_locks or "0").strip() not in {"", "0"}:
+                                    note = note or "profile has lock files"
 
             elif app in snap_app_specs:
                 installed = (

@@ -1,7 +1,19 @@
+import os
+import sys
 from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
 from typing import Any, Dict, List, Optional
+
+_src = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "src")
+if os.path.isdir(_src) and _src not in sys.path:
+    sys.path.insert(0, _src)
+
+try:
+    from clonebox.paths import vm_dir as _vm_dir
+    _HAS_PKG = True
+except ImportError:
+    _HAS_PKG = False
 
 
 class TestStatus(Enum):
@@ -43,6 +55,15 @@ class DiagnosticContext:
     has_ipv4: bool = False
     cloud_init_done: bool = False
 
+    # Browser state
+    browsers_detected: Dict[str, Dict[str, Any]] = field(default_factory=dict)
+    firefox_profile_ok: bool = False
+    chrome_profile_ok: bool = False
+    chromium_profile_ok: bool = False
+
     def __post_init__(self):
         if self.vm_dir is None:
-            self.vm_dir = Path.home() / ".local/share/libvirt/images" / self.vm_name
+            if _HAS_PKG:
+                self.vm_dir = _vm_dir(self.vm_name)
+            else:
+                self.vm_dir = Path.home() / ".local/share/libvirt/images" / self.vm_name

@@ -26,6 +26,9 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
+from clonebox import paths as _paths
+from clonebox.ssh import ssh_exec as _ssh_exec_shared
+
 try:
     import libvirt
 except ImportError:
@@ -50,6 +53,7 @@ from clonebox.browser_profiles import (
     stage_browser_profiles,
     copy_profiles_to_vm_via_ssh,
 )
+from clonebox.post_install_repair import run_post_install_repairs
 
 log = get_logger(__name__)
 
@@ -332,7 +336,20 @@ class SelectiveVMCloner:
                                 )
                             else:
                                 log.warning("No browser profiles found to copy")
-                    
+
+                        # ── Post-install auto-repair ─────────────────────
+                        ssh_port = self._get_saved_ssh_port(config.name)
+                        vm_dir = self.get_images_dir() / config.name
+                        ssh_key = vm_dir / "ssh_key"
+                        repair_browsers = list(config.browser_profiles) if config.browser_profiles else []
+                        run_post_install_repairs(
+                            ssh_port=ssh_port,
+                            ssh_key=ssh_key if ssh_key.exists() else None,
+                            vm_username=config.username,
+                            browsers=repair_browsers,
+                            gui_mode=config.gui,
+                        )
+
                     # Final status message
                     if ssh_ok and cloud_init_ok:
                         log.info(f"VM '{config.name}' created successfully - READY FOR USE!")
@@ -480,6 +497,21 @@ class SelectiveVMCloner:
                     ]
                     subprocess.run(chown_cmd, capture_output=True, text=True, timeout=120)
 
+                    # Fix snap parent directories (snap runtime needs
+                    # /home/<user>/snap/<app> owned by the user, not root)
+                    if f"/home/{vm_username}/snap/" in guest_path:
+                        import re as _re
+                        m = _re.match(
+                            rf"(/home/{_re.escape(vm_username)}/snap/[^/]+)",
+                            guest_path,
+                        )
+                        if m:
+                            snap_chown = base_ssh + [
+                                f"{vm_username}@127.0.0.1",
+                                f"sudo chown -R {vm_username}:{vm_username} '{m.group(1)}' || true",
+                            ]
+                            subprocess.run(snap_chown, capture_output=True, text=True, timeout=120)
+
                 log.info("    ✓ Copied")
             except Exception as e:
                 log.warning(f"    ❌ Copy error: {e}")
@@ -488,29 +520,10 @@ class SelectiveVMCloner:
         return all_success
 
     def _ssh_exec(self, ssh_port: int, ssh_key: Optional[Path], vm_username: str, command: str, timeout: int = 20) -> Optional[str]:
-        base = [
-            "ssh",
-            "-o",
-            "StrictHostKeyChecking=no",
-            "-o",
-            "UserKnownHostsFile=/dev/null",
-            "-o",
-            "BatchMode=yes",
-            "-o",
-            "ConnectTimeout=10",
-            "-p",
-            str(ssh_port),
-        ]
-        if ssh_key is not None:
-            base.extend(["-i", str(ssh_key)])
-        base.extend([f"{vm_username}@127.0.0.1", command])
-        try:
-            result = subprocess.run(base, capture_output=True, text=True, timeout=timeout)
-        except subprocess.TimeoutExpired:
-            return None
-        if result.returncode != 0:
-            return None
-        return (result.stdout or "").strip()
+        return _ssh_exec_shared(
+            port=ssh_port, key=ssh_key, command=command,
+            username=vm_username, timeout=timeout,
+        )
 
     def _verify_copied_paths_in_vm(
         self,
@@ -1064,6 +1077,17 @@ class SelectiveVMCloner:
                             vm_username=config.username,
                             try_gui_launch=config.gui,
                         )
+
+                # ── Post-install auto-repair ─────────────────────
+                repair_browsers = list(config.browser_profiles) if config.browser_profiles else []
+                run_post_install_repairs(
+                    ssh_port=ssh_port,
+                    ssh_key=ssh_key if ssh_key.exists() else None,
+                    vm_username=config.username,
+                    browsers=repair_browsers,
+                    gui_mode=getattr(config, "gui", False),
+                )
+
                 log.info("=" * 50)
             elif ssh_ok:
                 log.info("=" * 50)
@@ -1153,14 +1177,12 @@ class SelectiveVMCloner:
     @property
     def SYSTEM_IMAGES_DIR(self) -> Path:
         """Get the system images directory."""
-        return Path(os.getenv("CLONEBOX_SYSTEM_IMAGES_DIR", "/var/lib/libvirt/images"))
+        return _paths.system_images_dir()
 
     @property
     def USER_IMAGES_DIR(self) -> Path:
         """Get the user images directory."""
-        return Path(
-            os.getenv("CLONEBOX_USER_IMAGES_DIR", str(Path.home() / ".local/share/libvirt/images"))
-        )
+        return _paths.user_images_dir()
 
     def _generate_vm_xml(self, config: VMConfig, disk_path: Path, cloud_init_path: Optional[Path]) -> str:
         """Generate VM XML configuration."""
@@ -1886,43 +1908,24 @@ class SelectiveVMCloner:
     
     def _get_saved_ssh_port(self, vm_name: str) -> Optional[int]:
         """Get saved SSH port for a VM."""
-        # Check both locations for compatibility
-        images_dir = self.USER_IMAGES_DIR if self.user_session else Path("/var/lib/libvirt/images")
-        
-        # First check VM directory
-        port_file = images_dir / vm_name / "ssh_port"
-        log.debug(f"Checking for SSH port at: {port_file}")
-        if port_file.exists():
-            try:
-                port = int(port_file.read_text().strip())
-                log.debug(f"Found SSH port {port} in VM directory")
-                return port
-            except Exception as e:
-                log.debug(f"Failed to read port from {port_file}: {e}")
-        
-        # Fallback to old location
-        port_file = Path.home() / ".local/share/clonebox" / f"{vm_name}.ssh_port"
-        log.debug(f"Checking for SSH port at: {port_file}")
-        if port_file.exists():
-            try:
-                port = int(port_file.read_text().strip())
-                log.debug(f"Found SSH port {port} in old location")
-                return port
-            except Exception as e:
-                log.debug(f"Failed to read port from {port_file}: {e}")
-        
-        log.debug(f"No SSH port found for VM '{vm_name}'")
+        port = _paths.resolve_ssh_port(vm_name, self.user_session)
+        # resolve_ssh_port always returns a value (with fallback);
+        # callers that need to distinguish "found" vs "fallback" can
+        # check the port file directly.
+        pf = _paths.ssh_port_file(vm_name, self.user_session)
+        if pf.exists():
+            return port
+        alt = Path.home() / ".local/share/clonebox" / f"{vm_name}.ssh_port"
+        if alt.exists():
+            return port
         return None
     
     def _test_ssh_connectivity(self, vm_name: str, timeout: int = 120) -> bool:
         """Test SSH connectivity to VM with multiple fallback methods."""
         ssh_port = self._get_saved_ssh_port(vm_name)
         if not ssh_port:
-            log.warning("No SSH port configured for VM")
-            log.warning("Attempting to derive port from VM name...")
-            # Fallback: compute port from VM name hash
-            ssh_port = 22000 + (zlib.crc32(vm_name.encode()) % 1000)
-            log.warning(f"Using fallback port: {ssh_port}")
+            ssh_port = _paths.fallback_ssh_port(vm_name)
+            log.warning(f"No SSH port file — using fallback port: {ssh_port}")
         
         log.info(f"Testing SSH connectivity on port {ssh_port}...")
         log.info(f"  (waiting up to {timeout}s for cloud-init to complete)")
@@ -2719,51 +2722,13 @@ class SelectiveVMCloner:
         except Exception as e:
             log.error(f"Failed to allocate any port: {e}")
             # Last resort fallback
-            fallback_port = 22000 + (zlib.crc32(vm_name.encode()) % 1000)
+            fallback_port = _paths.fallback_ssh_port(vm_name)
             log.warning(f"Using fallback port without verification: {fallback_port}")
             return fallback_port
 
     def _save_ssh_port(self, vm_name: str, port: int) -> None:
         """Save SSH port to file for later retrieval."""
-        images_dir = self.USER_IMAGES_DIR if self.user_session else Path("/var/lib/libvirt/images")
-        vm_dir = images_dir / vm_name
-        
-        log.debug(f"Saving SSH port {port} for VM '{vm_name}'...")
-        
-        try:
-            vm_dir.mkdir(parents=True, exist_ok=True)
-        except PermissionError as e:
-            log.error(f"Cannot create VM directory: {vm_dir}")
-            log.error(f"Permission denied: {e}")
-            # Try alternative location
-            alt_dir = Path.home() / ".local/share/clonebox"
-            try:
-                alt_dir.mkdir(parents=True, exist_ok=True)
-                port_file = alt_dir / f"{vm_name}.ssh_port"
-                port_file.write_text(str(port))
-                log.warning(f"Saved SSH port to alternative location: {port_file}")
-                return
-            except Exception as e2:
-                log.error(f"Failed to save to alternative location: {e2}")
-                return
-        except Exception as e:
-            log.error(f"Failed to create VM directory: {e}")
-            return
-        
-        port_file = vm_dir / "ssh_port"
-        try:
-            port_file.write_text(str(port))
-            log.debug(f"SSH port {port} saved to {port_file}")
-        except Exception as e:
-            log.error(f"Failed to save SSH port to {port_file}: {e}")
-            # Try alternative location
-            alt_file = Path.home() / ".local/share/clonebox" / f"{vm_name}.ssh_port"
-            try:
-                alt_file.parent.mkdir(parents=True, exist_ok=True)
-                alt_file.write_text(str(port))
-                log.warning(f"Saved SSH port to alternative location: {alt_file}")
-            except Exception as e2:
-                log.error(f"Failed to save to alternative location: {e2}")
+        _paths.save_ssh_port(vm_name, port, self.user_session)
 
     def _save_ssh_key(self, vm_name: str, key_pair: SSHKeyPair) -> None:
         """Save SSH key pair to VM directory for later use."""

@@ -8,6 +8,7 @@ import xml.etree.ElementTree as ET
 from typing import Dict, List, Optional
 
 from clonebox.models import VMConfig
+from clonebox.paths import serial_log_path
 
 
 def generate_vm_xml(
@@ -122,7 +123,7 @@ def generate_vm_xml(
     serial = ET.SubElement(devices, "serial", type="pty")
     ET.SubElement(serial, "source", path="/dev/ttyS0")
     ET.SubElement(serial, "target", type="isa-serial", port="0")
-    ET.SubElement(serial, "log", file=f"/home/tom/.local/share/libvirt/images/{config.name}/serial.log", append="on")
+    ET.SubElement(serial, "log", file=str(serial_log_path(config.name, user_session)), append="on")
     
     console = ET.SubElement(devices, "console", type="pty")
     ET.SubElement(console, "target", type="serial", port="0")

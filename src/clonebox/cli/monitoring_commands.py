@@ -13,6 +13,8 @@ from rich.live import Live
 from clonebox.monitor import ResourceMonitor, format_bytes
 from clonebox.health import HealthCheckManager, ProbeConfig, ProbeType
 from clonebox.cli.utils import console, load_clonebox_config, CLONEBOX_CONFIG_FILE, _qga_ping, _qga_exec
+from clonebox.validation.validator import VMValidator
+from clonebox import paths as _paths
 
 
 def cmd_monitor(args):
@@ -174,11 +176,73 @@ def cmd_health(args):
         console.print("[red]❌ Some health checks failed[/]")
 
 
+def cmd_validate(args):
+    """Validate a running VM (services/apps/smoke tests)."""
+    vm_name = getattr(args, "name", None)
+    user_session = getattr(args, "user", False)
+    smoke_test = getattr(args, "smoke_test", False)
+    require_running_apps = getattr(args, "require_running_apps", False)
+    browsers_only = getattr(args, "browsers_only", False)
+
+    conn_uri = _paths.conn_uri(user_session)
+
+    # Resolve VM name from config if needed
+    if not vm_name or vm_name == ".":
+        config_file = Path.cwd() / CLONEBOX_CONFIG_FILE
+        if config_file.exists():
+            config = load_clonebox_config(config_file)
+            vm_name = config["vm"]["name"]
+        else:
+            console.print("[red]❌ No VM name specified[/]")
+            return
+    else:
+        config_file = Path.cwd() / CLONEBOX_CONFIG_FILE
+        config = load_clonebox_config(config_file) if config_file.exists() else {"vm": {"name": vm_name}}
+
+    if browsers_only:
+        # Reduce config to browser-related expectations only.
+        reduced = dict(config)
+        reduced_vm = dict((config.get("vm") or {}))
+        reduced["vm"] = reduced_vm
+
+        packages = list(reduced.get("packages", []) or [])
+        snap_packages = list(reduced.get("snap_packages", []) or [])
+        copy_paths = reduced.get("copy_paths", None)
+        if not isinstance(copy_paths, dict) or not copy_paths:
+            copy_paths = reduced.get("app_data_paths", {}) or {}
+
+        packages = [p for p in packages if p in {"firefox", "chromium-browser", "google-chrome-stable"}]
+        snap_packages = [p for p in snap_packages if p in {"firefox", "chromium"}]
+
+        keep_guest_paths = {
+            f"/home/{reduced_vm.get('username','ubuntu')}/.config/google-chrome",
+            f"/home/{reduced_vm.get('username','ubuntu')}/.mozilla/firefox",
+            f"/home/{reduced_vm.get('username','ubuntu')}/.config/chromium",
+        }
+        reduced_copy = {h: g for h, g in copy_paths.items() if str(g) in keep_guest_paths}
+
+        reduced["packages"] = packages
+        reduced["snap_packages"] = snap_packages
+        reduced["copy_paths"] = reduced_copy
+        config = reduced
+
+    validator = VMValidator(
+        config=config,
+        vm_name=vm_name,
+        conn_uri=conn_uri,
+        console=console,
+        require_running_apps=require_running_apps,
+        smoke_test=smoke_test,
+    )
+
+    validator.validate_all()
+
+
 def cmd_exec(args):
     """Execute command in VM."""
     vm_name = args.name
     user_session = getattr(args, "user", False)
-    conn_uri = "qemu:///session" if user_session else "qemu:///system"
+    conn_uri = _paths.conn_uri(user_session)
     
     # Resolve VM name from config if needed
     if not vm_name or vm_name == ".":
@@ -216,7 +280,7 @@ def cmd_watch(args):
     """Watch VM logs and status."""
     vm_name = args.name
     user_session = getattr(args, "user", False)
-    conn_uri = "qemu:///session" if user_session else "qemu:///system"
+    conn_uri = _paths.conn_uri(user_session)
     
     # Resolve VM name from config if needed
     if not vm_name or vm_name == ".":
@@ -270,7 +334,7 @@ def cmd_repair(args):
     """Attempt to repair VM issues."""
     vm_name = args.name
     user_session = getattr(args, "user", False)
-    conn_uri = "qemu:///session" if user_session else "qemu:///system"
+    conn_uri = _paths.conn_uri(user_session)
     
     # Resolve VM name from config if needed
     if not vm_name or vm_name == ".":

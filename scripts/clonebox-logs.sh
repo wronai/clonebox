@@ -5,9 +5,23 @@ VM_NAME="${1:-clone-clonebox}"
 USER_SESSION="${2:-false}"
 SHOW_ALL="${3:-false}"
 
+VM_DIR="${HOME}/.local/share/libvirt/images/${VM_NAME}"
+SSH_KEY="$VM_DIR/ssh_key"
+SSH_PORT_FILE="$VM_DIR/ssh_port"
+
+log() { echo "[INFO] $1"; }
+
+# SSH helper (avoids repeating flags)
+_ssh() {
+    [ -f "$SSH_KEY" ] && [ -f "$SSH_PORT_FILE" ] || return 1
+    ssh -o ConnectTimeout=5 -o StrictHostKeyChecking=no \
+        -o UserKnownHostsFile=/dev/null -o BatchMode=yes \
+        -o LogLevel=ERROR \
+        -i "$SSH_KEY" -p "$(cat "$SSH_PORT_FILE")" ubuntu@127.0.0.1 "$@" 2>/dev/null
+}
+
 if [ "$USER_SESSION" = "true" ]; then
     CONNECT="qemu:///session"
-    # For user sessions, we'll use QEMU Guest Agent to fetch logs
     USE_QGA=true
 else
     CONNECT="qemu:///system"
@@ -40,23 +54,16 @@ if [ "$USE_QGA" = "true" ]; then
     SCRIPT_DIR="$(dirname "$(readlink -f "$0")")"
     python3 "$SCRIPT_DIR/fetch-logs.py" "$VM_NAME" "$CONNECT" "$TEMP_DIR"
     
-    # Fetch browser-specific logs
+    # Fetch browser-specific logs via SSH helper
     log "Fetching browser logs..."
-    ssh -o ConnectTimeout=5 -o StrictHostKeyChecking=no -o BatchMode=yes \
-        -i "$VM_DIR/ssh_key" -p "$(cat "$VM_DIR/ssh_port")" ubuntu@127.0.0.1 \
-        "journalctl -n 50 --no-pager 2>/dev/null | grep -iE 'chrome|chromium|firefox|snap'" > "$TEMP_DIR/browser-journal.log" 2>/dev/null || true
-    
-    ssh -o ConnectTimeout=5 -o StrictHostKeyChecking=no -o BatchMode=yes \
-        -i "$VM_DIR/ssh_key" -p "$(cat "$VM_DIR/ssh_port")" ubuntu@127.0.0.1 \
-        "snap list 2>/dev/null | grep -E '(firefox|chromium)'" > "$TEMP_DIR/snap-list.log" 2>/dev/null || true
-    
-    ssh -o ConnectTimeout=5 -o StrictHostKeyChecking=no -o BatchMode=yes \
-        -i "$VM_DIR/ssh_key" -p "$(cat "$VM_DIR/ssh_port")" ubuntu@127.0.0.1 \
-        "ls -la ~/.config/google-chrome/ ~/snap/chromium/common/chromium/ ~/snap/firefox/common/.mozilla/firefox/ 2>&1" > "$TEMP_DIR/browser-profiles.log" 2>/dev/null || true
-    
-    ssh -o ConnectTimeout=5 -o StrictHostKeyChecking=no -o BatchMode=yes \
-        -i "$VM_DIR/ssh_key" -p "$(cat "$VM_DIR/ssh_port")" ubuntu@127.0.0.1 \
-        "pgrep -a -f 'chrome|chromium|firefox' 2>/dev/null" > "$TEMP_DIR/browser-processes.log" 2>/dev/null || true
+    _ssh "journalctl -n 50 --no-pager 2>/dev/null | grep -iE 'chrome|chromium|firefox|snap'" \
+        > "$TEMP_DIR/browser-journal.log" 2>/dev/null || true
+    _ssh "snap list 2>/dev/null | grep -E '(firefox|chromium)'" \
+        > "$TEMP_DIR/snap-list.log" 2>/dev/null || true
+    _ssh "ls -la ~/.config/google-chrome/ ~/snap/chromium/common/chromium/ ~/snap/firefox/common/.mozilla/firefox/ 2>&1" \
+        > "$TEMP_DIR/browser-profiles.log" 2>/dev/null || true
+    _ssh "pgrep -a -f 'chrome|chromium|firefox' 2>/dev/null" \
+        > "$TEMP_DIR/browser-processes.log" 2>/dev/null || true
     
     echo ""
     echo "📋 Available logs:"

@@ -1,5 +1,9 @@
 #!/usr/bin/env python3
-"""Fetch logs from VM using QEMU Guest Agent"""
+"""Fetch logs from VM using QEMU Guest Agent or SSH.
+
+Uses shared helpers from the clonebox package when available,
+falls back to inline implementations for standalone use.
+"""
 
 import subprocess
 import json
@@ -7,106 +11,77 @@ import sys
 import base64
 import time
 import os
-import zlib
 
-def qga_exec(vm_name, conn_uri, command, timeout=10):
-    """Execute command via QEMU Guest Agent"""
-    try:
-        # Execute command
-        payload = {
-            "execute": "guest-exec",
-            "arguments": {
-                "path": "/bin/sh",
-                "arg": ["-c", command],
-                "capture-output": True,
-            },
-        }
-        exec_result = subprocess.run(
-            ["virsh", "--connect", conn_uri, "qemu-agent-command", vm_name, json.dumps(payload)],
-            capture_output=True,
-            text=True,
-            timeout=timeout,
-        )
-        if exec_result.returncode != 0:
-            return None
+# Allow importing from the clonebox package (one level up)
+_src = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "src")
+if os.path.isdir(_src):
+    sys.path.insert(0, _src)
 
-        resp = json.loads(exec_result.stdout)
-        pid = resp.get("return", {}).get("pid")
-        if not pid:
-            return None
+try:
+    from clonebox.ssh import ssh_exec as _pkg_ssh_exec
+    from clonebox.paths import resolve_ssh_port, ssh_key_path
 
-        # Wait for completion
-        deadline = time.time() + timeout
-        while time.time() < deadline:
-            status_payload = {"execute": "guest-exec-status", "arguments": {"pid": pid}}
-            status_result = subprocess.run(
-                ["virsh", "--connect", conn_uri, "qemu-agent-command", vm_name, json.dumps(status_payload)],
-                capture_output=True,
-                text=True,
-                timeout=5,
-            )
-            if status_result.returncode != 0:
-                return None
+    def ssh_exec(vm_name, command, timeout=20):
+        port = resolve_ssh_port(vm_name, user_session=True)
+        key = ssh_key_path(vm_name, user_session=True)
+        return _pkg_ssh_exec(port=port, key=key, command=command, timeout=timeout)
+except ImportError:
+    # Standalone fallback (no clonebox package installed)
+    import zlib
 
-            status_resp = json.loads(status_result.stdout)
-            ret = status_resp.get("return", {})
-            if not ret.get("exited", False):
-                time.sleep(0.3)
-                continue
-
-            out_data = ret.get("out-data")
-            if out_data:
-                return base64.b64decode(out_data).decode().strip()
-            return ""
-
-        return None
-    except Exception as e:
-        return f"Error: {e}"
-
-
-def ssh_exec(vm_name, command, timeout=20):
-    """Execute command via SSH (requires passt port-forward + ssh_key)."""
-    try:
+    def ssh_exec(vm_name, command, timeout=20):
         key_path = os.path.expanduser(f"~/.local/share/libvirt/images/{vm_name}/ssh_key")
         if not os.path.exists(key_path):
             return None
-
         port_path = os.path.expanduser(f"~/.local/share/libvirt/images/{vm_name}/ssh_port")
-        if os.path.exists(port_path):
-            try:
-                ssh_port = int(open(port_path, "r").read().strip())
-            except Exception:
-                ssh_port = 22000 + (zlib.crc32(vm_name.encode("utf-8")) % 1000)
-        else:
+        try:
+            ssh_port = int(open(port_path).read().strip()) if os.path.exists(port_path) else None
+        except Exception:
+            ssh_port = None
+        if not ssh_port:
             ssh_port = 22000 + (zlib.crc32(vm_name.encode("utf-8")) % 1000)
-        user = "ubuntu"
-        result = subprocess.run(
-            [
-                "ssh",
-                "-i",
-                key_path,
-                "-p",
-                str(ssh_port),
-                "-o",
-                "StrictHostKeyChecking=no",
-                "-o",
-                "UserKnownHostsFile=/dev/null",
-                "-o",
-                "ConnectTimeout=5",
-                "-o",
-                "BatchMode=yes",
-                f"{user}@127.0.0.1",
-                command,
-            ],
-            capture_output=True,
-            text=True,
-            timeout=timeout,
-        )
-        if result.returncode != 0:
+        try:
+            result = subprocess.run(
+                ["ssh", "-i", key_path, "-p", str(ssh_port),
+                 "-o", "StrictHostKeyChecking=no", "-o", "UserKnownHostsFile=/dev/null",
+                 "-o", "ConnectTimeout=5", "-o", "BatchMode=yes",
+                 f"ubuntu@127.0.0.1", command],
+                capture_output=True, text=True, timeout=timeout)
+            return (result.stdout or "").strip() if result.returncode == 0 else None
+        except Exception:
             return None
-        return (result.stdout or "").strip()
-    except Exception:
+
+
+def qga_exec(vm_name, conn_uri, command, timeout=10):
+    """Execute command via QEMU Guest Agent."""
+    try:
+        payload = json.dumps({"execute": "guest-exec", "arguments": {
+            "path": "/bin/sh", "arg": ["-c", command], "capture-output": True}})
+        r = subprocess.run(
+            ["virsh", "--connect", conn_uri, "qemu-agent-command", vm_name, payload],
+            capture_output=True, text=True, timeout=timeout)
+        if r.returncode != 0:
+            return None
+        pid = json.loads(r.stdout).get("return", {}).get("pid")
+        if not pid:
+            return None
+        deadline = time.time() + timeout
+        while time.time() < deadline:
+            sr = subprocess.run(
+                ["virsh", "--connect", conn_uri, "qemu-agent-command", vm_name,
+                 json.dumps({"execute": "guest-exec-status", "arguments": {"pid": pid}})],
+                capture_output=True, text=True, timeout=5)
+            if sr.returncode != 0:
+                return None
+            ret = json.loads(sr.stdout).get("return", {})
+            if not ret.get("exited", False):
+                time.sleep(0.3)
+                continue
+            out = ret.get("out-data")
+            return base64.b64decode(out).decode().strip() if out else ""
         return None
+    except Exception as e:
+        return f"Error: {e}"
 
 def main():
     if len(sys.argv) < 4:

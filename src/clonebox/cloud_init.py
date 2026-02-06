@@ -81,16 +81,22 @@ def generate_cloud_init_config(
         
         for idx, snap in enumerate(config.snap_packages):
             runcmd_lines.append(f"echo '[clonebox] [{idx+1}/{len(config.snap_packages)}] Installing snap: {snap}...' > /dev/ttyS0")
+            classic_snaps = ["code", "pycharm-community", "intellij-idea-community", "clion", "goland", "rubymine", "webstorm", "phpstorm", "datagrip"]
+            is_classic = snap in classic_snaps
+            classic_flag = "--classic" if is_classic else ""
             if snap in SNAP_INTERFACES:
-                # Install with --classic if needed
-                classic_snaps = ["code", "pycharm-community", "intellij-idea-community", "clion", "goland", "rubymine", "webstorm", "phpstorm", "datagrip"]
-                classic_flag = "--classic" if snap in classic_snaps else ""
                 runcmd_lines.extend([
                     f"echo '[clonebox] Installing {snap} with interfaces...' > /dev/ttyS0",
                     f"snap install {snap} {classic_flag} 2>&1 | tee -a /var/log/cloud-init-output.log | while read line; do echo \"[clonebox] [snap-{snap}] $line\" > /dev/ttyS0; done || echo '[clonebox] WARNING: Failed to install {snap}' > /dev/ttyS0",
                 ])
-                for iface in SNAP_INTERFACES[snap]:
-                    runcmd_lines.append(f"snap connect {snap}:{iface} 2>&1 | tee -a /var/log/cloud-init-output.log || echo '[clonebox] WARNING: Failed to connect {snap}:{iface}' > /dev/ttyS0")
+                # Classic snaps have full system access — snap connect is not needed/supported
+                if not is_classic:
+                    for iface in SNAP_INTERFACES[snap]:
+                        runcmd_lines.append(
+                            f"snap connections {snap} 2>/dev/null | grep -q ':{iface} ' "
+                            f"&& snap connect {snap}:{iface} 2>&1 | tee -a /var/log/cloud-init-output.log "
+                            f"|| echo '[clonebox] SKIP: {snap}:{iface} plug not available' > /dev/ttyS0"
+                        )
             else:
                 # Regular snap
                 runcmd_lines.append(f"snap install {snap} 2>&1 | tee -a /var/log/cloud-init-output.log | while read line; do echo \"[clonebox] [snap-{snap}] $line\" > /dev/ttyS0; done || echo '[clonebox] WARNING: Failed to install {snap}' > /dev/ttyS0")
@@ -365,7 +371,6 @@ SNAP_INTERFACES = {
         "network",
         "network-bind",
         "cups-control",
-        "removable-media",
     ],
     "chromium": [
         "desktop",
