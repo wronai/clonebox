@@ -103,7 +103,7 @@ def main():
     open_parser.set_defaults(func=cmd_open)
 
     # Stop command
-    stop_parser = subparsers.add_parser("stop", help="Stop a VM")
+    stop_parser = subparsers.add_parser("stop", help="Stop a VM (use --all to stop all VMs)")
     stop_parser.add_argument(
         "name", nargs="?", default=None, help="VM name or '.' to use .clonebox.yaml"
     )
@@ -122,7 +122,7 @@ def main():
     stop_parser.set_defaults(func=cmd_stop)
 
     # Restart command
-    restart_parser = subparsers.add_parser("restart", help="Restart a VM (stop and start)")
+    restart_parser = subparsers.add_parser("restart", help="Restart a VM (use --all to restart all VMs)")
     restart_parser.add_argument(
         "name", nargs="?", default=None, help="VM name or '.' to use .clonebox.yaml"
     )

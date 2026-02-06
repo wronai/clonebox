@@ -1,3 +1,19 @@
+## [1.1.45] - 2026-02-06
+
+### Summary
+
+feat(docs): configuration management system
+
+### Core
+
+- update src/clonebox/cli/parsers.py
+
+### Docs
+
+- docs: update README
+- docs: update QUICK_REFERENCE.md
+
+
 ## [1.1.44] - 2026-02-06
 
 ### Summary

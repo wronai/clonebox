@@ -411,6 +411,14 @@ clonebox list
 # Start/Stop VM
 clonebox start my-dev-vm
 clonebox stop my-dev-vm
+clonebox restart my-dev-vm
+
+# Stop/Restart all VMs
+clonebox stop --all
+clonebox restart --all
+
+# Stop VM using current directory's config
+clonebox stop . --user
 
 # Delete VM
 clonebox delete my-dev-vm
@@ -981,6 +989,9 @@ clonebox clone . --network auto
 | `clonebox start <name>` | Start existing VM by name |
 | `clonebox stop .` | Stop VM from `.clonebox.yaml` in current dir |
 | `clonebox stop . -f` | Force stop VM |
+| `clonebox stop --all` | Stop all running VMs in both user and system sessions |
+| `clonebox restart <name>` | Restart VM (stop and start) |
+| `clonebox restart --all` | Restart all VMs in both user and system sessions |
 | `clonebox delete .` | Delete VM from `.clonebox.yaml` in current dir |
 | `clonebox delete . --yes` | Delete VM without confirmation |
 | `clonebox list` | List all VMs |

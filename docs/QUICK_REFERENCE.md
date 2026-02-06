@@ -251,6 +251,12 @@ tail -f ~/.local/share/libvirt/images/<vm_name>/serial.log
 clonebox stop . --user
 clonebox start . --user
 
+# Stop all VMs
+clonebox stop --all
+
+# Restart all VMs
+clonebox restart --all
+
 # GUI not working
 clonebox open . --user
 
