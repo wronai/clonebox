@@ -1,0 +1,15 @@
+FROM php:8.3-cli
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    curl \
+    libxml2-dev \
+    && docker-php-ext-install dom \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+COPY tests/ /app/tests/
+
+RUN mkdir -p /app/test-results
+
+ENTRYPOINT ["php", "tests/run_tests.php"]

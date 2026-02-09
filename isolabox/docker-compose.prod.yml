@@ -1,0 +1,24 @@
+# Docker Compose production configuration
+# Usage: docker-compose -f docker-compose.yml -f docker-compose.prod.yml up -d
+
+services:
+  web:
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      - APP_ENV=production
+      - DEBUG_MODE=false
+      - LOG_LEVEL=error
+    volumes:
+      - ./config:/var/www/html/config:ro
+      - ./includes:/var/www/html/includes:ro
+      - ./pages:/var/www/html/pages:ro
+      - ./public:/var/www/html/public:ro
+      - ./ssl:/var/www/html/ssl:ro  # SSL certificates
+    restart: always
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"

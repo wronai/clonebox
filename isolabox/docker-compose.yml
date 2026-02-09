@@ -1,0 +1,44 @@
+services:
+  web:
+    build: .
+    container_name: ${WEB_SERVICE_NAME:-isolabox-web}
+    ports:
+      - "${PORT:-8080}:${WEB_PORT:-80}"
+    volumes:
+      - ./config:/var/www/html/config
+      - ./includes:/var/www/html/includes
+      - ./pages:/var/www/html/pages
+      - ./public:/var/www/html/public
+    env_file:
+      - .env
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost/"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+      start_period: 5s
+    restart: unless-stopped
+    networks:
+      - isolabox-network
+
+  tests:
+    build:
+      context: .
+      dockerfile: Dockerfile.test
+    container_name: ${WEB_SERVICE_NAME:-isolabox-web}-tests
+    depends_on:
+      web:
+        condition: service_healthy
+    environment:
+      - BASE_URL=http://${WEB_SERVICE_NAME:-isolabox-web}
+    env_file:
+      - .env
+    volumes:
+      - ./tests:/app/tests
+      - ./test-results:/app/test-results
+    networks:
+      - isolabox-network
+
+networks:
+  isolabox-network:
+    driver: bridge

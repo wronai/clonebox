@@ -1,0 +1,429 @@
+{
+    "timestamp": "2026-02-09T09:47:53+00:00",
+    "base_url": "http:\/\/isolabox-web",
+    "duration_seconds": 0.01,
+    "summary": {
+        "total": 104,
+        "passed": 104,
+        "failed": 0,
+        "skipped": 0
+    },
+    "results": [
+        {
+            "status": "PASS",
+            "name": "Homepage returns 200"
+        },
+        {
+            "status": "PASS",
+            "name": "No connection errors"
+        },
+        {
+            "status": "PASS",
+            "name": "Homepage loads in under 5s"
+        },
+        {
+            "status": "PASS",
+            "name": "Homepage has substantial content"
+        },
+        {
+            "status": "PASS",
+            "name": "Has DOCTYPE"
+        },
+        {
+            "status": "PASS",
+            "name": "Has html lang attribute"
+        },
+        {
+            "status": "PASS",
+            "name": "Has charset meta"
+        },
+        {
+            "status": "PASS",
+            "name": "Has viewport meta"
+        },
+        {
+            "status": "PASS",
+            "name": "Has description meta"
+        },
+        {
+            "status": "PASS",
+            "name": "Has Open Graph title"
+        },
+        {
+            "status": "PASS",
+            "name": "Has Open Graph description"
+        },
+        {
+            "status": "PASS",
+            "name": "Has Twitter card meta"
+        },
+        {
+            "status": "PASS",
+            "name": "Hero section exists"
+        },
+        {
+            "status": "PASS",
+            "name": "Problem\/Solution section exists"
+        },
+        {
+            "status": "PASS",
+            "name": "Features section exists"
+        },
+        {
+            "status": "PASS",
+            "name": "Comparison section exists"
+        },
+        {
+            "status": "PASS",
+            "name": "Pricing section exists"
+        },
+        {
+            "status": "PASS",
+            "name": "Roadmap section exists"
+        },
+        {
+            "status": "PASS",
+            "name": "Use cases section exists"
+        },
+        {
+            "status": "PASS",
+            "name": "CTA section exists"
+        },
+        {
+            "status": "PASS",
+            "name": "Navigation bar exists"
+        },
+        {
+            "status": "PASS",
+            "name": "Brand name in nav"
+        },
+        {
+            "status": "PASS",
+            "name": "Features nav link"
+        },
+        {
+            "status": "PASS",
+            "name": "Pricing nav link"
+        },
+        {
+            "status": "PASS",
+            "name": "Roadmap nav link"
+        },
+        {
+            "status": "PASS",
+            "name": "GitHub link present"
+        },
+        {
+            "status": "PASS",
+            "name": "Community tier exists"
+        },
+        {
+            "status": "PASS",
+            "name": "Pro tier exists"
+        },
+        {
+            "status": "PASS",
+            "name": "Enterprise tier exists"
+        },
+        {
+            "status": "PASS",
+            "name": "Free tier price shown"
+        },
+        {
+            "status": "PASS",
+            "name": "Pro tier price shown"
+        },
+        {
+            "status": "PASS",
+            "name": "Enterprise custom pricing"
+        },
+        {
+            "status": "PASS",
+            "name": "Featured tier badge"
+        },
+        {
+            "status": "PASS",
+            "name": "Community CTA text"
+        },
+        {
+            "status": "PASS",
+            "name": "Enterprise CTA text"
+        },
+        {
+            "status": "PASS",
+            "name": "SSO feature in Pro"
+        },
+        {
+            "status": "PASS",
+            "name": "License mentioned in Community"
+        },
+        {
+            "status": "PASS",
+            "name": "Compliance in Enterprise"
+        },
+        {
+            "status": "PASS",
+            "name": "Consulting price"
+        },
+        {
+            "status": "PASS",
+            "name": "Deployment package price"
+        },
+        {
+            "status": "PASS",
+            "name": "Security audit addon"
+        },
+        {
+            "status": "PASS",
+            "name": "v1.0 in roadmap"
+        },
+        {
+            "status": "PASS",
+            "name": "v1.1 in roadmap"
+        },
+        {
+            "status": "PASS",
+            "name": "v1.2 in roadmap"
+        },
+        {
+            "status": "PASS",
+            "name": "v2.0 in roadmap"
+        },
+        {
+            "status": "PASS",
+            "name": "Firecracker mentioned"
+        },
+        {
+            "status": "PASS",
+            "name": "Current phase indicator"
+        },
+        {
+            "status": "PASS",
+            "name": "Released phase indicator"
+        },
+        {
+            "status": "PASS",
+            "name": "Comparison table exists"
+        },
+        {
+            "status": "PASS",
+            "name": "E2B in comparison"
+        },
+        {
+            "status": "PASS",
+            "name": "Modal in comparison"
+        },
+        {
+            "status": "PASS",
+            "name": "Daytona in comparison"
+        },
+        {
+            "status": "PASS",
+            "name": "Fly.io in comparison"
+        },
+        {
+            "status": "PASS",
+            "name": "Isolabox has checkmarks"
+        },
+        {
+            "status": "PASS",
+            "name": "12 feature cards rendered"
+        },
+        {
+            "status": "PASS",
+            "name": "Clone feature"
+        },
+        {
+            "status": "PASS",
+            "name": "Isolation feature"
+        },
+        {
+            "status": "PASS",
+            "name": "Dual runtime feature"
+        },
+        {
+            "status": "PASS",
+            "name": "GUI feature"
+        },
+        {
+            "status": "PASS",
+            "name": "Audit feature"
+        },
+        {
+            "status": "PASS",
+            "name": "Secrets feature"
+        },
+        {
+            "status": "PASS",
+            "name": "Install command in terminal"
+        },
+        {
+            "status": "PASS",
+            "name": "Detect command shown"
+        },
+        {
+            "status": "PASS",
+            "name": "Clone command shown"
+        },
+        {
+            "status": "PASS",
+            "name": "Sandbox command shown"
+        },
+        {
+            "status": "PASS",
+            "name": "Boot time stat"
+        },
+        {
+            "status": "PASS",
+            "name": "Lines of code stat"
+        },
+        {
+            "status": "PASS",
+            "name": "Self-hosted stat"
+        },
+        {
+            "status": "PASS",
+            "name": "CSS file loads"
+        },
+        {
+            "status": "PASS",
+            "name": "CSS has substantial content"
+        },
+        {
+            "status": "PASS",
+            "name": "CSS has custom properties"
+        },
+        {
+            "status": "PASS",
+            "name": "CSS has responsive breakpoints"
+        },
+        {
+            "status": "PASS",
+            "name": "JS file loads"
+        },
+        {
+            "status": "PASS",
+            "name": "JS has content"
+        },
+        {
+            "status": "PASS",
+            "name": "Favicon loads"
+        },
+        {
+            "status": "PASS",
+            "name": "Favicon is valid SVG"
+        },
+        {
+            "status": "PASS",
+            "name": "404 for unknown page"
+        },
+        {
+            "status": "PASS",
+            "name": "404 page shows error code"
+        },
+        {
+            "status": "PASS",
+            "name": "Exactly one H1 tag"
+        },
+        {
+            "status": "PASS",
+            "name": "Multiple H2 tags for sections"
+        },
+        {
+            "status": "PASS",
+            "name": "Has ARIA labels"
+        },
+        {
+            "status": "PASS",
+            "name": "Accessibility attributes present"
+        },
+        {
+            "status": "PASS",
+            "name": "Footer element exists"
+        },
+        {
+            "status": "PASS",
+            "name": "Location in footer"
+        },
+        {
+            "status": "PASS",
+            "name": "Current year in copyright"
+        },
+        {
+            "status": "PASS",
+            "name": "Privacy policy link"
+        },
+        {
+            "status": "PASS",
+            "name": "Docs link in footer"
+        },
+        {
+            "status": "PASS",
+            "name": "Homepage under 2s TTFB"
+        },
+        {
+            "status": "PASS",
+            "name": "X-Frame-Options header set"
+        },
+        {
+            "status": "PASS",
+            "name": "X-Content-Type-Options header set"
+        },
+        {
+            "status": "PASS",
+            "name": "AI sandboxing use case"
+        },
+        {
+            "status": "PASS",
+            "name": "Enterprise compliance use case"
+        },
+        {
+            "status": "PASS",
+            "name": "Dev\/test use case"
+        },
+        {
+            "status": "PASS",
+            "name": "Security research use case"
+        },
+        {
+            "status": "PASS",
+            "name": "Anchor #features has matching target"
+        },
+        {
+            "status": "PASS",
+            "name": "Anchor #compare has matching target"
+        },
+        {
+            "status": "PASS",
+            "name": "Anchor #pricing has matching target"
+        },
+        {
+            "status": "PASS",
+            "name": "Anchor #roadmap has matching target"
+        },
+        {
+            "status": "PASS",
+            "name": "External links open in new tab"
+        },
+        {
+            "status": "PASS",
+            "name": "GitHub URL is correct"
+        },
+        {
+            "status": "PASS",
+            "name": "3 pricing cards rendered"
+        },
+        {
+            "status": "PASS",
+            "name": "5 roadmap phases rendered"
+        },
+        {
+            "status": "PASS",
+            "name": "4 use case cards rendered"
+        },
+        {
+            "status": "PASS",
+            "name": "4 addon cards rendered"
+        }
+    ]
+}

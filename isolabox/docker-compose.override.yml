@@ -1,0 +1,13 @@
+# Docker Compose override for local development
+# This file extends docker-compose.yml with development-specific settings
+# Usage: docker-compose up -d (will automatically use this file)
+
+services:
+  web:
+    environment:
+      - APP_ENV=development
+      - DEBUG_MODE=true
+      - LOG_LEVEL=debug
+    volumes:
+      - .:/var/www/html  # Mount entire project for live reload
+      - /var/www/html/vendor  # Exclude vendor from mount
