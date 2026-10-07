@@ -12,6 +12,7 @@ Run with: pytest tests/e2e/test_p2p_workflow.py -v
 import os
 import shutil
 import subprocess
+import sys
 import tempfile
 from pathlib import Path
 from unittest.mock import MagicMock, patch
@@ -281,7 +282,7 @@ class TestCLICommands:
     def test_keygen_help(self):
         """Test clonebox keygen --help works."""
         result = subprocess.run(
-            ["python3", "-m", "clonebox", "keygen", "--help"],
+            [sys.executable, "-m", "clonebox", "keygen", "--help"],
             capture_output=True,
             text=True,
             timeout=10,
@@ -292,7 +293,7 @@ class TestCLICommands:
     def test_export_encrypted_help(self):
         """Test clonebox export-encrypted --help works."""
         result = subprocess.run(
-            ["python3", "-m", "clonebox", "export-encrypted", "--help"],
+            [sys.executable, "-m", "clonebox", "export-encrypted", "--help"],
             capture_output=True,
             text=True,
             timeout=10,
@@ -303,7 +304,7 @@ class TestCLICommands:
     def test_import_encrypted_help(self):
         """Test clonebox import-encrypted --help works."""
         result = subprocess.run(
-            ["python3", "-m", "clonebox", "import-encrypted", "--help"],
+            [sys.executable, "-m", "clonebox", "import-encrypted", "--help"],
             capture_output=True,
             text=True,
             timeout=10,
@@ -314,7 +315,7 @@ class TestCLICommands:
     def test_export_remote_help(self):
         """Test clonebox export-remote --help works."""
         result = subprocess.run(
-            ["python3", "-m", "clonebox", "export-remote", "--help"],
+            [sys.executable, "-m", "clonebox", "export-remote", "--help"],
             capture_output=True,
             text=True,
             timeout=10,
@@ -325,7 +326,7 @@ class TestCLICommands:
     def test_import_remote_help(self):
         """Test clonebox import-remote --help works."""
         result = subprocess.run(
-            ["python3", "-m", "clonebox", "import-remote", "--help"],
+            [sys.executable, "-m", "clonebox", "import-remote", "--help"],
             capture_output=True,
             text=True,
             timeout=10,
@@ -336,7 +337,7 @@ class TestCLICommands:
     def test_sync_key_help(self):
         """Test clonebox sync-key --help works."""
         result = subprocess.run(
-            ["python3", "-m", "clonebox", "sync-key", "--help"],
+            [sys.executable, "-m", "clonebox", "sync-key", "--help"],
             capture_output=True,
             text=True,
             timeout=10,
@@ -347,7 +348,7 @@ class TestCLICommands:
     def test_list_remote_help(self):
         """Test clonebox list-remote --help works."""
         result = subprocess.run(
-            ["python3", "-m", "clonebox", "list-remote", "--help"],
+            [sys.executable, "-m", "clonebox", "list-remote", "--help"],
             capture_output=True,
             text=True,
             timeout=10,
